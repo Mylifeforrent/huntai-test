@@ -82,7 +82,7 @@ huntai-test/
 | Stage 3 · 业务问题建模 | `docs/03_problem_modeling/` | ✅ 文档集迁入（v1.3，23 对象 / 25 页 IA） |
 | Stage 4 · 核心交互链路设计 | `docs/04_interaction_design/` | ✅ 文档集迁入（v1.1 + C1–C4 链路详设） |
 | Stage 5 · 产品原型规范 | `docs/05_prototype/` | ⏳ 占位骨架已迁入，待生成 |
-| Stage 6 · 系统架构设计 | `docs/06_architecture_design/` | ⏳ 占位骨架已迁入，待生成 |
+| Stage 6 · 系统架构设计 | `docs/06_architecture_design/` | 🔶 前端分册已生成（frontend_design_spec-v1.0）；后端架构占位待生成 |
 | Stage 7 · 数据模型与 API 规范 | `docs/07_backend_design/` | 待启动 |
 | Stage 8 · PRD | `docs/08_prd/` | 🔶 中期版 v1.5 已迁入，待 v2 终版 |
 | Stage 9 · 高保真设计 | `docs/09_figma_highfi/` | 待启动 |
