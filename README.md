@@ -2,7 +2,7 @@
 
 个人 AI 应用项目，采用「文档先行、分阶段推进」的 Agent Team 协作流程：全部设计资产落盘在 `docs/`，实现代码只在 Stage 11 进入 `frontend/` 与 `backend/`。
 
-> 当前阶段：**Stage 0 — 项目初始化与规范搭建**。仓库只包含目录结构与规范文档，不含任何前后端实现代码。产品定位与业务范围由 Stage 1–3 依次产出。
+> 当前阶段：**Stage 1–4 设计文档集已迁入**（2026-08-24，源自 opensource-product-analysis 仓库的决策文档集，见 `docs/README.md` 迁移注记）。仓库仍不含任何前后端实现代码；Stage 5 原型与 Stage 6 架构为占位骨架待生成，Stage 8 PRD 为中期版 v1.5。
 
 ## 目录结构
 
@@ -13,6 +13,7 @@ huntai-test/
 ├── frontend/                   # 前端源码（Stage 11 落地，当前为空）
 ├── backend/                    # 后端源码（Stage 11 落地，当前为空）
 └── docs/                       # 全部设计资产与过程文档的唯一存放地
+    ├── README.md               # 决策总纲（迁入文档集的总索引与编号映射）
     ├── 00_setup/               # Stage 0  · 项目规范
     ├── 01_market_research/     # Stage 1  · 业务调研
     ├── 02_competitor_analysis/ # Stage 2  · 竞品分析
@@ -67,6 +68,7 @@ huntai-test/
 |---|---|
 | `AGENTS.md` | 仓库级 Agent 指令：目录职责边界、`.env` / uv 约定、阶段输出文件要求、Plan 优先规则 |
 | `docs/00_setup/project_rules.md` | 工程规范：命名、目录组织、Git 分支与 Conventional Commits、AI 生成代码 Review Checklist、测试与验证、AI 使用红线 |
+| `docs/README.md` | 决策总纲（迁入）：北极星闭环、竞品结论、平台功能裁定、分期路线图、安全清单，以及迁入文档集的编号映射 |
 
 已就绪的工程基线：`.gitignore`（密钥与环境文件忽略）、`.env.example`（仅键名模板）、pre-commit + gitleaks（秘密扫描）、LangChain 文档 / 参考 MCP（`.zcode/config.json` 与 Claude 兼容的 `.mcp.json`）。
 
@@ -75,17 +77,17 @@ huntai-test/
 | 阶段 | 产出位置 | 状态 |
 |---|---|---|
 | Stage 0 · 初始化与规范搭建 | `docs/00_setup/` + 根 `AGENTS.md` | ✅ 完成 |
-| Stage 1 · 业务调研 | `docs/01_market_research/` | 待启动 |
-| Stage 2 · 竞品分析 | `docs/02_competitor_analysis/` | 待启动 |
-| Stage 3 · 业务问题建模 | `docs/03_problem_modeling/` | 待启动 |
-| Stage 4 · 核心交互链路设计 | `docs/04_interaction_design/` | 待启动 |
-| Stage 5 · 产品原型规范 | `docs/05_prototype/` | 待启动 |
-| Stage 6 · 系统架构设计 | `docs/06_architecture_design/` | 待启动 |
+| Stage 1 · 业务调研 | `docs/01_market_research/` | ✅ 文档集迁入（研究包借鉴与设计增强） |
+| Stage 2 · 竞品分析 | `docs/02_competitor_analysis/` | ✅ 文档集迁入（源码实现索引） |
+| Stage 3 · 业务问题建模 | `docs/03_problem_modeling/` | ✅ 文档集迁入（v1.3，23 对象 / 25 页 IA） |
+| Stage 4 · 核心交互链路设计 | `docs/04_interaction_design/` | ✅ 文档集迁入（v1.1 + C1–C4 链路详设） |
+| Stage 5 · 产品原型规范 | `docs/05_prototype/` | ⏳ 占位骨架已迁入，待生成 |
+| Stage 6 · 系统架构设计 | `docs/06_architecture_design/` | ⏳ 占位骨架已迁入，待生成 |
 | Stage 7 · 数据模型与 API 规范 | `docs/07_backend_design/` | 待启动 |
-| Stage 8 · PRD | `docs/08_prd/` | 待启动 |
+| Stage 8 · PRD | `docs/08_prd/` | 🔶 中期版 v1.5 已迁入，待 v2 终版 |
 | Stage 9 · 高保真设计 | `docs/09_figma_highfi/` | 待启动 |
 | Stage 10 · AI 上下文 | `docs/10_ai_context/` | 待启动 |
 | Stage 11 · 实现与联调测试 | `docs/11_test/` + 代码目录 | 待启动 |
 | Stage 12 · 发布和部署 | `docs/12_deployment/` | 待启动 |
-| Stage 13 · 变更记录 | `docs/13_changes/` | 待启动 |
+| Stage 13 · 变更记录 | `docs/13_changes/` | 🔶 机制启用（change_log + 历史一致性修复记录） |
 | Stage 14 · 设计资产冻结与约束补充 | `AGENTS.md` 补充条款 | 待启动 |
