@@ -1,0 +1,8 @@
+# pre-commit 配置：安装后每次 commit 自动执行秘密扫描等检查
+# 安装：pre-commit install
+# 手动全量检查：pre-commit run --all-files
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks

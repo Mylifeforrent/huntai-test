@@ -1,0 +1,37 @@
+# ===== 敏感信息（必须保留，不可删除）=====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*
+secrets*
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# ===== 操作系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== 依赖 =====
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.pyc
+target/
+dist/
+build/
+
+# ===== 日志与临时文件 =====
+*.log
+logs/
+tmp/
+temp/
