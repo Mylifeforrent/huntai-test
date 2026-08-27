@@ -1,9 +1,10 @@
 # 前端设计规范（frontend_design_spec · v1.0）
 
+> - **Status: Draft**
 > - **日期**：2026-08-25 · **版本**：v1.0
 > - **流程定位**：Stage 6（系统架构设计）**前端分册**——本仓库前端架构层的收口设计规范；后端架构正文由同目录 [architecture.md](architecture.md) 骨架承接，两者共同构成 Stage 6 产出
 > - **上游输入**：[problem_model.md](../03_problem_modeling/problem_model.md)（§4 IA 与 **25 页**清单、§4.3 三个关键页面结构约束、§2 状态机全集——唯一事实源）· [interaction_flows.md](../04_interaction_design/interaction_flows.md) 及 [chains/](../04_interaction_design/chains/) C1–C4（页面流 / 分支异常 / 审批交互）· [prd.md](../08_prd/prd.md)（US / FR / 边界场景）
-> - **下游消费者**：[prototype_spec.md](../05_prototype/prototype_spec.md)（原型评审基线，见 §8）· Stage 10 AI 上下文 · Stage 11 前端实现 · [07_backend_design](../07_backend_design/README.md)（API 的展示契约输入）
+> - **下游消费者**：`../05_prototype/prototype_spec.md`（当前工作树不可用，见 §8 缺口声明）· Stage 10 AI 上下文 · Stage 11 前端实现 · [07_backend_design](../07_backend_design/README.md)（API 的展示契约输入）
 > - **收口纪律**：页面 ⊆ 05 §4.2（**25 页**，编号见 §2）；状态与跳转 ⊆ 05 §2；交互行为 ⊆ C1–C4 已定义集合；**不新增页面、状态、对象、功能**；技术栈按仓库根 README Stage 0 决策引用，不引入新依赖；本文件不含任何代码
 > - **编号约定**：页面唯一标识为 **05 §4.2 页面名称**（Interaction Design 全程按名称引用）；本文按 05 §4.2 表序分配编号 **P01–P25** 与路由（§3），下游（原型 / 实现）统一引用该编号，不另行编号
 
@@ -22,7 +23,7 @@
 
 | 职责 | 归属 | 前端行为 |
 | --- | --- | --- |
-| 状态机迁移触发与裁决（TestRun 15 条边、审批 consume、Release 推送） | 服务端治理面 | 只发起用户动作请求 + 渲染服务端状态 |
+| 状态机迁移触发与裁决（TestRun 迁移以 problem_model 的 canonical transition registry 为唯一来源，不手写边数；审批 consume、Release 推送） | 服务端治理面 | 只发起用户动作请求 + 渲染服务端状态 |
 | Policy Gate 裁决（ALLOW / DENY / REQUIRE_APPROVAL / REQUIRE_REAUTH） | 服务端（FR-17） | 渲染裁决结果；置灰 / 引导仅为呈现 |
 | 四眼校验、行锁防双执行、anti-TOCTOU 参数哈希复核 | 服务端（05 §2.3） | 发起人本人打开卡片时「批准」置灰（C2 §3.4）；服务端必须独立复核 |
 | 聚类算法、规则聚类 fallback、脱敏管道 | 服务端（A2 契约） | 渲染 7 值枚举 / confidence / 脱敏后内容 |
@@ -160,7 +161,7 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 
 ### 5.1 页面状态基线与链路特殊态
 
-**七态基线**（沿 [page-inventory.md](../05_prototype/page-inventory.md) 填写规则，适用全部 25 页）：默认、加载、空数据、无结果、错误、无权限、成功。列表类页面（P05 / P09 / P12 / P20 / P24）另须明确筛选 / 排序 / 分页进 URL。
+**七态基线**（沿当前不可用的 `../05_prototype/page-inventory.md` 原填写规则，适用全部 25 页）：默认、加载、空数据、无结果、错误、无权限、成功。列表类页面（P05 / P09 / P12 / P20 / P24）另须明确筛选 / 排序 / 分页进 URL。
 
 **链路特殊态**（按页面登记，均有上游依据）：
 
@@ -223,7 +224,7 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 
 ## 7. 响应式行为
 
-> 上游（05 / 06 / 12-PRD）未定义响应式需求；本节为**工程约定**，锚定决策总纲的使用场景（企业内部自用、桌面工作场景、≤1000 用户），供 [page-inventory.md](../05_prototype/page-inventory.md)「响应式变化」列与 Prototype 阶段使用，Prototype 评审时确认。
+> 上游（05 / 06 / 12-PRD）未定义响应式需求；本节为**工程约定**，锚定决策总纲的使用场景（企业内部自用、桌面工作场景、≤1000 用户），供当前不可用的 `../05_prototype/page-inventory.md`「响应式变化」列与 Prototype 阶段使用，Prototype 评审时确认。
 
 1. **桌面优先**：≥1280px 为一等公民（全功能）；1024–1279px 可用（侧栏折叠为图标）；<1024px 降级为**只读浏览**（列表、报告、证据查看），不承诺完整操作。
 2. **断点约定**：1280 / 1024 两档；不设移动端专用布局。
@@ -244,7 +245,9 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 
 ## 8. 与 Prototype 的对应关系
 
-[prototype_spec.md](../05_prototype/prototype_spec.md)（Stage 5 骨架）的每项输出以本文档为直接输入与验收基线：
+> **当前输入缺口**：`docs/05_prototype/` 在当前工作树中无可读文件；本节仅保留预期下游契约，不把 `prototype_spec.md`、inventory 或评审模板伪装为当前可达资料，也不从 Git 历史恢复。由 Prototype Owner 决定恢复、重建或批准替代输入后，必须重新执行 Stage 5/6 UX 一致性评审。缺口依据见 [研究与输入追溯](00_research_and_input_traceability.md) §2。
+
+`../05_prototype/prototype_spec.md`（当前不可用的 Stage 5 预期骨架）的每项输出原计划以本文档为直接输入与验收基线：
 
 | prototype_spec 输出结构 | 本文档供给 | 验收基线 |
 | --- | --- | --- |
@@ -254,11 +257,11 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 | 交互态定义（空态 / 加载 / SSE 进度 / AI 降级横幅 / incomplete 标记 / 审批过期提示） | §5.1 特殊态表 + §6 各行 | 逐态可溯源到链路依据 |
 | IA 校验结论 | §2 与 05 §4.2 对照（25/25） | 原型如需调整 IA，**先回写 05 §4 并在 [change_log.md](../13_changes/change_log.md) 登记**（prototype_spec 生成纪律 1） |
 
-**模板工具对应**（[docs/05_prototype](../05_prototype/README.md) 五份模板，源自 UI-UX-docs）：
+**预期模板工具对应**（`docs/05_prototype/` 当前不可用；以下仅记录原定关系）：
 
-- [page-inventory.md](../05_prototype/page-inventory.md)：以本文 §2（编号 / 路由 / 角色 / 主动作）、§4（入口 / 跳转）、§5.1（状态）、§7（响应式变化）逐列填写；
-- [component-inventory.md](../05_prototype/component-inventory.md)：以 §5.2 / §6 提炼共享组件（审批卡片、状态进度条、聚类簇卡片、证据查看器、动态表单、AI 降级横幅等）；
-- [ui-brief.md](../05_prototype/ui-brief.md) / [design-review.md](../05_prototype/design-review.md) / [visual-acceptance.md](../05_prototype/visual-acceptance.md)：评审与验收环节消费 §6 交互要求逐条核对。
+- `page-inventory.md`：以本文 §2（编号 / 路由 / 角色 / 主动作）、§4（入口 / 跳转）、§5.1（状态）、§7（响应式变化）逐列填写；
+- `component-inventory.md`：以 §5.2 / §6 提炼共享组件（审批卡片、状态进度条、聚类簇卡片、证据查看器、动态表单、AI 降级横幅等）；
+- `ui-brief.md` / `design-review.md` / `visual-acceptance.md`：评审与验收环节消费 §6 交互要求逐条核对。
 
 **评审纪律**：原型（低保真与高保真）不得超出 §2 页面集与 §5.1 状态集；新增页面 / 组件 / 状态一律先回写 05 §4.2 并登记变更，再进入原型。
 
@@ -269,7 +272,7 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 | 检查项 | 结果 |
 | --- | --- |
 | 页面 ⊆ 05 §4.2（25 页） | PASS：P01–P25 与 §4.2 表逐行一一对应（名称 / 导航 / 阶段 / US-FR 映射均取自原文） |
-| 状态引用 ⊆ 05 §2 | PASS：TestRun 10 态、ApprovalRequest 6 态、ReleaseTask 6 态、ExecutionEnvironment 4 态、TestCase 4 态，无新增状态 |
+| 状态引用 ⊆ 05 §2 | PASS：TestRun 10 态且迁移不维护固定边数（含 STOPPING→TIMEOUT，审批过期不迁移 TestRun）、ApprovalRequest 6 态、ReleaseTask 6 态、ExecutionEnvironment 4 态、TestCase 4 态，无新增状态 |
 | 页面流 / 跳转 ⊆ C1–C4 | PASS：§4.1 跳转矩阵逐条标注链路出处，无链路外跳转 |
 | 交互行为 ⊆ 已定义集合 | PASS：§6 每行标注依据；〔工程约定〕仅 §6.14 与 §7（已显式标注） |
 | 无代码 / 无新依赖 | PASS：仅引用 Stage 0 已定技术基线 |
