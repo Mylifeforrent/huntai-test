@@ -8,7 +8,7 @@
 
 ```text
 huntai-test/
-├── AGENTS.md                   # 仓库级 Agent 指令（ZCode 每次会话自动加载）
+├── AGENTS.md                   # 仓库级 Agent 指令（Cursor / ZCode 会话加载）
 ├── README.md                   # 本文件：项目总览与技术栈决策
 ├── frontend/                   # 前端源码（Stage 11 落地，当前为空）
 ├── backend/                    # 后端源码（Stage 11 落地，当前为空）
@@ -45,7 +45,7 @@ huntai-test/
 | uv | 虚拟环境与依赖一体化管理，`uv.lock` 保证可复现；已固化为仓库工程约定（AGENTS.md §3） |
 | Pydantic Settings | 以 `.env` 为唯一配置入口，与安全基线（`.env` 不入库、`.env.example` 只含键名）配套 |
 | SQLAlchemy 2.0（async）+ Alembic | ORM 与迁移；开发期用 SQLite 零运维，如需多用户并发再切 PostgreSQL（方言差异被 ORM 层屏蔽） |
-| LangChain / LangGraph | 仓库已接入 LangChain 官方文档 / 参考 MCP（`.zcode/config.json`、`.mcp.json`），项目方向即该生态 |
+| LangChain / LangGraph | 仓库已接入 LangChain 官方文档 / 参考 MCP（`.zcode/config.json`、`.cursor/mcp.json`、`.mcp.json`），项目方向即该生态 |
 
 ### 前端：React · TypeScript · Vite · Tailwind CSS · shadcn/ui
 
@@ -70,7 +70,7 @@ huntai-test/
 | `docs/00_setup/project_rules.md` | 工程规范：命名、目录组织、Git 分支与 Conventional Commits、AI 生成代码 Review Checklist、测试与验证、AI 使用红线 |
 | `docs/README.md` | 决策总纲（迁入）：北极星闭环、竞品结论、平台功能裁定、分期路线图、安全清单，以及迁入文档集的编号映射 |
 
-已就绪的工程基线：`.gitignore`（密钥与环境文件忽略）、`.env.example`（仅键名模板）、pre-commit + gitleaks（秘密扫描）、LangChain 文档 / 参考 MCP（`.zcode/config.json` 与 Claude 兼容的 `.mcp.json`）。
+已就绪的工程基线：`.gitignore`（密钥与环境文件忽略）、`.env.example`（仅键名模板）、pre-commit + gitleaks（秘密扫描）、LangChain 文档 / 参考 MCP（ZCode `.zcode/config.json`、Cursor `.cursor/mcp.json`、Claude 兼容 `.mcp.json` 三份清单保持一致）。
 
 ## 阶段进度
 

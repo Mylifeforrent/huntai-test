@@ -5,6 +5,7 @@
 
 | 日期 | 变更对象（路径） | 变更摘要 | 原因 | 批准人 | 状态 |
 |---|---|---|---|---|---|
+| 2026-08-27 | `docs/00_setup/project_rules.md` §2、`AGENTS.md` §1；新增 `.cursor/` | 顶层仓库级配置白名单增加 `.cursor/`（Cursor MCP 与 rules）；与既有 `.zcode/`、`.mcp.json` 并列，不替换 | 在 Cursor 中使用与 ZCode 相同的 LangChain MCP，并明确 Cursor 工程配置合法落点 | 用户（本会话明确请求） | 已完成 |
 | 2026-08-25 | docs/05_prototype/ 新增 5 份 UI/UX 模板 | 自源仓库 UI-UX-docs 的 docs/templates 复制 page-inventory 等五份模板（工具，非阶段产出），外链转源仓库限定 | 原型阶段需要统一的页面清单/组件清单/评审模板 | Tony | 已完成 |
 | 2026-08-25 | docs/06_architecture_design/frontend_design_spec-v1.0.md（新增） | 生成前端设计规范 v1.0：P01–P25 页面清单、路由结构、跳转矩阵、前端职责边界、核心交互要求、响应式工程约定、与 Prototype 对应关系；缺口 6 项上报 | Stage 6 前端分册收口，供原型评审与实现使用 | Tony | 已完成 |
 | 2026-08-24 | docs/01–08、13 新增 14 份设计文档 | 迁入 opensource-product-analysis 仓库决策文档集：按仓库规范重命名（snake_case）、改写全部内部交叉链接、外部资产（competitors/ references/）转为源仓库限定引用；各阶段 README 登记产出 | 复用已完成的设计资产，避免重复调研与建模 | Tony | 已完成 |

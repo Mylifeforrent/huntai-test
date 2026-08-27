@@ -46,7 +46,7 @@
 
 ## 2. 目录组织规范
 
-1. 仓库顶层只允许三类业务目录：`frontend/`、`backend/`、`docs/`；其余只能是仓库级配置文件（`README.md`、`AGENTS.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.mcp.json`）。
+1. 仓库顶层只允许三类业务目录：`frontend/`、`backend/`、`docs/`；其余只能是仓库级配置文件（`README.md`、`AGENTS.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.cursor/`、`.mcp.json`）。
 2. 设计资产与过程文档只存放于 `docs/`；`frontend/`、`backend/` 内禁止出现设计文档（代码目录内的 `README.md` 不算设计文档，但内容只限「如何构建 / 运行」）。
 3. 可执行代码只存放于 `frontend/`、`backend/`；`docs/` 内禁止出现代码文件（`.md` 内嵌的代码示例片段不算）。
 4. 阶段产物只进对应 `docs/NN_*` 目录；跨阶段引用使用相对路径链接。

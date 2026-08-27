@@ -1,8 +1,9 @@
 # AGENTS.md — huntai-test 仓库级指令
 
-> ZCode 在每次会话自动加载本文件（等价于 Claude Code 的 CLAUDE.md）。
+> Cursor 与 ZCode 均会在会话中加载本文件（Cursor 另读 `.cursor/rules/`；ZCode 等价于 Claude Code 的 `CLAUDE.md`）。
 > 本文件是**工程规则初始版（Stage 0 产出）**：只包含工程约定，设计资产冻结与约束条款由 Stage 14 补充完善。
 > 完整规范见 `docs/00_setup/project_rules.md`；两文冲突时以 project_rules.md 为准。
+> MCP 三份清单须保持一致：ZCode `.zcode/config.json`、Cursor `.cursor/mcp.json`、Claude 兼容 `.mcp.json`。
 
 ## 1. 目录职责边界
 
@@ -12,7 +13,7 @@
 | `backend/` | 后端源码与后端工程配置 | 存放设计文档、前端代码 |
 | `docs/` | **全部**设计资产与过程文档的唯一存放地 | 存放任何可执行代码 |
 
-- 仓库顶层只允许上述三个业务目录 + 仓库级配置文件（`README.md`、`AGENTS.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.mcp.json` 等）。
+- 仓库顶层只允许上述三个业务目录 + 仓库级配置文件（`README.md`、`AGENTS.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.cursor/`、`.mcp.json` 等）。
 - 设计文档写进 `frontend/` / `backend/`，或可执行代码写进 `docs/`，均视为放错位置，当次提交必须移正。
 - `docs/` 阶段目录（`00_setup` – `13_changes`）与阶段一一对应：目录序号与名称不得变更；任何阶段的产出只落入对应目录。
 - `backend/` / `frontend/` 的内部子结构由 Stage 6/7 设计文档定稿；定稿前不得预建子目录。
