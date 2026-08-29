@@ -271,7 +271,7 @@ Stage 7 应基于统一错误外壳表达以下语义类别，但本文不冻结
 | Excel 导出 | 异步生成文件 | 导出 Artifact 可授权访问 | 轮询/SSE + GET | 否 |
 | Evidence 包导出 | 异步打包 | 导出 Artifact 可授权访问 | 轮询/SSE + GET | 否 |
 | Artifact 上传 | 字节上传与登记分离；大文件异步校验/处理 | 授权引用与校验结果 | GET/任务进度 | 否 |
-| ApprovalRequest 决策 | 决策命令短事务；副作用可异步 | `EXECUTED + execution_result` | GET/SSE/通知 | 是，仅因对应动作 L2+ |
+| ApprovalRequest 决策 | 决策命令短事务；副作用可异步 | `EXECUTED + execution_result=ok/failed/unknown`；unknown 必须显式对账 | GET/SSE/通知 | 是，仅因对应动作 L2+ |
 | Jira/GitHub/Release 外部写 | 审批后异步或短时执行，按连接器能力 | external reference + 审计/Evidence | GET/通知 | 是或系统契约豁免，按冻结表 |
 | 通知投递 | 业务事件提交后异步 | 渠道投递结果 | 管理查询/告警 | 否 |
 
@@ -510,8 +510,8 @@ ApprovalRequest 采用：
 3. `APPROVED`：审批人同意，但尚不代表副作用成功；
 4. 执行前重算 `param_hash`、重校验权限/tenant/资源版本；
 5. consume 在事务内加行锁，原子创建以 `approval_request_id + bound_hash` 唯一标识的基础设施执行意图与 Outbox；重复 consume 返回同一执行引用，不创建第二个意图，也不提前进入 EXECUTED；
-6. Worker 领取该唯一意图并用稳定外部幂等键执行；调用前崩溃可重新领取同一意图，调用后响应丢失或落账前崩溃先查询 external_request_id/幂等结果；
-7. `EXECUTED`：首次真实调用已发出后才写入，另带 `execution_result=ok/failed` 语义；
+6. execution intent 至少使用 `READY / CLAIMED / DISPATCHING / CONFIRMED_OK / CONFIRMED_FAILED / UNKNOWN / ABANDONED`；Worker 在网络调用前持久化 DISPATCHING，确定响应后确认结果，调用可能已发出但不可判定时进入 UNKNOWN；
+7. `EXECUTED`：首次真实调用已发出后才写入，另带 `execution_result=ok/failed/unknown`；unknown 只表示外部效果当前不可判定，不得视为失败重试或成功放行；
 8. 拒绝进入 `REJECTED`；到期、撤回、上游取消或参数失效统一进入 `EXPIRED` 并记录原因。
 
 最高事实源见 `../03_problem_modeling/problem_model.md:188-220`。
@@ -551,12 +551,14 @@ README 的安全清单明确参数变化使审批失效且执行前须重校验�
 - 旧请求保持 EXPIRED/原终态，不被“重新打开”；
 - 新请求重新执行四眼、权限、资源版本和 Policy Gate 校验。
 
-### 11.8 执行失败
+### 11.8 执行失败与结果不可判定
 
 - `EXECUTED` 表示“已尝试”，不是“成功”；
 - 最终失败记录 `execution_result=failed`，写 AuditEvent，并保留连接器错误/Evidence；
 - 行锁消费只创建唯一基础设施执行意图，不提前写 EXECUTED；Outbox 重投、Worker 重领和重复 consume 必须复用同一意图；
-- 调用前崩溃可重领；调用后结果未知必须先查询。若提供方既不支持幂等创建也不能按请求标识查询，则 fail-close 并转人工接管；
+- READY/CLAIMED 阶段崩溃可重领；DISPATCHING/UNKNOWN 必须先按 external_request_id 或稳定幂等键查询。可确认成功/失败时分别收敛 ok/failed；暂不可判定时记录 `execution_result=unknown` 并持续对账；
+- 若提供方既不支持幂等创建也不能按请求标识查询，unknown 必须 fail-close 并转人工接管，禁止自动重发；
+- 只有 `execution_result=ok` 可触发目标聚合的成功迁移；failed/unknown 不得自动推进 TestRun、ReleaseTask 或 ExecutionEnvironment，现有状态模型无合法失败边时保持 fail-closed 并等待显式人工命令；
 - 连接器内部可在同一次执行尝试中按幂等策略处理短暂错误；一旦记录最终失败，不得静默再次消费同一批准；
 - 需要再次执行时重新发起审批；参数或资源变化必定需要新审批；
 - heal_apply 快照失败时 fail-close，不写新版本；

@@ -1,10 +1,11 @@
 # 05 · 业务建模与领域模型（收口建模层 · Stage 5）
 
-> - **日期**：2026-08-24 · **版本**：v1.3
+> - **日期**：2026-08-29 · **版本**：v1.4
 > - **流程定位**：开发流程图 Stage 5「业务建模」产出；上承 [03-市场调研借鉴](../01_market_research/market_research.md)（Stage 3）与 [04-竞品功能拆解索引](../02_competitor_analysis/competitor_analysis.md)（Stage 4），下供 Stage 6 核心交互链、Stage 7 产品原型、Stage 8 后端架构与数据模型设计使用
 > - **定位**：完成「功能清单 → 业务建模」的数据升级，作为后续**系统架构设计、前端原型设计、数据模型设计**的共同输入。
 > - **收口纪律**：所有对象 / 状态 / 页面均可追溯到 [12-PRD](../08_prd/prd.md) 的 FR 或 [README](../README.md)（v1.5）章节，来源以「←」标注；为建模完整性补充的字段级细节标注 **[建模补全]**，数据模型设计阶段可调整，不构成新需求。
 > - **v1.3 说明**：本版为一致性修复版——补齐既有 FR 在建模层的落点缺口（门禁对象、配额对象、4 个页面）与状态机 / ER 图的表述矛盾，**不引入新业务功能**；新增对象与页面均可回溯到已冻结的 FR 或 README 裁定表条目。
+> - **v1.4 说明**：按已批准架构复审补充 `execution_result=unknown`，用于表达外部请求可能已发出但效果不可判定；不新增领域对象或 ApprovalRequest 状态。
 > - **不做什么**：不定义 API 路由细节、不写 DDL、不做视觉设计——分别是架构 / 数据模型 / 原型阶段的工作。
 
 ---
@@ -195,14 +196,15 @@ stateDiagram-v2
 | approver_id | ≠ initiator_id（四眼原则） | ← TestHub 反面取证 |
 | snapshot_ref | 应用前快照（自愈等写操作） | ← FR-06 |
 | expires_at / escalate_to | 超时升级备审批人，**不自动放行** | ← PRD 边界场景 |
+| execution_result | nullable enum：`ok / failed / unknown`，仅 EXECUTED 有值；unknown 表示外部效果不可判定 | ← 架构复审 v1.4 |
 
 **状态机**：`CREATED → PENDING → (参数哈希复核) APPROVED → EXECUTED`；分支 `REJECTED` / `EXPIRED`；consume 加行锁（select_for_update）防并发双执行（← TestHub confirm.py:118 反例）。
 
-**状态语义与处置（v1.2 冻结）**：
+**状态语义与处置（v1.2 冻结；v1.4 增补 unknown）**：
 
 - CREATED = Policy Gate 判 REQUIRE_APPROVAL 时创建（瞬时态）；PENDING = 卡片入审批队列、通知审批人、TTL（expires_at）启动；
 - 发起方撤回 / 上游对象取消 / APPROVED 后参数变更（审批失效）→ 统一置 **EXPIRED + reason（withdrawn / invalidated）**，AuditEvent 留痕，不新增状态；
-- EXECUTED = 已尝试执行，附 **execution_result（ok / failed）**；执行失败（快照 fail-close 中止、外部写失败）凭 AuditEvent + 连接器重试策略表达，需重新发起审批；
+- EXECUTED = 已尝试执行，附 **execution_result（ok / failed / unknown）**：`ok` 表示结果已确认成功，`failed` 表示结果已确认失败，`unknown` 表示请求可能已到达外部系统但当前无法确认效果；`unknown` 必须进入对账或人工接管，禁止当作失败盲目重试，也禁止当作成功放行。执行失败或不可判定均通过 AuditEvent、Evidence 与连接器恢复协议表达；需要再次发起新动作时必须创建新审批；
 - 「修改后重新提交」生成新请求：**initiator_id = 重新提交人**，保留 origin_request_id / original_initiator_id 归因链，四眼基于新 initiator 校验；
 - 审批过期：EXPIRED 后关联 TestRun 停留 WAITING_APPROVAL，不自动放行（← 12-PRD §2.3）。
 
@@ -425,3 +427,4 @@ stateDiagram-v2
 | v1.0 | 2026-08-23 | 首版：20 对象 ER、6 组状态机、19 项 FR×对象矩阵、20 页面 IA 清单、8 份 AI 输出 schema；全部条目带溯源 |
 | v1.2 | 2026-08-24 | Stage 6.5 缺口回写（26 项缺口裁定，详见各交互链文末「回写记录」）：TestRun 状态机补边与标注（WAITING_EXTERNAL→CANCELLED 幂等取消直达边、审批过期停留 WAITING_APPROVAL、校验时序、Agent 终态归属）；ApprovalRequest 状态语义/处置冻结 + action_ref 扩展（agent_tool_action / gate_waiver / M4 copilot_write）+ sideEffectLevel 冻结表；TestCase.validity 失效标记；ExecutionEnvironment 在途处置；ReleaseTask FAILED_RETRYABLE 出边；FailureCluster 补 correction_history 与 7 值枚举对齐；页面清单补列「集成」（20→21） |
 | v1.3 | 2026-08-24 | 全链路一致性复核（Stage 3→6 反向核查）修复 9 项：① 领域对象补 3 个（OrgQuota 遗漏补列、新增 QualityGatePolicy / GateEvaluation——门禁原为「有落点无对象」）；② ER 图修正无定义悬空实体 `EXECUTION_EFFECT` → `ACTION_TARGET` 多态语义占位，并补门禁 / 会话关系边；③ 补关键约束 6–8（多态目标非独立表、门禁两对象职责分离与快照纪律、agent 型 run 不产生 GateEvaluation）；④ TestRun 状态机消歧（`过期不停留` 措辞与注 2 冲突）并补裁定 5–7（等待态「可见+告警+可人工取消」替代自动回收、STOPPING→TIMEOUT 兜底出边、VALIDATING 无独立取消边）；⑤ 页面清单补 4 页（项目设置 / 测试计划 / 集成中心 / AI 能力开关与降级）并固化「25 页」口径，作废下游「20 个页面」引用；⑥ action_ref 扩 `kill_switch_restore` + 冻结表补行，裁定开关**关停 L1 即时、恢复 L3 审批**的方向不对称；⑦ §3 矩阵 FR-12/13 落点改挂新门禁对象 + 豁免审批；⑧ §5 补 A2 登记行（原 A1→A3 跳号）；⑨ §2.5 补 QualityGatePolicy / GateEvaluation 字段摘要 |
+| v1.4 | 2026-08-29 | 架构复审回写：ApprovalRequest 的 `execution_result` 从 ok/failed 扩展为 ok/failed/unknown；unknown 仅表示外部效果不可判定，必须对账或人工接管，不得盲重试或成功放行。 |

@@ -125,7 +125,7 @@ Organization 是部门/事业部租户。所有核心表必须带 tenant_id，�
 ### 3.1 数据库选型冲突处理
 
 - **冲突**：根 README 仍写“开发期 SQLite，需并发再切 PostgreSQL”（`../../README.md:47`）；PRD 与架构输入已指定 PostgreSQL + pgvector，并要求第一天多租户隔离（`../08_prd/prd.md:221`、`../08_prd/prd.md:222`）。
-- **Draft 推荐**：M0 集成与安全 Gate 使用 PostgreSQL；SQLite 只能作为无共享数据、无并发、无租户安全结论的本地开发便利，不得作为租户隔离、并发审批、幂等、恢复或 Temporal POC 的验收环境。
+- **Draft 推荐**：M0 集成与安全 Gate 使用 PostgreSQL；SQLite 只能作为无共享数据、无并发、无租户安全结论的本地开发便利，不得作为租户隔离、并发审批、幂等、恢复或 Temporal 生产 Gate 的验收环境。
 - **替代方案**：若阶段资源不足，单元测试可用 SQLite，但所有安全/并发/恢复集成 Gate 必须在 PostgreSQL 重跑。
 - **状态**：Draft，需总架构文档定稿；本文不修改上游。
 
@@ -267,7 +267,7 @@ PRD 提到 Trace/视频默认 90 天，但同时明确“法务确认 TBD”（`
 | --- | --- |
 | 入站幂等 | Webhook event id/body hash 原子去重；相同键不同 request_hash 视为冲突并告警 |
 | 工作流幂等 | TestRun external_ci 使用唯一 idempotency_key；故障恢复不得重复触发外部 Job（`../03_problem_modeling/problem_model.md:146`） |
-| 审批执行领取 | consume 行锁事务只创建以 approval_request_id + bound_hash 唯一标识的基础设施 execution intent 与 Outbox，不提前写 EXECUTED；重复 consume/Outbox 重投/Worker 重领复用同一意图 |
+| 审批执行领取 | consume 行锁事务只创建以 approval_request_id + bound_hash 唯一标识的基础设施 execution intent 与 Outbox，不提前写 EXECUTED；intent 使用 READY/CLAIMED/DISPATCHING/CONFIRMED_*/UNKNOWN/ABANDONED；重复 consume/Outbox/Activity 重投复用同一意图 |
 | 外部写幂等 | tenant + action + target + stable request hash 生成幂等范围；保存 external_request_id 与响应摘要；重试先查询既有结果 |
 | ETag/版本 | 读取目标版本→Preview→审批绑定→执行前重读并比较；冲突则失效/重建审批，不覆盖最新外部状态 |
 | 重试 | 仅对已知幂等或可安全查询结果的操作自动重试；指数退避、抖动、Retry-After、最大尝试与总时长均 **TBD**；鉴权/权限/Schema/Policy DENY 不重试 |
@@ -412,11 +412,11 @@ PRD 的容量和 SLO 是当前输入，但容量明确标为“假设值，M0 �
 
 RACI 人名仍为 PRD Q8 的 M0 待办，不在本文虚构（`../08_prd/prd.md:365`）。
 
-## 13. Temporal POC 运维门槛
+## 13. Temporal 生产运维门槛
 
-上游裁定是 **POC Temporal，Celery + 自建状态机 + 幂等纪律为保底**，原因是长审批、长轮询、中断恢复与“不重复副作用”（`../01_market_research/market_research.md:136`）；PRD Q3 仍未闭环（`../08_prd/prd.md:360`）。
+Accepted ADR 0002 已基于用户完成的适配 POC 选择 Temporal，原因是长审批、长轮询、中断恢复与持久 Signal。该架构选择不等于生产就绪；托管/自托管、恢复、Worker Versioning、容量、成本、权限和值班仍按本节阻断生产放量。
 
-### 13.1 POC 必须证明
+### 13.1 生产 Gate 必须证明
 
 1. TestRun 统一 10 态映射不新增/扭曲业务状态；WAITING_APPROVAL/WAITING_EXTERNAL 可长等待、可见、可告警、可人工取消。
 2. API/worker/Temporal/DB 分别重启后，workflow 恢复且外部 CI/Jira/Release 不重复副作用。
@@ -429,11 +429,11 @@ RACI 人名仍为 PRD Q8 的 M0 待办，不在本文虚构（`../08_prd/prd.md:
 
 ### 13.2 放行门槛与替代
 
-**Draft 推荐**：只有上述 8 项及 Gate M1 的混沌/幂等测试通过，才可定稿 Temporal。任何一项无法运维、恢复会重复副作用、secret 进入 history、升级不能兼容在途任务，都不得定稿。
+**放行规则**：只有上述 8 项及 Gate M1 的混沌/幂等测试通过，Temporal 才可生产放量。任何一项无法运维、恢复会重复副作用、secret 进入 history、升级不能兼容在途任务，都必须阻断放量；不回退已经接受的架构事实，也不能用“POC 已完成”绕过生产 Gate。
 
-**替代方案**：Celery + PostgreSQL 自建权威状态机 + outbox/inbox + 幂等键 + 持久轮询/信号 + 心跳/僵尸回收。替代方案不是降级安全标准，仍须通过相同重启、重复、乱序、恢复、租户和审计 Gate；Redis/Celery task state 不得成为唯一事实源。
+**替代决策流程**：若 Temporal 无法满足生产 Gate，停止放量并新建 ADR 重评托管方式或 Celery + PostgreSQL 自建权威状态机。替代方案不得降低重启、重复、乱序、恢复、租户和审计标准；Redis/Celery task state 不得成为唯一事实源。
 
-所有 timeout/retry/history retention/task queue 数值均 **TBD**；POC 不产生真实部署配置或依赖变更。
+所有 timeout/retry/history retention/task queue 数值均 **TBD**；本次选型不产生真实部署配置或依赖变更。
 
 ## 14. LangGraph 与 MCP 安全边界
 
@@ -492,7 +492,7 @@ M4 候选边界：
 | 网关 | route/rate/burst/body/SSE limits | HTTP 入口保护 | 网关 Owner | 数值 TBD；容量压测 |
 | 配额 | AI token/API run/UI slot/perf/connector quotas | 业务资源治理 | 平台管理员 + SRE | 数值 TBD；试点校准 |
 | 工作流 | heartbeat/zombie/wait/stopping thresholds | TestRun 收敛与滞留告警 | SRE + 架构师 | 数值 TBD；混沌测试 |
-| 工作流 | activity timeout/retry/idempotency/history | Temporal/Celery POC | 架构师 + SRE | 全部 TBD；POC Gate |
+| 工作流 | activity timeout/retry/idempotency/history | Temporal 生产运行时 | 架构师 + SRE | 全部 TBD；生产就绪 Gate |
 | 备份 | backup/PITR/replication/encryption/retention | 数据保护 | SRE + 安全 | 数值/拓扑 TBD；恢复演练 |
 | 恢复 | service/data-class RPO/RTO | 业务连续性 | 平台负责人 + SRE | **TBD**；BIA 与演练批准 |
 | OTel | propagation/sampling/attribute/redaction/export | Trace 与观测 | SRE + 安全 | 数值/后端 TBD；敏感字段检查 |
@@ -514,7 +514,7 @@ M4 候选边界：
 | C-07 | Artifact/导出访问方式缺失（`frontend_backend_boundary_spec-v1.0.md:345`） | 后端鉴权后短时单对象 URL，Restricted 走代理/隔离查看候选 | 全部后端代理下载 | Draft/TBD，API 契约收口 |
 | C-08 | Legal Hold/WORM 未在上游定义 | 法务+安全设计 Hold；Audit/Evidence 评估对象锁/SIEM 不可变层 | 仅 append-only DB，但不得宣称满足 WORM | TBD，法务 Gate |
 | C-09 | HMAC 时间窗/重放 TTL、SSRF 内网例外、重试预算无数值 | 全部配置化，经威胁测试和依赖实测定值 | 系统级统一值，但必须证明适配各 Connector | TBD，不虚构默认 |
-| C-10 | Temporal POC 未结论（`../08_prd/prd.md:360`） | 通过 §13 运维/恢复/幂等 Gate 后再定 | Celery + PG 权威状态机，过同等 Gate | TBD，M0 第 4 周目标沿上游 |
+| C-10 | Temporal 已完成架构选型但生产能力未验证 | 按 §13 完成运维/恢复/幂等/版本/成本 Gate 后放量 | 未通过则停止放量并新建替代 ADR | Accepted 选型；生产 Gate 未完成 |
 | C-11 | MCP 在愿景中存在但一期明确不做 | 当前默认禁用；M4 独立威胁建模、依赖审计和 Gate | 不启用 MCP，只保留内部 Connector/Tool Router | Draft，M4 前不放行 |
 | C-12 | 容量/SLO 有假设值但无我方基线 | 保留为 Draft 目标，M0/M1 压测与试点校准 | 使用更保守临时限额，但必须显式标临时 | TBD，不作为定稿 |
 
@@ -534,7 +534,7 @@ M4 候选边界：
 | G-08 Prompt/Agent/MCP | 注入套件、白名单外工具、越权资源、恶意 tool description/result、max_steps、持久终止 | 越权副作用拦截率必须 100%；MCP 未批准保持禁用 |
 | G-09 Connector | HMAC、重放、归属、SSRF/DNS rebinding/metadata、TLS、ETag、幂等、调用前/后崩溃、响应丢失、429/5xx/超时、补偿 | 重启/重试重复触发或重复写即阻断 |
 | G-10 状态与可靠性 | 所有 TestRun 边、等待可见、STOPPING 兜底、心跳 TIMEOUT、进程/worker/DB 恢复 | 永久 RUNNING、状态假绿、丢证据即阻断 |
-| G-11 Temporal POC | §13 八项：恢复、Signal、Activity、版本升级、租户、安全、观测、运维成本 | 未通过则不得定稿，切保底方案重测 |
+| G-11 Temporal 生产就绪 | §13 八项：恢复、Signal、Activity、版本升级、租户、安全、观测、运维成本 | 未通过不得生产放量，并触发替代 ADR 评审 |
 | G-12 容量/SLO/限流 | 假设负载、突发、单租户占用、超大报告、对象增长、网关与业务配额、降级顺序 | 过载导致 kill/取消/审计/证据不可用即阻断 |
 | G-13 备份恢复 | PG/对象/Vault/工作流恢复、摘要一致、租户隔离、删除/Hold 重放、外部副作用不重复 | 未完成隔离恢复演练或 RPO/RTO 未定即阻断正式生产 |
 | G-14 OTel/告警/事故 | Trace 关联、敏感字段检查、P1/P2/可靠性告警、kill switch 关停与审批恢复、SIEM | P1 无告警/无取证/关停受阻即阻断 |
@@ -562,7 +562,7 @@ M4 候选边界：
 | Redis 不作工作流唯一状态；存储为 PG/Redis/S3 | `../08_prd/prd.md:221` |
 | OTel 关联模型/工具/工作流，基础设施监控归企业体系 | `../01_market_research/market_research.md:140` |
 | P1 为外部误写/泄露；关停即时、恢复审批 | `../08_prd/prd.md:343`、`../08_prd/prd.md:347` |
-| Temporal 仅 POC，Celery+状态机为保底 | `../01_market_research/market_research.md:136`、`../08_prd/prd.md:360` |
+| Temporal 已接受为持久工作流运行时；生产就绪仍受八项 Gate 约束 | `adr/0002_durable_workflow_runtime.md`、`../08_prd/prd.md:360` |
 | LangGraph 不作业务工作流控制面 | `../01_market_research/market_research.md:137` |
 | MCP 对外暴露一期不做，M4 评估 | `../08_prd/prd.md:73`、`../08_prd/prd.md:303` |
 | 制品 90 天仍待法务确认，不是本分册定稿值 | `../08_prd/prd.md:222`、`../08_prd/prd.md:363` |
@@ -570,6 +570,6 @@ M4 候选边界：
 
 ## 19. Draft 收口
 
-本文完成安全、可靠性与运维的架构草案，但不代表 Stage 6 总架构批准。以下项目仍阻断相应定稿：IdP 与会话数值、职能角色映射、PostgreSQL/RLS 决策、Artifact 访问契约、Vault 与扫描方案、保留/删除/Legal Hold/WORM、Connector 时间窗与重试预算、容量/SLO 校准、RPO/RTO、Temporal POC、MCP M4 评审、告警阈值、RACI 人名与值班安排。
+本文完成安全、可靠性与运维的架构草案，但不代表各项生产 Gate 已批准。以下项目仍阻断相应生产放量：IdP 与会话数值、职能角色映射、PostgreSQL/RLS 决策、Artifact 访问契约、Vault 与扫描方案、保留/删除/Legal Hold/WORM、Connector 时间窗与重试预算、容量/SLO 校准、RPO/RTO、Temporal 生产就绪 Gate、MCP M4 评审、告警阈值、RACI 人名与值班安排。
 
 任何需要推翻冻结上游结论的选择，必须先走 `docs/13_changes/` 变更流程；本文仅记录冲突、推荐和替代，不回写上游、不标批准（`../00_setup/project_rules.md:130`）。

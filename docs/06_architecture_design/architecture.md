@@ -1,19 +1,20 @@
 # HuntAI Test 后端集成架构
 
-> - **Status: Draft**
-> - **日期**：2026-08-26
-> - **阶段**：Stage 6 · 系统架构设计 · 后端集成架构 Draft
-> - **文档定位**：把研究、领域、API/工作流、安全运维分册与 8 份 Proposed ADR 收口为一套唯一集成推荐；不是各分册的机械汇总
-> - **决策纪律**：本文的架构选择仍是 Draft；所有 ADR 均保持 **Proposed**，不得据此宣称已 Accepted、已完成 POC 或已获生产实施授权
-> - **实现边界**：本文不包含代码、DDL、迁移、依赖变更或部署配置，也不新增已批准的领域对象、状态、枚举或字段
+> - **Status: 已定稿**
+> - **日期**：2026-08-27（2026-08-29 修订）
+> - **阶段**：Stage 6 · 系统架构设计 · 后端集成架构正式产出
+> - **文档定位**：把研究、领域、API/工作流、安全运维分册与 8 份 ADR 收口为一套唯一集成推荐；不是各分册的机械汇总
+> - **决策纪律**：本文为 Stage 6 已定稿集成架构，后续阶段以本文为后端架构输入。ADR 0001（模块化单体控制面）与 ADR 0002（Temporal 持久工作流）为 **Accepted**；ADR 0003–0008 仍为 **Proposed**。架构选型不等于生产就绪或部署授权，文内 **Proposed** 冲突处置、生产 Gate 与 **TBD** 数值仍须各自批准或验证
+> - **变更纪律**：修订本文必须先在 `docs/13_changes/change_log.md` 登记并获批准
+> - **实现边界**：本文不包含代码、DDL、迁移、依赖变更或部署配置；本次仅按已登记批准新增 `execution_result=unknown` 结果值与基础设施 execution intent 状态，不新增领域对象或 ApprovalRequest 状态
 
 ## 1. 架构结论
 
-HuntAI Test 推荐采用 **模块化单体控制面 + 独立 Worker**：控制面集中认证、租户、RBAC、Policy Gate、领域状态机、聚合事务、审批、门禁与审计裁决；持久工作流、执行器、连接器、报告和 AI 作为独立 Worker，按已登记命令回写控制面。PostgreSQL 保存业务与一致性事实；Redis 仅作可重建的缓存、限流和短租约；S3/MinIO 保存大制品正文；Vault 保存秘密，业务库只保存引用。
+HuntAI Test 采用 **模块化单体控制面 + Temporal 持久工作流 + 独立 Activity Worker**：控制面集中认证、租户、RBAC、Policy Gate、领域状态机、聚合事务、审批、门禁与审计裁决；Temporal Server 保存 workflow history、Timer、Signal 与 Task Queue 调度，Workflow Worker 只运行确定性编排；执行器、连接器、报告和 AI 作为隔离 Activity Worker，按已登记命令回写控制面。PostgreSQL 保存业务与一致性事实；Redis 仅作可重建的缓存、限流和短租约；S3/MinIO 保存大制品正文；Vault 保存秘密，业务库只保存引用。
 
 这套推荐与企业内部、≤1000 用户的规模相称，同时满足治理面与执行面分离、平台执行器独立于 API、长等待可恢复以及故障重启不重复副作用的要求，依据见 [决策总纲](../README.md)（`../README.md:14`、`../README.md:44`、`../README.md:46`、`../README.md:336`）和 [PRD](../08_prd/prd.md)（`../08_prd/prd.md:118`、`../08_prd/prd.md:124`、`../08_prd/prd.md:269`）。模块与运行单元细化见 [领域与服务架构分册](01_domain_and_service_architecture.md)（`01_domain_and_service_architecture.md:45` 至 `01_domain_and_service_architecture.md:106`）。
 
-本推荐不把具体持久工作流产品写死：**Temporal 仅进入条件 POC，当前未完成 POC、未形成生产选型**；若 Gate 不通过，使用 Celery + PostgreSQL 权威状态机 + Outbox/Inbox + 幂等纪律的保底方案，且安全与可靠性标准不降低。研究依据见 [研究与输入追溯分册](00_research_and_input_traceability.md)（`00_research_and_input_traceability.md:130` 至 `00_research_and_input_traceability.md:138`）和 [安全、可靠性与运维分册](03_security_reliability_and_operations.md)（`03_security_reliability_and_operations.md:414` 至 `03_security_reliability_and_operations.md:435`）。
+用户已完成 Temporal 适配 POC，并于 2026-08-29 确认其符合本系统的长等待、Signal 与恢复需求，因此本架构接受 Temporal 作为持久工作流运行时。该事实只关闭“选择哪类运行时”的架构问题，不虚构尚未提供的 POC 测试数据，也不表示托管/自托管、Worker Versioning、容量、成本、RPO/RTO、生产部署和值班方案已经批准；生产 Gate 未通过时必须停止放量并以新 ADR 重评运行形态或替代方案。
 
 ## 2. 目标、范围与非目标
 
@@ -37,7 +38,7 @@ HuntAI Test 推荐采用 **模块化单体控制面 + 独立 Worker**：控制�
 - 不定义实例数、节点、集群、容器、网络、Secret 路径、环境变量或部署清单；下文图均为概念拓扑。
 - 不替代 Jira、GitHub、Confluence、CI/CD 或 Release 系统，不做双向全量同步；平台只编排测试治理与质量证据。[PRD](../08_prd/prd.md) 的非目标见 `../08_prd/prd.md:66` 至 `../08_prd/prd.md:73`。
 - 不把 Agent Mode 结果直接用于门禁或发布证据；轨迹人工固化为 Script 资产并执行确定性 run 后才恢复门禁资格。
-- 不新增第 24 个领域对象、业务状态、结果枚举或字段；需改变上游模型的事项均明确标为 **Proposed** 并走变更流程。
+- 除本次已登记批准的 `execution_result=unknown` 外，不新增第 24 个领域对象、业务状态、结果枚举或字段；后续改变上游模型的事项均须明确标为 **Proposed** 并走变更流程。
 
 ## 3. 输入追溯与事实优先级
 
@@ -56,6 +57,8 @@ HuntAI Test 推荐采用 **模块化单体控制面 + 独立 Worker**：控制�
 
 输入可复核性和限制沿用 [研究分册](00_research_and_input_traceability.md)：Stage 5 原型当前无可读文件，源仓库 references/competitors 未随迁，官方链接由 Lead 事先核对但本阶段没有二次联网验证（`00_research_and_input_traceability.md:66` 至 `00_research_and_input_traceability.md:78`）。这些缺口不被猜测补齐。
 
+文内具体行号是审查时的定位快照，文件和章节链接才是长期权威引用；后续修订不得只维护行号而不核对被引语义。新引用优先使用章节名、ADR 编号或稳定契约 ID。
+
 ### 3.2 事实优先级
 
 | 优先级 | 来源 | 本文使用规则 |
@@ -65,7 +68,7 @@ HuntAI Test 推荐采用 **模块化单体控制面 + 独立 Worker**：控制�
 | 3 | [前后端边界](frontend_backend_boundary_spec-v1.0.md) | 后端权威、成功判定、错误与外部访问边界；见 `frontend_backend_boundary_spec-v1.0.md:17` 至 `frontend_backend_boundary_spec-v1.0.md:23`。 |
 | 4 | [决策总纲](../README.md) | 产品原则、治理/执行分离、技术路线和安全基线。 |
 | 5 | [PRD](../08_prd/prd.md) | 需求、验收、SLO 假设和里程碑；其自身仍是中期版，见 `../08_prd/prd.md:3` 至 `../08_prd/prd.md:5`。 |
-| 6 | Stage 6 四分册与 8 ADR | 本阶段的 Draft/Proposed 集成建议，不反向提升为已批准事实。ADR 状态纪律见 `adr/README.md:3` 至 `adr/README.md:11`。 |
+| 6 | Stage 6 四分册与 8 ADR | 四分册仍为 Draft 支撑材料；ADR 0001/0002 为 Accepted，0003–0008 为 Proposed。不得把其余 Proposed/TBD 或生产 Gate 反向提升为已批准实现事实。 |
 
 冲突处理规则是：先保持高优先级模型可兼容运行，再登记 Proposed 变更、替代与验证；不以实现便利静默修改冻结资产。
 
@@ -73,18 +76,19 @@ HuntAI Test 推荐采用 **模块化单体控制面 + 独立 Worker**：控制�
 
 ### 4.1 唯一推荐：模块化单体控制面 + 独立 Worker
 
-**Draft 推荐**采用一个逻辑控制面和五类独立 Worker：
+**已定稿推荐**采用一个逻辑控制面、Temporal Server、Workflow Worker 和四类隔离 Activity Worker：
 
 | 运行单元 | 职责 | 禁止 |
 | --- | --- | --- |
 | 模块化单体控制面 | 认证/tenant/RBAC、同步命令与查询、Policy Gate、状态机、聚合事务、审批、门禁、Outbox、工作台投影 | 执行浏览器或压测、长轮询、大报告解析、模型厂商直连 |
-| 工作流 Worker | 长等待、持久信号、轮询、恢复、补偿编排；调用控制面命令 | 直接改模块私有数据；用引擎状态替代领域状态 |
-| 执行器 Worker | API/Web/性能确定性执行和受限 Agent 执行；心跳、停止、制品上传 | 拥有审批、门禁或业务终态裁决权 |
-| 连接器 Worker | Jira/GitHub/CI/Release I/O，webhook 规范化、轮询、幂等、对账与补偿 | 让外部回调直接改 TestRun/ReleaseTask/GateEvaluation |
-| 报告 Worker | 分片解析、归一化、脱敏、partial 显式、结果写入命令 | 在 API 进程解析大报告；自行判门禁 |
-| AI Worker | A1–A8、结构化校验、fallback、AIInvocationLog、Evidence 引用校验 | 决定权限、审批、业务重试、幂等、状态机或外部写 |
+| Temporal Server | workflow history、Timer、Signal、Task Queue 调度与持久恢复 | 作为 TestRun/ApprovalRequest 等领域事实源 |
+| Workflow Worker | 运行确定性 Workflow，编排长等待、轮询、恢复和补偿 | 直接执行网络/数据库 I/O；用引擎状态替代领域状态 |
+| 执行器 Activity Worker | API/Web/性能确定性执行和受限 Agent 执行；心跳、停止、制品上传 | 拥有审批、门禁或业务终态裁决权 |
+| 连接器 Activity Worker | Jira/GitHub/CI/Release I/O，webhook 规范化、轮询、幂等、对账与补偿 | 让外部回调直接改 TestRun/ReleaseTask/GateEvaluation |
+| 报告 Activity Worker | 分片解析、归一化、脱敏、partial 显式、结果写入命令 | 在 API 进程解析大报告；自行判门禁 |
+| AI Activity Worker | A1–A8、结构化校验、fallback、AIInvocationLog、Evidence 引用校验 | 决定权限、审批、业务重试、幂等、状态机或外部写 |
 
-Worker 回写的唯一业务路径是已登记命令，跨模块通知只使用已登记事件；模块之间通过 ID、不可变快照、查询接口和事件协作，不共享仓储或 ORM 实体。该规则承接 [领域分册](01_domain_and_service_architecture.md)（`01_domain_and_service_architecture.md:81` 至 `01_domain_and_service_architecture.md:90`、`01_domain_and_service_architecture.md:183` 至 `01_domain_and_service_architecture.md:198`）和 [Proposed ADR 0001](adr/0001_modular_monolith_control_plane.md)（`adr/0001_modular_monolith_control_plane.md:12` 至 `adr/0001_modular_monolith_control_plane.md:19`）。
+Worker 回写的唯一业务路径是已登记命令，跨模块通知只使用已登记事件；模块之间通过 ID、不可变快照、查询接口和事件协作，不共享仓储或 ORM 实体。Workflow 不执行网络/数据库 I/O，只调度 Activity。该规则承接 [领域分册](01_domain_and_service_architecture.md) 和 [Accepted ADR 0001](adr/0001_modular_monolith_control_plane.md)。
 
 ### 4.2 为什么不立即微服务化
 
@@ -128,10 +132,12 @@ flowchart TB
 
     subgraph CONTROL[确定性控制面]
       API --> IAM[身份、租户与配额]
-      API --> ASSET[测试资产与环境注册]
+      API --> ASSET[测试资产]
+      API --> ENV[执行环境]
       API --> RUN[执行编排]
       API --> POLICY[审批与 Policy Gate]
-      API --> GATE[质量门禁与 Release]
+      API --> GATE[质量门禁]
+      API --> RELEASE[发布编排]
       API --> INT[集成中心]
       API --> EVID[结果、Evidence、Audit]
       API --> AIG[AI 治理]
@@ -140,15 +146,15 @@ flowchart TB
     API --> PG[(PostgreSQL 业务事实 + Outbox/Inbox)]
     API --> REDIS[(Redis 可重建加速层)]
     API --> S3[(S3/MinIO 制品正文)]
-    PG --> TASKS[任务/事件投递]
+    PG --> RELAY[Outbox Relay]
+    RELAY --> TEMPORAL[Temporal Server]
+    RELAY --> SIMPLE[普通 Outbox Consumer]
+    TEMPORAL --> WF[Workflow Worker]
+    TEMPORAL --> EXEC[执行器 Activity Worker]
+    TEMPORAL --> CONN[连接器 Activity Worker]
+    TEMPORAL --> REPORT[报告 Activity Worker]
+    TEMPORAL --> AIW[AI Activity Worker]
 
-    TASKS --> WF[工作流 Worker]
-    TASKS --> EXEC[执行器 Worker]
-    TASKS --> CONN[连接器 Worker]
-    TASKS --> REPORT[报告 Worker]
-    TASKS --> AIW[AI Worker]
-
-    WF --> API
     EXEC --> API
     CONN --> API
     REPORT --> API
@@ -161,7 +167,7 @@ flowchart TB
     CONN --> VAULT2[Vault 凭证引用解析]
 ```
 
-该图只表达运行职责与数据流，不规定实例数、产品、网络、容器、集群或部署位置。
+控制面事务只提交业务事实与 Outbox；relay 以 event_id 和确定性 workflow_id 幂等 Start/Signal Temporal。外部回调先验签、去重、归属校验并落 Inbox/ExternalObservation，再经 Outbox Signal；Temporal 不可用时保留 Outbox 待重放。单步、可重建且无需 Timer/Signal 的通知或投影可走普通 Consumer；同一业务步骤只能有一个调度 Owner。该图不规定实例数、网络、容器、集群、托管方式或部署位置。
 
 ## 6. 模块职责与 23 对象归属摘要
 
@@ -196,7 +202,7 @@ flowchart TB
 
 ### 7.2 ApprovalRequest
 
-状态集合为 `CREATED / PENDING / APPROVED / EXECUTED / REJECTED / EXPIRED`。`APPROVED` 只表示人已批准；`EXECUTED` 表示已尝试执行，结果由既有 `execution_result=ok/failed` 语义表达。四眼、param_hash、TTL、失效和一次消费依据见 [问题模型](../03_problem_modeling/problem_model.md)（`../03_problem_modeling/problem_model.md:188` 至 `../03_problem_modeling/problem_model.md:220`）。
+状态集合为 `CREATED / PENDING / APPROVED / EXECUTED / REJECTED / EXPIRED`。`APPROVED` 只表示人已批准；`EXECUTED` 表示已尝试执行，结果由 `execution_result=ok/failed/unknown` 表达已确认成功、已确认失败或当前不可判定。四眼、param_hash、TTL、失效和一次消费依据见 [问题模型](../03_problem_modeling/problem_model.md)（`../03_problem_modeling/problem_model.md:188` 至 `../03_problem_modeling/problem_model.md:220`）。
 
 资格与不变量：
 
@@ -205,8 +211,9 @@ flowchart TB
 3. 审批前 Preview 的完整参数与目标语义绑定 param_hash；消费前重算，同时重校验 tenant、当前权限、目标版本、持续授权和 kill switch。
 4. APPROVED 的消费必须使用数据库行锁，并在同一事务原子创建以 `approval_request_id + bound_hash` 唯一标识的基础设施执行意图与 Outbox；重复消费返回同一执行引用。执行意图不是第 24 个领域对象，也不使 ApprovalRequest 提前进入 EXECUTED。
 5. 过期、撤回、上游取消和参数失效进入 EXPIRED，不复用旧批准；修改后重提是新请求、新 TTL、新 initiator 和新哈希。
-6. Worker 只领取该唯一意图，使用稳定幂等键执行；首次真实调用已发出后，才经控制面命令写 `EXECUTED + execution_result`。调用前崩溃可重新领取同一意图；调用后结果未知必须先查询 external_request_id/幂等结果，不能新建意图或盲目重发。
-7. 最终执行失败后不得静默再次消费同一批准；需按场景人工处置或重新审批。若提供方既不支持幂等创建也不能查询请求结果，自动恢复必须 fail-close 并转人工接管。
+6. execution intent 至少区分 `READY / CLAIMED / DISPATCHING / CONFIRMED_OK / CONFIRMED_FAILED / UNKNOWN / ABANDONED`。Worker 在网络调用前持久化 DISPATCHING，使用稳定幂等键执行；首次真实调用已发出后，经控制面命令写 `EXECUTED + execution_result=ok/failed/unknown`。
+7. READY/CLAIMED 崩溃可重新领取；DISPATCHING/UNKNOWN 或结果落账前崩溃必须先查询 external_request_id/幂等结果。可确认时收敛 ok/failed，暂不可判定时保持 unknown；unknown 不得按失败盲重试或按成功放行。若提供方既不支持幂等创建也不能查询请求结果，必须 fail-close 并转人工接管。
+8. 只有 execution_result=ok 可触发目标聚合的成功迁移；failed/unknown 均不得自动推进 TestRun、ReleaseTask 或 ExecutionEnvironment。具体失败收敛若不在现有状态边内，保持当前 fail-closed 状态并由显式人工命令处置，直至上游状态模型另行批准。
 
 ### 7.3 ExecutionEnvironment
 
@@ -242,10 +249,10 @@ QualityGatePolicy 是版本化策略；GateEvaluation 是包含 policy_snapshot 
 
 ### 8.1 C1 北极星质量闭环
 
-1. 测试资产模块接收 OpenAPI/Postman/curl；AI Worker 生成默认不落库草稿并记录 AIInvocationLog；人工保存后才创建 TestCase DRAFT。
+1. 测试资产模块接收 OpenAPI/Postman/curl；AI Activity Worker 生成默认不落库草稿并记录 AIInvocationLog；人工保存后才创建 TestCase DRAFT。
 2. TestCase 经 DRAFT→PENDING_REVIEW→ACTIVE；执行编排读取已批准版本、ACTIVE 环境和配额，创建 TestRun 并冻结 snapshot。
 3. Script×平台执行器、Script×外部 CI 和 Agent×平台执行器归一到 TestRun；Agent 结果不进门禁。
-4. 报告 Worker 分片归一化，结果模块产生 CaseResult/Artifact；C4 生成 FailureCluster 与 Evidence。
+4. 报告 Activity Worker 分片归一化，结果模块产生 CaseResult/Artifact；C4 生成 FailureCluster 与 Evidence。
 5. 合格 run 进入门禁，生成不可变 GateEvaluation；GitHub Check Run 同步失败不回滚门禁事实。
 6. Jira 缺陷经 C2 审批后由连接器幂等创建；ReleaseTask 汇聚范围、门禁、性能和缺陷证据，只 prepare 外部 item。
 7. EvidenceObject 与 AuditEvent 贯穿全链；M0–M3 以证据包导出承接知识回流，不擅自实现 M4 Confluence/RAG。
@@ -290,7 +297,7 @@ manual/schedule/ci_webhook/api_token 统一归一为受理命令；PENDING 冻�
 
 ### 9.3 SSE
 
-SSE 只负责展示进度和变化提示，不是命令通道、业务事实源或状态机：首次 GET 后订阅；关键状态、终态、重连、版本跳跃或网络恢复后 GET 对账；SSE 与 GET 冲突时以 GET 为准。服务端事件 ID 只用于续传和缺口检测，不作为业务版本或幂等键；保留窗口外明确要求全量对账。连续失败后降级轮询，不能因断流把 TestRun 判 FAILED/TIMEOUT 或把审批判 EXPIRED。该 Draft 原则见 `02_api_workflow_and_review.md:335` 至 `02_api_workflow_and_review.md:381`。
+SSE 只负责展示进度和变化提示，不是命令通道、业务事实源或状态机：首次 GET 后订阅；关键状态、终态、重连、版本跳跃或网络恢复后 GET 对账；SSE 与 GET 冲突时以 GET 为准。服务端事件 ID 只用于续传和缺口检测，不作为业务版本或幂等键；保留窗口外明确要求全量对账。连续失败后降级轮询，不能因断流把 TestRun 判 FAILED/TIMEOUT 或把审批判 EXPIRED。该原则见 `02_api_workflow_and_review.md:335` 至 `02_api_workflow_and_review.md:381`。
 
 ### 9.4 Webhook + 轮询
 
@@ -317,28 +324,36 @@ Webhook 是低延迟观察，必须验签、归属校验和去重；持久轮询
 ### 11.1 事务边界
 
 - 聚合内强一致使用单个 PostgreSQL 本地事务；事务只写本模块私有数据、Audit append 请求和 Outbox。
-- 跨模块流程不使用分布式事务；通过 Outbox/Inbox、幂等命令、持久工作流和补偿达成最终一致。
+- 不使用跨进程分布式事务；但同进程模块协作不机械地全部消息化，按下表选择一致性机制。
 - 远程调用不放进数据库事务，不持有数据库锁等待 Jira/CI/Release。
 - 大结果按稳定 chunk key 分片提交，不与 TestRun 放在一个超大事务；TestRun 只保存完成/失败摘要和引用。
 
+| 场景 | 机制 | 边界 |
+| --- | --- | --- |
+| 单聚合写入 | 模块私有 PostgreSQL 本地事务 | 业务事实、Audit append 请求与 Outbox 同事务 |
+| 同进程只读/无独立生命周期校验 | 公开查询或领域端口同步调用 | 不共享 ORM 实体和私有仓储 |
+| 提交后通知、投影、单步可重建任务 | Outbox + Inbox/幂等 Consumer | 不需要 Timer、Signal 或多步补偿 |
+| 长等待、取消、轮询、多步补偿 | Outbox relay + Temporal Workflow/Activity | workflow_id/event_id 去重；PostgreSQL 为业务权威 |
+| 跨模块独立聚合变更 | 已登记命令 + Outbox，必要时 Temporal saga | 显式中间态、补偿与人工接管 |
+
 ### 11.2 Outbox / Inbox
 
-聚合事实与 Outbox 同事务提交；发布至少一次。消费者以 event_id 在 Inbox 去重，并将 Inbox 记录和自身业务写放在同一事务；崩溃后重复投递返回已有结果。事件只陈述已提交事实，敏感正文不进总线，只传稳定引用与 classification。工作流任务同样按至少一次设计，不能依赖“只投一次”。依据见 `01_domain_and_service_architecture.md:462` 至 `01_domain_and_service_architecture.md:467` 和 [Proposed ADR 0006](adr/0006_connector_idempotency_and_recovery.md)（`adr/0006_connector_idempotency_and_recovery.md:12` 至 `adr/0006_connector_idempotency_and_recovery.md:22`）。
+聚合事实与 Outbox 同事务提交；发布至少一次。消费者以 event_id 在 Inbox 去重，并将 Inbox 记录和自身业务写放在同一事务；崩溃后重复投递返回已有结果。需要持久编排时，relay 以 event_id 与确定性 workflow_id 幂等 Start/Signal Temporal；外部回调先落 Inbox/ExternalObservation 再 Signal。事件只陈述已提交事实，敏感正文不进总线或 workflow history，只传稳定引用与 classification。普通 Consumer 与 Temporal Activity 都按至少一次设计，同一业务步骤只能登记一个调度 Owner。
 
 ### 11.3 幂等、CAS 与行锁
 
-- 受理幂等 Draft scope 为 tenant + command/action type + idempotency key，并保存请求哈希与结果引用；同 key 同 hash 返回已有结果，同 key 异 hash 拒绝冲突。
+- 受理幂等 scope 为 tenant + command/action type + idempotency key，并保存请求哈希与结果引用；同 key 同 hash 返回已有结果，同 key 异 hash 拒绝冲突。
 - 外部写保存稳定幂等键、external_request_id、目标版本和响应摘要；未知结果先查询，确认不存在才重试。
 - TestRun、TestCase current_version、ExecutionEnvironment、ReleaseTask、OrgQuota 和配置发布指针使用 expected_version/CAS；每次更新同时校验当前态、版本和不变量。
-- ApprovalRequest 消费必须数据库行锁；锁内原子创建唯一基础设施执行意图和 Outbox，不做远程调用，也不提前写 EXECUTED。重复 consume、Outbox 重投与 Worker 重领都复用同一意图。
-- Worker 首次真实调用后才写 EXECUTED；调用前崩溃重领同一意图，调用后响应丢失先按 external_request_id/幂等键查询，结果落账前崩溃也不得创建第二个意图。人工重提使用新 ApprovalRequest，不能复用旧意图授权新参数。
+- ApprovalRequest 消费必须数据库行锁；锁内原子创建 READY execution intent 和 Outbox，不做远程调用，也不提前写 EXECUTED。重复 consume、Outbox/Activity 重投与 Worker 重领都复用同一意图。
+- Worker 在网络调用前持久化 DISPATCHING；首次真实调用后才写 EXECUTED。确定结果进入 ok/failed；响应丢失或落账前崩溃进入/恢复为 unknown 并先按 external_request_id/幂等键查询，不得创建第二个意图。人工重提使用新 ApprovalRequest，不能复用旧意图授权新参数。
 - 外部 ETag/版本在 Preview、审批绑定和执行前重读比较；冲突使旧动作 fail-close。
 
 ### 11.4 失败恢复与补偿
 
-- 控制面重启：从 PostgreSQL 与 Outbox 恢复，未发布事件重发。
-- Worker 重启：从持久检查点恢复，重复命令安全；不能重新执行已确认副作用。
-- Approval 执行：调用前崩溃重新领取同一执行意图；调用后结果未知先查询；Outbox 重投只唤醒同一意图。无法幂等创建且无法查询结果的外部动作转人工接管。
+- 控制面重启：从 PostgreSQL 与 Outbox 恢复，未发布事件重发；不得直接补启第二条 workflow。
+- Temporal/Worker 重启：从 workflow history 与 Task Queue 恢复，重复 Activity/命令安全；不能重新执行已确认副作用。
+- Approval 执行：READY/CLAIMED 崩溃重新领取同一意图；DISPATCHING/UNKNOWN 先查询；Outbox/Activity 重投只唤醒同一意图。无法幂等创建且无法查询结果的外部动作保持 EXECUTED+unknown 并转人工接管。
 - 外部 CI 未知结果：按幂等键/external_request_id 查询；webhook 丢失由持久轮询兜底。
 - 执行器失联：RUNNING/STOPPING 按心跳收敛 TIMEOUT；不自动重跑 Agent 或压测。
 - 审批过期：EXPIRED，run 保持 WAITING_APPROVAL，人工重提或取消。
@@ -385,27 +400,27 @@ OIDC Authorization Code + PKCE 是主认证候选，浏览器只持安全、可�
 
 所有上传、外部 CI Artifact、附件、报告、日志和生成脚本均是不可信输入，经过隔离、扩展名/MIME/magic bytes、大小与解压预算、路径安全、恶意文件扫描、checksum、脱敏和准入后才能消费。对象 key 由服务端生成，默认私有。
 
-**Draft 访问推荐**为混合模式：大文件在后端授权后使用短期、单对象、只读预签名访问；Restricted 或高审计内容走后端代理、隔离查看或禁止导出。Artifact/Evidence 引用本身不是访问授权，每次访问重校验 tenant、project、RBAC、classification、保留和 Legal Hold。具体 TTL、扫描器、下载次数和保留期均 TBD，不能把 PRD 的 90 天假设写成默认值。依据见 `02_api_workflow_and_review.md:595` 至 `02_api_workflow_and_review.md:631`。
+**已定稿访问形态**为混合模式：大文件在后端授权后使用短期、单对象、只读预签名访问；Restricted 或高审计内容走后端代理、隔离查看或禁止导出。Artifact/Evidence 引用本身不是访问授权，每次访问重校验 tenant、project、RBAC、classification、保留和 Legal Hold。具体 TTL、扫描器、下载次数和保留期均 TBD，不能把 PRD 的 90 天假设写成默认值。依据见 `02_api_workflow_and_review.md:595` 至 `02_api_workflow_and_review.md:631`。
 
 ### 13.4 数据分类与模型出站
 
-采用 Public/Internal/Confidential/Restricted 四级分类，输入、证据、历史上下文和工具结果取最高等级；分类缺失按 Confidential fail-close 是 Draft 候选。Confidential 禁缓存并最小化/脱敏；Restricted 默认禁止模型出站，只允许经批准本地模型或拒绝处理。所有 chat/structured/embed 经 ModelRoute/LLM 工厂唯一出口并写 AIInvocationLog；业务模块和 Skill 不得直连厂商 SDK。
+采用 Public/Internal/Confidential/Restricted 四级分类，输入、证据、历史上下文和工具结果取最高等级；分类缺失按 Confidential fail-close。Confidential 禁缓存并最小化/脱敏；Restricted 默认禁止模型出站，只允许经批准本地模型或拒绝处理。所有 chat/structured/embed 经 ModelRoute/LLM 工厂唯一出口并写 AIInvocationLog；业务模块和 Skill 不得直连厂商 SDK。
 
 Jira、PR、Confluence、日志、网页 DOM、文件和未来 MCP 描述/结果全部是不可信内容。System/Policy/Skill/User/Document 分层；工具名、参数、URL 和资源 ID 只接受服务端注册 schema，随后经过 tenant/RBAC、Tool Router、Policy Gate、数据分级和审计。模型声称“已获批准”不构成授权。安全依据见 `03_security_reliability_and_operations.md:185` 至 `03_security_reliability_and_operations.md:215`。
 
 ## 14. SLO、容量、备份恢复、可观测与运维
 
-### 14.1 Draft SLO 与容量假设
+### 14.1 SLO 与容量假设
 
-下列数值来自当前 PRD，但仍是 Draft/假设或 TBD，不是部署默认：
+下列数值来自当前 PRD，仍是假设或 TBD，不是部署默认；本文定稿不把这些数值提升为生产 SLO：
 
 | 指标 | 当前目标/假设 | 成熟度 |
 | --- | --- | --- |
-| 只读 API | P95 < 1s（不含模型） | Draft SLO |
-| AI 流式生成 | 首 token P95 ≤3s | Draft SLO，依赖企业模型网关 |
-| A2 分诊 | 10k 用例级 run 完成后 ≤5 分钟 | Draft SLO |
-| Check Run 回写 | CI 结束后 ≤2 分钟 | Draft SLO |
-| 报告解析 | ≥1000 用例结果/分钟 | Draft 容量目标 |
+| 只读 API | P95 < 1s（不含模型） | PRD 假设 SLO |
+| AI 流式生成 | 首 token P95 ≤3s | PRD 假设 SLO，依赖企业模型网关 |
+| A2 分诊 | 10k 用例级 run 完成后 ≤5 分钟 | PRD 假设 SLO |
+| Check Run 回写 | CI 结束后 ≤2 分钟 | PRD 假设 SLO |
+| 报告解析 | ≥1000 用例结果/分钟 | PRD 容量假设 |
 | 用户规模 | 1000 注册、约 200 DAU | 假设，M0 校准 |
 | 执行并发 | 接口 50 run；UI 8 slot TBD；压测全局并发 TBD | 假设/TBD |
 
@@ -419,7 +434,7 @@ Jira、PR、Confluence、日志、网页 DOM、文件和未来 MCP 描述/结果
 - S3/MinIO：版本/复制/对象锁候选；恢复后验证摘要、引用和孤儿对象。
 - Vault：使用企业 Vault DR，不把秘密明文纳入应用备份；恢复后验证租约并按需轮换。
 - Redis：不是必须恢复的业务事实，从 PostgreSQL/工作流重建。
-- Temporal（若最终采用）：持久库、history/visibility 与配置需纳入恢复；恢复不得重复 Activity，Worker 版本兼容。
+- Temporal：持久库、history/visibility 与配置需纳入恢复；恢复不得重复外部副作用，Worker Versioning 必须兼容在途 history。
 
 备份成功不等于可恢复。正式放量前必须在隔离环境演练应用一致性、租户越权、在途工作流、外部副作用去重、删除/Hold 重放。具体矩阵见 `03_security_reliability_and_operations.md:316` 至 `03_security_reliability_and_operations.md:343`。
 
@@ -435,20 +450,21 @@ Jira、PR、Confluence、日志、网页 DOM、文件和未来 MCP 描述/结果
 
 ## 15. 技术调研结论
 
-### 15.1 Temporal：仅条件 POC
+### 15.1 Temporal：已接受选型，生产 Gate 独立
 
-Temporal 的 durable workflow、Signal 和长等待模型与审批/外部轮询匹配，但 Activity 可能至少一次执行，不能提供业务 exactly-once。**当前不得声称 POC 已开始或完成，也不得把 Temporal 写成生产依赖。** POC 必须证明：
+用户已完成适配 POC 并确认 Temporal 的 durable workflow、Signal 和长等待模型适合审批、外部轮询与恢复场景，因此 [ADR 0002](adr/0002_durable_workflow_runtime.md) 已接受 Temporal 为持久工作流运行时。Activity 仍是至少一次执行，Temporal 不提供业务 exactly-once，也不替代 PostgreSQL 领域事实。
 
-1. TestRun 10 态和 ApprovalRequest 六态无损映射；
-2. API、Worker、Temporal 和数据库分别重启后等待不丢、外部副作用不重复；
-3. 重复、乱序、迟到 Signal 不放行过期审批、不重开终态；
-4. Activity 使用业务幂等、external_request_id 和查询后重试；
-5. Worker 新旧版本兼容在途 history，可升级与回滚；
-6. tenant、actor、classification、request hash 可传播并在执行点复核，secret 不进 history；
-7. 备份恢复、可观测、容量、成本和值班能力有实测证据；
-8. 与 Celery+PostgreSQL 保底按相同 Gate 比较。
+集成协议固定为：
 
-任一恢复重复副作用、旧流程不可升级、secret 入 history、RPO/RTO 或值班不可承担，都退出 Temporal 选型，采用保底方案。见 [研究分册](00_research_and_input_traceability.md)（`00_research_and_input_traceability.md:182` 至 `00_research_and_input_traceability.md:197`）和 [Proposed ADR 0002](adr/0002_durable_workflow_runtime.md)（`adr/0002_durable_workflow_runtime.md:12` 至 `adr/0002_durable_workflow_runtime.md:19`）。
+1. 控制面事务提交领域事实与 Outbox，不在事务内直接调用 Temporal；
+2. relay 以 event_id 与确定性 workflow_id 幂等 StartWorkflow/SignalWithStart/Signal；
+3. Workflow 只运行确定性编排，不直接执行网络或数据库 I/O；
+4. 执行器、连接器、报告和 AI 使用隔离 Activity Task Queue；
+5. webhook/轮询先落 Inbox/ExternalObservation，再经 Outbox Signal；
+6. Activity 通过已登记控制面命令回写领域状态，重放必须业务幂等；
+7. 单步可重建通知/投影可走普通 Outbox Consumer，但同一步骤不得由两套调度器重复执行。
+
+选型 Accepted 不等于生产就绪。正式放量前仍须证明 API、Worker、Temporal 与数据库重启恢复，重复/乱序 Signal 安全，Worker Versioning 兼容在途 history，secret 不进 history，tenant/actor/classification 在执行点复核，以及备份恢复、可观测、容量、成本、RPO/RTO 和值班能力可承担。任一生产 Gate 失败都阻断放量，并通过新 ADR 重评托管方式或替代运行时，不得静默切换。
 
 ### 15.2 LangGraph：仅限 Agent/Copilot
 
@@ -464,12 +480,12 @@ MCP 的 host/client/server、tools/resources/prompts 和协议授权都不是平
 
 ## 16. ADR 摘要
 
-所有 ADR 的当前状态均为 **Proposed**，无一 Accepted；状态规则见 [ADR README](adr/README.md)（`adr/README.md:3` 至 `adr/README.md:11`）。
+ADR 0001、0002 为 **Accepted**；ADR 0003–0008 仍为 **Proposed**。Accepted 只表示架构决策已作出，不等于生产 Gate、供应商、部署参数或其依赖的 Proposed 业务变化已经批准。
 
-| ADR | Proposed 主题 | 本集成推荐中的位置 |
+| ADR | 决策主题 | 本集成推荐中的位置 |
 | --- | --- | --- |
-| [0001](adr/0001_modular_monolith_control_plane.md) | 模块化单体控制面 + 独立 Worker | 唯一架构形态推荐；产品、实例和部署未定 |
-| [0002](adr/0002_durable_workflow_runtime.md) | 持久工作流条件 POC | Temporal 未选定；Celery+PG 为同标准保底 |
+| [0001](adr/0001_modular_monolith_control_plane.md) | **Accepted**：模块化单体控制面 + 独立 Worker | 唯一架构形态；实例和部署参数未定 |
+| [0002](adr/0002_durable_workflow_runtime.md) | **Accepted**：Temporal 持久工作流 | PostgreSQL 业务权威；生产 Gate 与托管方式未定 |
 | [0003](adr/0003_canonical_state_and_gate_semantics.md) | 权威状态与门禁资格 | 过期保持 WAITING_APPROVAL；not_evaluated 未批前无评估+reason |
 | [0004](adr/0004_side_effect_approval_and_pre_authorization.md) | 审批、Release prepare、持续授权 | L4 prepare-only；实际发布 DENY；L2 自动动作作用域化持续授权 Proposed |
 | [0005](adr/0005_identity_tenancy_and_project_membership.md) | 身份、租户与成员权威 | IdP 身份、Jira 项目镜像、本地 ProjectMember 角色 Proposed 拆分 |
@@ -489,8 +505,9 @@ ADR 之间的依赖关系见 `adr/README.md:26` 至 `adr/README.md:32`；任何�
 | L2 CI/Check Run 自动动作 | 注册审批形成作用域化持续授权，每次仍持续鉴权、Policy Gate、可撤销和审计 | **Proposed**；scope/有效期 TBD |
 | ProjectMember 是否从 Jira 同步 | IdP 管身份，Jira 只读镜像 Project 元数据，平台权威管理 ProjectMember 本地角色 | **Proposed** |
 | ExecutionEnvironment 无恢复边 | Proposed `DEGRADED→ACTIVE`、`DISABLED→PENDING_APPROVAL`；批准前不得后台改状态 | **Proposed** |
-| heal_apply 快照时点冲突 | 批准后锁 ApprovalRequest + current_version CAS + 事务内真实 rollback snapshot + 新 Version；失败 fail-close | Draft 集成推荐，不新增状态/字段 |
-| 状态边数在文档间漂移 | 不再手写边数；唯一来源为问题模型的可校验迁移契约，后续生成文档/测试 | Draft 集成规则 |
+| heal_apply 快照时点冲突 | 批准后锁 ApprovalRequest + current_version CAS + 事务内真实 rollback snapshot + 新 Version；失败 fail-close | 已定稿集成处置，不新增状态/字段 |
+| 外部调用已发出但结果不可判定 | execution intent 进入 UNKNOWN；ApprovalRequest 为 EXECUTED + execution_result=unknown；只对账/人工接管，不盲重试或放行 | 已定稿集成处置；上游结果枚举已同步 |
+| 状态边数在文档间漂移 | 不再手写边数；唯一来源为问题模型的可校验迁移契约，后续生成文档/测试 | 已定稿集成规则 |
 
 ## 18. 风险
 
@@ -505,7 +522,7 @@ ADR 之间的依赖关系见 `adr/README.md:26` 至 `adr/README.md:32`；任何�
 | 外部观察倒退终态 | 迟到 webhook/轮询覆盖取消或超时 | revision+CAS、终态吸收、divergence 与人工对账 |
 | AI 或 MCP 越权 | 模型文本触发白名单外工具/泄露 | Tool Router、Policy Gate、分类、注入套件、kill switch、MCP 默认关闭 |
 | 大报告/AI 拖垮控制面 | API 进程解析、队列无隔离 | 独立 Worker、分片、配额、公平队列、降级顺序 |
-| Temporal 选型过早 | 未验证升级/恢复/值班却成为依赖 | 条件 POC，同场景对比保底；失败即退出 |
+| Temporal 选型与生产就绪混淆 | 未验证升级/恢复/值班却直接放量 | Accepted 只关闭产品选择；八项生产 Gate 未通过即阻断放量 |
 | 数据/Artifact/备份泄露 | 跨租户对象、旧 URL、恢复后数据复活 | 私有存储、短期授权、全层 tenant、删除/Hold 重放、隔离恢复测试 |
 | GPL 源码污染 | 引入或改写 TestHub 实现 | 只借机制，依赖/来源审查；依据 `../08_prd/prd.md:72` |
 
@@ -513,7 +530,7 @@ ADR 之间的依赖关系见 `adr/README.md:26` 至 `adr/README.md:32`；任何�
 
 | # | 问题 | 建议 Owner | 阻塞点 |
 | --- | --- | --- | --- |
-| Q1 | Temporal 托管/自托管候选、POC 结果、成本、值班与最终运行时 | 平台架构师 + SRE + 安全 | 工作流产品定稿；当前不得宣称完成 |
+| Q1 | Temporal 托管/自托管、POC 原始证据归档、Worker Versioning、成本、RPO/RTO 与值班方案 | 平台架构师 + SRE + 安全 | 生产就绪 Gate；不影响已接受的运行时选择 |
 | Q2 | GateEvaluation `not_evaluated + reason` 是否获上游批准 | QA + 产品 + 架构 | 门禁统计与 Release 汇聚长期模型 |
 | Q3 | L2 持续授权的合格动作、scope、有效期、撤销传播和承载位置 | 安全 + 集成 Owner | CI trigger/Check Run 自动化上线 |
 | Q4 | ProjectMember 权威拆分、Jira 候选映射与离职/调岗撤权 SLA | 安全 + IdP/Jira Owner | RBAC 定稿 |
@@ -531,7 +548,7 @@ ADR 之间的依赖关系见 `adr/README.md:26` 至 `adr/README.md:32`；任何�
 
 ## 20. 验证计划
 
-后续实现与评审必须以证据验证本 Draft，而不是只做文档评审：
+后续实现与评审必须以证据验证本文，而不是只做文档评审：
 
 1. **架构依赖**：禁止模块引用其他模块私有仓储/ORM；禁止 Worker 直写控制面；删除测试证明模块接口有实际封装价值。
 2. **状态机属性**：从问题模型的可校验契约生成测试；非法迁移拒绝、终态吸收、过期保持 WAITING_APPROVAL、STOPPING 可收敛 TIMEOUT；不维护手写边数断言。
@@ -544,17 +561,17 @@ ADR 之间的依赖关系见 `adr/README.md:26` 至 `adr/README.md:32`；任何�
 9. **文件与数据**：类型伪造、zip bomb、XXE、路径穿越、恶意文件、URL 泄露、Restricted 出站、Confidential 缓存、恢复后删除复活均被阻断。
 10. **报告与门禁**：重复/乱序 chunk、解析中断与 partial；agent 无评估；缺配/partial/CANCELLED/TIMEOUT 无 GateEvaluation+reason 且绝不默认通过；历史评估不可变。
 11. **AI/Agent**：所有调用有 AIInvocationLog；schema/evidence_refs 失败 fallback；白名单外工具、模型伪造批准和注入副作用 100% 阻断；checkpoint 丢失/重放不改变业务事实。
-12. **Temporal 条件 POC**：按第 15.1 节八项与 Celery+PG 保底做同场景对比；保留原始实测、成本和恢复证据；未通过不选 Temporal。
+12. **Temporal 生产就绪**：验证 Outbox relay 启动/Signal 去重、Workflow determinism、Activity 幂等、Worker Versioning、备份恢复、容量、成本和运维；保留原始 POC/实测证据，未通过不得放量。
 13. **MCP 分期**：M0–M3 依赖与能力扫描证明未启用；M4 若获批，验证只读、跨租户、注入、egress、审计、kill switch 和退出条件。
-14. **容量与降级**：按 Draft 负载、突发、单租户占用、大报告和对象增长压测；过载不得阻塞取消、kill switch、审计或证据写入。
+14. **容量与降级**：按当前假设负载、突发、单租户占用、大报告和对象增长压测；过载不得阻塞取消、kill switch、审计或证据写入。
 15. **备份恢复**：隔离环境恢复 PG/S3/Vault/工作流；验证摘要、tenant、删除/Hold、在途流程和外部副作用去重；RPO/RTO 未批准前不放量。
 16. **可观测与事故**：Trace 串联 request→run→approval→connector/model；敏感字段扫描；演练 P1 告警、即时关停、审批恢复、取证和 SIEM。
 17. **人工接管**：等待 run 取消、审批重提、Check Run 重推、Connector reconcile、Release 对账、环境停用、heal rollback 和证据包导出均可由显式命令完成并留审计。
 
 验证 Gate 可进一步消费 [安全运维分册](03_security_reliability_and_operations.md) 的 G-01 至 G-16（`03_security_reliability_and_operations.md:520` 至 `03_security_reliability_and_operations.md:541`）。
 
-## 21. Draft 收口声明
+## 21. 收口声明
 
-本文形成唯一后端集成推荐：**模块化单体控制面 + 独立 Worker；PostgreSQL 业务权威；Outbox/Inbox 与业务幂等吸收至少一次；审批/持续授权/Policy Gate 管理副作用；S3 保存制品；Vault 保存秘密；AI 只在受限节点；Temporal 条件 POC；LangGraph 限 Agent/Copilot；M0–M3 不采用 MCP、M4 只读 POC 候选。**
+本文形成唯一后端集成推荐：**模块化单体控制面 + Temporal 持久工作流 + 隔离 Activity Worker；PostgreSQL 业务权威；Outbox relay 幂等启动/Signal；Outbox/Inbox、execution intent 与业务幂等吸收至少一次；审批/持续授权/Policy Gate 管理副作用；S3 保存制品；Vault 保存秘密；AI 只在受限节点；LangGraph 限 Agent/Copilot；M0–M3 不采用 MCP、M4 只读 POC 候选。**
 
-本文仍为 **Status: Draft**。8 份 ADR 仍全部 **Proposed**；Temporal POC 未完成；所有 Proposed 冲突处置、TBD 数值、供应商、依赖和部署方式均不得被实现者擅自视为已批准。任何新增对象、状态、枚举、字段或对冻结语义的修改，必须先走上游变更流程。
+本文为 **Status: 已定稿**。ADR 0001/0002 为 Accepted，0003–0008 仍为 Proposed；Temporal 架构选型已完成但生产 Gate 未完成。所有其余 Proposed 冲突处置、TBD 数值、供应商、依赖、托管方式和部署参数均不得被实现者擅自视为已批准。任何新增对象、状态、枚举、字段或对冻结语义的修改，必须先走上游变更流程。

@@ -14,7 +14,7 @@
 2. 对 `docs/` 执行文件、图片和 HTTP 外链扫描；对 `docs/05_prototype/` 额外执行目录与 Git 跟踪状态核对。
 3. 不访问网络。第 5 节只登记 Lead 已核对的官方链接与结论，不声称本次会话重新抓取或验证了网页内容。
 4. 不读取仓库外 `opensource-product-analysis`、`competitor-src` 或其 `references/`、`competitors/` 内容；凡上游仅指向这些材料的结论，均标为“源仓库引用不可复核”。
-5. 本文的“采用”只表示 Draft 架构采用边界；Temporal 与 MCP M4 均仍是条件 POC，不构成依赖、部署或产品承诺。
+5. 本文原始“采用”表示 Draft 架构边界；2026-08-29 后 Temporal 选型以 Accepted ADR 0002 为准，但仍不构成依赖、部署或生产放量授权。MCP M4 继续只是条件 POC。
 
 ## 1. 实际读取输入清单
 
@@ -56,7 +56,7 @@
 | `frontend_backend_boundary_spec-v1.0.md` | 全文 | 复核后端权威边界、`param_hash`/行锁/幂等和外部访问约束 |
 | `01_domain_and_service_architecture.md` | 全文 | 横向核对模块、Worker、事务/消息与开放问题；其自身为 Draft，不作为上游事实源 |
 | `02_api_workflow_and_review.md` | 全文 | 横向核对 LangGraph/MCP 分期与 API/审批边界；其自身为 Draft |
-| `03_security_reliability_and_operations.md` | 全文 | 横向核对 Temporal POC 运维 Gate、LangGraph/MCP 安全边界；其自身为 Draft |
+| `03_security_reliability_and_operations.md` | 全文 | 横向核对 Temporal 生产运维 Gate、LangGraph/MCP 安全边界；其自身为 Draft |
 | `04_architecture_review.md` | 全文 | 修订阶段消费独立 finding-first 审查与验收项；其结论是 Draft 审查建议，不是批准 |
 
 ### 1.4 未作为输入读取的文件
@@ -86,12 +86,12 @@
 | F-02 | Agent 动态性限于单用例步骤层，每个工具动作经 Tool Router + Policy Gate | `../README.md:182`、`../README.md:184`、`../README.md:186` | LangGraph 节点恢复后仍需重新经过平台治理。 |
 | F-03 | ApprovalRequest 是独立领域对象，绑定 `param_hash`、四眼、独立 TTL，并用行锁单次消费 | `../03_problem_modeling/problem_model.md:28`、`../03_problem_modeling/problem_model.md:193`、`../03_problem_modeling/problem_model.md:195`、`../03_problem_modeling/problem_model.md:197`、`../03_problem_modeling/problem_model.md:199` | interrupt/checkpoint/resume 不得替代审批事实、anti-TOCTOU 或并发控制。 |
 | F-04 | 审批消费前重算哈希、重校验权限，失败也审计 | `../04_interaction_design/chains/c2_approval_chain.md:127`、`../04_interaction_design/chains/c2_approval_chain.md:130`、`../04_interaction_design/chains/c2_approval_chain.md:181`、`../04_interaction_design/chains/c2_approval_chain.md:235` | LangGraph/Temporal 只协调等待与唤醒，放行仍由后端 ApprovalRequest 事务完成。 |
-| F-05 | TestRun 有 10 态；WAITING_* 是可长期等待态，审批过期不自动放行 | `../03_problem_modeling/problem_model.md:150`、`../03_problem_modeling/problem_model.md:173`、`../03_problem_modeling/problem_model.md:178`、`../03_problem_modeling/problem_model.md:184` | Temporal POC 必须无损映射业务状态，不能以引擎内部状态替代 TestRun。 |
+| F-05 | TestRun 有 10 态；WAITING_* 是可长期等待态，审批过期不自动放行 | `../03_problem_modeling/problem_model.md:150`、`../03_problem_modeling/problem_model.md:173`、`../03_problem_modeling/problem_model.md:178`、`../03_problem_modeling/problem_model.md:184` | Temporal Workflow/Activity 必须无损映射业务状态，不能以引擎内部状态替代 TestRun。 |
 | F-06 | 故障重启不得重复副作用，外部写要求幂等键、external request id、响应快照与补偿 | `../README.md:336`、`../README.md:374` | Temporal Activity 的至少一次执行语义必须由业务幂等与对账吸收。 |
 | F-07 | Redis 不得成为工作流/审批等唯一事实源；跨模块消息至少一次且消费者必须幂等 | `01_domain_and_service_architecture.md:95`、`01_domain_and_service_architecture.md:97`、`01_domain_and_service_architecture.md:467` | durable engine、消息总线和 checkpoint 都是协调设施，不是业务事实替代物。 |
 | F-08 | 租户隔离和 RBAC 在后端/工具层强制，跨租户不泄露存在性 | `../03_problem_modeling/problem_model.md:97`、`../README.md:328`、`../README.md:334` | MCP host/client/server 或 tool schema 不构成授权边界；每次调用仍需 tenant/RBAC。 |
 | F-09 | AuditEvent append-only，外部写与失败操作均需可追溯 | `../03_problem_modeling/problem_model.md:30`、`../03_problem_modeling/problem_model.md:244`、`../04_interaction_design/chains/c2_approval_chain.md:227` | 任一框架事件、resume 或 MCP 调用都必须关联平台审计，而非只留框架日志。 |
-| F-10 | Temporal 当前仅为 POC，Celery + 自建状态机 + 幂等纪律是保底 | `../01_market_research/market_research.md:136`、`../README.md:339`、`../08_prd/prd.md:360` | 不能在 POC Gate 前写成定稿依赖或生产部署结论。 |
+| F-10 | 上游原始输入将 Temporal 列为 POC、Celery 为保底；2026-08-29 已由 Accepted ADR 0002 收口为 Temporal | `../01_market_research/market_research.md:136`、`../README.md:339`、Accepted ADR 0002 | 可指导运行时设计，但不能写成已批准依赖、部署或生产放量结论。 |
 | F-11 | LangGraph 只作单点受限推理节点，不作业务工作流 | `../01_market_research/market_research.md:137` | 采用 interrupt/checkpoint/streaming 也不扩大其职责。 |
 | F-12 | 一期不做 MCP 对外暴露，M4 才评估 | `../08_prd/prd.md:73`、`../08_prd/prd.md:303` | M0-M3 不采用；M4 只读 POC 仍需专项批准。 |
 
@@ -100,9 +100,9 @@
 | ID | 类型 | 内容 | 依据或来源 | 架构影响 / 处置 |
 | --- | --- | --- | --- | --- |
 | T-01 | 事实 | LangGraph 仅用于 Agent/Copilot 受限推理；interrupt/checkpoint/resume 不替代 ApprovalRequest、四眼、`param_hash`、TTL、行锁和审计 | Lead 已核对官方结论；F-01 至 F-04、F-09、F-11 | 将 LangGraph 定位为推理/交互适配层；恢复前必须查询平台事实并重新鉴权。 |
-| T-02 | 事实 | Temporal durable workflow 适配长等待和恢复，但 Activity 至少一次，外部副作用必须业务幂等 | Lead 已核对官方结论；F-05、F-06、F-10 | 仅进入条件 POC；TestRun/ApprovalRequest/PostgreSQL 仍为业务事实源。 |
+| T-02 | 事实 | Temporal durable workflow 适配长等待和恢复，但 Activity 至少一次，外部副作用必须业务幂等 | Lead 已核对官方结论；F-05、F-06、F-10 | 已接受为持久运行时；TestRun/ApprovalRequest/PostgreSQL 仍为业务事实源。 |
 | T-03 | 事实 | MCP 的 tools/resources/prompts 与 host/client/server 是协议边界，不是权限、审批或租户隔离 | Lead 已核对官方结论；F-08、F-09、F-12 | M4 只读 POC 也必须经 Tool Router、tenant/RBAC、审计和 kill switch。 |
-| T-04 | 假设 | 团队能运维 Temporal 的持久库、Worker 版本升级、可观测、备份恢复和在途工作流兼容 | 当前无 POC 实测；`03_security_reliability_and_operations.md:418` 至 `03_security_reliability_and_operations.md:427` | 未通过运维 Gate 则采用 Celery + PostgreSQL 权威状态机保底。 |
+| T-04 | 假设 | 团队能运维 Temporal 的持久库、Worker 版本升级、可观测、备份恢复和在途工作流兼容 | 用户确认适配 POC 完成，但原始实测未随本次修订提供；生产 Gate 见安全运维分册 §13 | 未通过运维 Gate 则阻断放量并新建替代 ADR。 |
 | T-05 | 假设 | LangGraph checkpoint 可按租户加密、清理，并满足 Agent/Copilot 恢复 SLO | 当前无实现/POC；`02_api_workflow_and_review.md:768` | checkpoint 只存最小上下文或受控引用；不得含 secret/Restricted 原文。 |
 | T-06 | 假设 | M4 存在明确只读 MCP 用例，且内部服务契约不能更简单地满足需求 | 当前只有愿景，无需求基线和用户验证 | POC 前先证明具体消费者、价值、白名单与退出条件；否则继续不采用。 |
 | T-07 | 冲突 | README 描述 MCP 双向生态位与 M4 能力，而 PRD 明确一期不做 | `../README.md:290`、`../README.md:351`；`../08_prd/prd.md:73` | 以分期兼容：M0-M3 不采用，M4 仅只读 POC 候选，不将愿景当承诺。 |
@@ -110,7 +110,7 @@
 | T-09 | 冲突 | C1 把 release prepare 标为 L3，建模冻结表标为 L4 | `../04_interaction_design/chains/c1_north_star_quality_loop.md:278`；`../03_problem_modeling/problem_model.md:220` | 任何引擎/协议 POC 不碰 Release 写；后续按最高事实源与变更流程裁定。 |
 | T-10 | 缺失 | `docs/05_prototype/` 当前无可读文件，无法核对原型表现 | 第 2 节本地扫描结果 | 不阻塞本研究 Draft；阻塞 Stage 5/6 跨阶段 UX 一致性确认。 |
 | T-11 | 缺失 | 源仓库 references/competitors 与竞品源码快照当前不可复核 | `../README.md:8`、`../02_competitor_analysis/competitor_analysis.md:7` | 竞品论据只作上游索引，不作为本次新增的源码级证据。 |
-| T-12 | 缺失 | Temporal POC 的部署模式、持久化、namespace/task queue、history retention、RPO/RTO 和成本未定 | `03_security_reliability_and_operations.md:414`、`03_security_reliability_and_operations.md:435` | 未补齐不得定稿 Temporal。 |
+| T-12 | 缺失 | Temporal POC 原始证据以及部署模式、持久化、namespace/task queue、history retention、RPO/RTO 和成本未归档/批准 | 安全运维分册 §13、Accepted ADR 0002 | 不影响架构选型；未补齐不得生产放量。 |
 | T-13 | 缺失 | MCP M4 只读 POC 的工具白名单、试点 tenant、认证映射、退出标准和协议版本未定 | `02_api_workflow_and_review.md:769`、`03_security_reliability_and_operations.md:501` | M4 专项评审前保持关闭，不引入 SDK/依赖。 |
 | T-14 | 缺失 | LangGraph checkpoint 的数据分类、保留/删除、加密与恢复 SLO 未定 | `02_api_workflow_and_review.md:768` | Agent/Copilot 技术评审前不得把 checkpoint 当持久化承诺。 |
 | T-15 | 架构影响 | 三项技术均不能改变平台的后端权威边界 | `frontend_backend_boundary_spec-v1.0.md:17` 至 `frontend_backend_boundary_spec-v1.0.md:23` | 框架/协议适配器必须位于既有命令、Policy Gate、ApprovalRequest、Connector 与 AuditEvent 之外侧。 |
@@ -130,13 +130,15 @@
 
 ### 5.2 Temporal
 
+> **2026-08-29 状态更新**：用户已完成适配 POC 并批准采用 Temporal；选型以 Accepted ADR 0002 为准。下表保留原始研究问题与生产 Gate，不再表示 Temporal 尚未选定。
+
 | ID | 问题 | 官方链接 | Lead 核对结论 | 项目影响 | 采用 / 不采用理由 | POC |
 | --- | --- | --- | --- | --- | --- | --- |
-| TP-01 | durable workflow 是否适配长审批、长轮询和重启恢复？ | [Workflows](https://docs.temporal.io/workflows) | Workflow 适合持久、可恢复、长时间运行的协调逻辑。 | 与 WAITING_APPROVAL/WAITING_EXTERNAL、外部轮询和恢复需求匹配；但 TestRun/ApprovalRequest 仍是业务事实源。 | **条件采用**：表达力匹配 F-05/F-06；仅在 POC 证明无损状态映射、可运维和可恢复后定稿。 | 以 external_ci + 审批等待为代表流程，分别重启 API、Worker、Temporal 和数据库，验证不丢等待、不重复副作用。 |
+| TP-01 | durable workflow 是否适配长审批、长轮询和重启恢复？ | [Workflows](https://docs.temporal.io/workflows) | Workflow 适合持久、可恢复、长时间运行的协调逻辑。 | 与 WAITING_APPROVAL/WAITING_EXTERNAL、外部轮询和恢复需求匹配；但 TestRun/ApprovalRequest 仍是业务事实源。 | **已采用**：用户 POC 确认表达力匹配 F-05/F-06；生产运维仍需独立 Gate。 | 以 external_ci + 审批等待为代表流程，分别重启 API、Worker、Temporal 和数据库，验证不丢等待、不重复副作用。 |
 | TP-02 | Activity 的交付/重试语义对外部副作用有何约束？ | [Activities](https://docs.temporal.io/activities)；[Retry Policies](https://docs.temporal.io/encyclopedia/retry-policies)；[Idempotency](https://docs.temporal.io/activity-definition#idempotency) | Activity 可能至少一次执行并受重试策略驱动；外部副作用必须业务幂等，不能假设框架 exactly-once。 | Jira issue、CI Job、Check Run、Release item、通知等必须使用稳定幂等键、external_request_id、查询后重试和补偿；压测/Agent 禁止自动重试的业务规则仍有效。 | **采用 Activity，拒绝“框架保证不重复”假设**：Temporal 提供恢复机制，但业务幂等才满足 F-06。 | 对每类外部写注入“请求成功但响应丢失”、Activity 超时、Worker 崩溃和重复投递；外部对象数量必须保持 1，未知结果先查询。 |
 | TP-03 | Signal/Update 等消息机制能否承接审批、取消和外部回调？ | [Sending Messages](https://docs.temporal.io/sending-messages) | Workflow 可接收外部消息以推进长流程；消息到达不自动等于业务授权或状态迁移。 | 可作为 ApprovalRequest 结果、取消、webhook 规范化后的唤醒通道；处理前仍需读平台事实、校验版本和幂等。 | **采用协调信号，不采用授权信号**：避免把消息来源或到达顺序误当有效审批。 | 重复、乱序、过期 Signal；ApprovalRequest 已 EXPIRED/REJECTED 后的批准消息不得执行；终态 TestRun 不得被迟到消息重开。 |
-| TP-04 | Worker 升级如何兼容长期在途工作流？ | [Worker Versioning](https://docs.temporal.io/worker-versioning) | 长流程要求 Worker 版本演进兼容历史执行。 | POC 必须覆盖新旧 Worker 并存、回滚和旧 history；不得通过清空在途任务解决升级。 | **条件采用**：没有版本治理就不满足长等待生产运维要求。 | 启动旧版本长等待 workflow，部署新 Worker、回滚并恢复；业务状态与外部副作用保持一致。 |
-| TP-05 | 自托管/部署运维是否在团队能力边界内？ | [Self-hosted deployment](https://docs.temporal.io/self-hosted-guide/deployment) | 自托管涉及持久化、服务拓扑、升级、容量、可观测、备份恢复和安全运维。 | Temporal 不能只按开发 API 选型；部署方式、RPO/RTO、证书、namespace/task queue 权限和成本均是 Gate。 | **不直接采用生产部署**：先完成 T-04/T-12；失败则走 Celery + PostgreSQL 状态机保底，安全标准不降低。 | 比较托管/自托管/保底方案的恢复演练、值班技能、资源成本和升级复杂度，形成可批准结论。 |
+| TP-04 | Worker 升级如何兼容长期在途工作流？ | [Worker Versioning](https://docs.temporal.io/worker-versioning) | 长流程要求 Worker 版本演进兼容历史执行。 | 生产 Gate 必须覆盖新旧 Worker 并存、回滚和旧 history；不得通过清空在途任务解决升级。 | **选型已采用，生产受限**：没有版本治理不得放量。 | 启动旧版本长等待 workflow，部署新 Worker、回滚并恢复；业务状态与外部副作用保持一致。 |
+| TP-05 | 自托管/部署运维是否在团队能力边界内？ | [Self-hosted deployment](https://docs.temporal.io/self-hosted-guide/deployment) | 自托管涉及持久化、服务拓扑、升级、容量、可观测、备份恢复和安全运维。 | Temporal 不能只按开发 API 选型；部署方式、RPO/RTO、证书、namespace/task queue 权限和成本均是 Gate。 | **架构采用、部署未批准**：先完成 T-04/T-12；失败则停止放量并新建替代 ADR。 | 比较托管/自托管方案的恢复演练、值班技能、资源成本和升级复杂度，形成可批准结论。 |
 
 ### 5.3 MCP
 
@@ -157,8 +159,8 @@
 | LangGraph interrupt/resume | 不用于审批中心 | 不用于普通任务 | Agent L2+ bridge 候选 | Copilot bridge 候选 | 延续 | **受限采用候选**；只暂停/恢复图，必须绑定平台 ApprovalRequest。 |
 | LangGraph checkpoint/persistence | POC 前不承诺 | 同左 | 仅 Agent 恢复 POC | Copilot 会话恢复候选 | 按数据治理评审 | **受限采用候选**；不是业务事实源，数据治理 T-14 未闭环前不定稿。 |
 | LangGraph streaming | 不需要 | A1 可用既有异步/SSE | Agent 进度候选 | Copilot 输出候选 | 延续 | **采用展示能力候选**；GET/领域资源仍权威。 |
-| Temporal durable workflow | 条件 POC | POC 通过后才可用于 TestRun/外部 CI | 延续 | 长审批/Release 候选 | 延续 | **仅条件采用**；POC 未通过则 Celery + PostgreSQL 权威状态机保底。 |
-| Temporal Activity | 随 POC | 随引擎决定 | 延续 | 延续 | 延续 | 即使采用也按至少一次设计；外部副作用必须业务幂等、查询后重试、可补偿。 |
+| Temporal durable workflow | 建立运行时基座与生产 Gate | 用于 TestRun/外部 CI | 延续 | 长审批/Release | 延续 | **已采用**；PostgreSQL 仍为业务权威，生产放量受恢复/版本/容量/成本/运维 Gate 约束。 |
+| Temporal Activity | 隔离 Task Queue 设计 | 执行器/连接器/报告/AI 按需接入 | 延续 | 延续 | 延续 | 按至少一次设计；外部副作用必须业务幂等、查询后重试、可补偿。 |
 | MCP client/server | **不采用** | **不采用** | **不采用** | **不采用** | **仅只读 POC 候选** | 不开放写工具，不替代内部 Connector/Tool Router，不作为对外承诺。 |
 | MCP tools | 不采用 | 不采用 | 不采用 | 内部白名单工具不用 MCP | L0 只读 POC 候选 | 每次调用仍经 tenant/RBAC、schema、Policy Gate、审计、kill switch。 |
 | MCP resources | 不采用 | 不采用 | 不采用 | 不采用 | 只读资源 POC 候选 | 不能替代 EvidenceObject、ACL 或数据分类。 |
@@ -180,9 +182,11 @@
 
 **退出**：若需要把业务状态复制进 checkpoint 才能正确运行，或无法证明 tenant 清理/重复恢复安全，则不采用 LangGraph persistence；保留普通受限模型调用与平台自有状态机。
 
-### 7.2 Temporal POC
+### 7.2 Temporal 选型证据与生产 Gate
 
-**范围**：一个 external_ci 长轮询流程 + 一个 WAITING_APPROVAL 长等待流程；覆盖 Activity、Signal/Update、Worker 版本和恢复演练。
+**状态**：用户已确认适配 POC 完成并批准选型；原始测试数据尚未随本次修订提供，因此本文不虚构通过项。以下验证从“选型前条件”转为“证据归档与生产放量 Gate”。
+
+**范围**：external_ci 长轮询、WAITING_APPROVAL 长等待、Activity、Signal/Update、Worker Versioning 和恢复演练。
 
 **必须通过**：
 
@@ -193,9 +197,9 @@
 5. Worker 新旧版本兼容在途流程，可回滚，不清空 history；
 6. tenant/actor/classification/request hash 传播并在执行点重校验，secret 不进入 history；
 7. 备份恢复、可观测、权限、容量、成本和值班能力有实测证据；
-8. 与 Celery + PostgreSQL 保底方案按同一混沌、幂等、安全 Gate 比较。
+8. 归档相对 Celery + PostgreSQL 自建方案的选择依据，并证明 Temporal 没有降低混沌、幂等和安全标准。
 
-**退出**：任何恢复重复副作用、旧流程无法升级、secret 进入 history、RPO/RTO/值班无法承担，均不定稿 Temporal，切换保底方案且不降低 Gate。
+**阻断/替代**：任何恢复重复副作用、旧流程无法升级、secret 进入 history、RPO/RTO/值班无法承担，均阻断生产放量；如无法修复，必须新建 ADR 重评托管方式或替代运行时，且不得降低 Gate。
 
 ### 7.3 MCP M4 只读 POC
 
@@ -219,9 +223,9 @@
 | --- | --- | --- | --- | --- |
 | Q-01 | 确认 Stage 5 原型资产为何当前无可读文件，是否需要恢复或重新批准替代输入 | 原型 Owner + Lead | Stage 6 总评审前 | 原型与架构跨阶段一致性确认 |
 | Q-02 | 批准 LangGraph interrupt/checkpoint POC 的最小场景、数据保留/删除、加密和恢复 SLO | Agent/Copilot 技术 Owner + 安全 | M2 Agent 试点前 | LangGraph persistence/interrupt 定稿 |
-| Q-03 | Temporal POC 的托管/自托管候选、RPO/RTO、namespace/task queue、history retention、成本和值班责任 | 平台架构师 + SRE + 安全 | M0 第 4 周 | Temporal 选型 Gate；对齐 `../08_prd/prd.md:360` |
-| Q-04 | 为 CI/Jira/GitHub/Release 各动作冻结幂等键、external_request_id 查询和补偿契约 | 集成 Owner + 各外部系统 Owner | 相应 Connector contract test 前，最迟 M1 | Temporal/Celery 两方案的副作用安全 |
-| Q-05 | 处理“审批过期”旧交互图与建模层冲突 | 产品 + 领域建模 Owner | Stage 7 API/状态机契约冻结前 | POC 状态映射；本文暂服从建模层 |
+| Q-03 | Temporal POC 原始证据归档、托管/自托管、RPO/RTO、namespace/task queue、history retention、成本和值班责任 | 平台架构师 + SRE + 安全 | M0 第 4 周 | Temporal 生产就绪 Gate；选型已由 ADR 0002 接受 |
+| Q-04 | 为 CI/Jira/GitHub/Release 各动作冻结幂等键、external_request_id 查询和补偿契约 | 集成 Owner + 各外部系统 Owner | 相应 Connector contract test 前，最迟 M1 | Temporal Activity 的副作用安全 |
+| Q-05 | 处理“审批过期”旧交互图与建模层冲突 | 产品 + 领域建模 Owner | Stage 7 API/状态机契约冻结前 | Temporal 状态映射；本文暂服从建模层 |
 | Q-06 | 处理 release prepare L3/L4 冲突 | 安全 + Release Owner + 产品 | M3 Release 设计前 | Release Policy Gate；当前 POC 禁止触碰写入 |
 | Q-07 | 明确 MCP M4 只读 POC 的用户场景、工具/资源白名单、试点 tenant、协议版本和退出指标 | M4 产品 Owner + 安全 + 架构师 | M4 立项评审前 | 是否启动 MCP POC |
 | Q-08 | 完成 MCP SDK/依赖 License、供应链与安全通告审计；未经批准不得引入依赖 | 架构师 + 安全 + 法务/依赖 Owner | MCP POC 依赖变更前 | MCP POC 实施 |
@@ -232,7 +236,7 @@
 
 1. 任何同目录分册不得把 LangGraph 描述为平台业务工作流引擎，或把 checkpoint/interrupt 当作 ApprovalRequest、TestRun、审计、权限和租户事实源。
 2. 任何 Temporal 方案必须明确 Activity 至少一次和业务幂等，不得使用“durable/exactly once”措辞淡化外部副作用重复风险。
-3. Temporal 只能在 POC Gate 后由 Draft/TBD 升级为定稿；此前架构必须保留 Celery + PostgreSQL 权威状态机的可行保底。
+3. Temporal 已由 Accepted ADR 0002 定稿为持久运行时；后续分册必须区分“选型已接受”和“生产 Gate 未完成”，不得用前者替代恢复、版本、安全、容量和运维验证。
 4. M0-M3 不得引入 MCP SDK、传输、server/client 或对外协议承诺；M4 仅允许经过批准的只读 POC。
 5. MCP tools/resources/prompts、host/client/server、授权协议均不得替代平台 tenant/RBAC、Policy Gate、ApprovalRequest、EvidenceObject 或 AuditEvent。
 6. 所有框架/协议适配器只能调用既有后端命令、查询和连接器端口，不得直写领域私有表或绕过业务状态机。
@@ -244,6 +248,6 @@
 ## 11. Draft 结论
 
 - **LangGraph**：采用范围限定为 Agent/Copilot 受限推理及可选 interrupt/checkpoint/streaming 适配；永不替代 ApprovalRequest、四眼、`param_hash`、TTL、行锁、tenant/RBAC、审计或 TestRun。
-- **Temporal**：只进入条件 POC；durable workflow 与长等待匹配，但 Activity 至少一次，所有外部副作用必须由业务幂等、查询后重试、external_request_id 和补偿保证。POC 未通过即使用 Celery + PostgreSQL 权威状态机保底。
+- **Temporal**：已接受为持久工作流运行时；durable workflow 与长等待匹配，但 Activity 至少一次，所有外部副作用必须由业务幂等、查询后重试、external_request_id、unknown 结果和补偿/人工接管保证。生产 Gate 未通过即阻断放量并新建替代 ADR。
 - **MCP**：M0-M3 不采用；M4 仅只读 POC 候选。tools/resources/prompts 与 host/client/server/authorization 不能替代平台权限、审批、租户隔离、Evidence 或审计。
 - **输入完整性**：仓库内核心建模和交互事实可复核；`docs/05_prototype/` 当前无可读文件、无图片，仓库上游无 HTTP 外链，源仓库 references/competitors 不可复核，均已显式登记，不用推测补齐。

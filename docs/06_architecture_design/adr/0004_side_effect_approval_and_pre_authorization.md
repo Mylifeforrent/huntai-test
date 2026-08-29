@@ -18,7 +18,7 @@
 5. 持续授权不是永久授权：入口、队列消费、工作流恢复、审批 consume、Connector 调用和 Tool 调用都必须复核当前成员、职能资格、目标、参数、有效期、撤销和 kill switch（`../03_security_reliability_and_operations.md:84`、`../03_security_reliability_and_operations.md:96`）。
 6. 单次 ApprovalRequest 绑定服务端 Preview 的完整参数哈希、九要素、发起人和目标版本；四眼、权限、哈希和目标版本在批准与消费时重校验，批准只可消费一次（`../../03_problem_modeling/problem_model.md:193`、`../../03_problem_modeling/problem_model.md:199`、`../02_api_workflow_and_review.md:500`、`../02_api_workflow_and_review.md:514`）。
 7. `APPROVED` 只表示人已批准。消费事务必须在行锁内原子创建以 `approval_request_id + bound_hash` 唯一标识的基础设施执行意图与 Outbox；重复消费返回同一执行引用，不创建第二个意图，也不提前写 EXECUTED。该意图不是新领域对象。
-8. Worker 领取唯一意图并使用稳定外部幂等键；首次真实调用已发出后，才由控制面写 `EXECUTED + execution_result=ok/failed`。调用前崩溃可重领同一意图；调用后响应丢失或落账前崩溃先查询 external_request_id/幂等结果；失败后不得静默再次消费同一批准（`../02_api_workflow_and_review.md:226`、`../02_api_workflow_and_review.md:235`、`../02_api_workflow_and_review.md:553`、`../02_api_workflow_and_review.md:560`）。
+8. execution intent 至少区分 `READY / CLAIMED / DISPATCHING / CONFIRMED_OK / CONFIRMED_FAILED / UNKNOWN / ABANDONED`。Worker 在网络调用前持久化 DISPATCHING，使用稳定外部幂等键调用；首次真实调用已发出后，由控制面写 `EXECUTED + execution_result=ok/failed/unknown`。READY/CLAIMED 崩溃可重领；DISPATCHING/UNKNOWN 或落账前崩溃先查询 external_request_id/幂等结果；unknown 不得按失败盲重试或按成功放行（`../02_api_workflow_and_review.md:226`、`../02_api_workflow_and_review.md:235`、`../02_api_workflow_and_review.md:553`、`../02_api_workflow_and_review.md:560`）。
 9. 本 ADR 不批准持续授权的有效期、再认证窗口、自动动作清单或新领域对象；这些均保持 TBD/Proposed，且不得将预授权实现成绕过 ApprovalRequest 的隐藏通道（`../01_domain_and_service_architecture.md:522`、`../01_domain_and_service_architecture.md:524`）。
 
 ## Alternatives
@@ -47,12 +47,12 @@
 2. 收口动作注册表：级别、Preview、审批/再认证、幂等、补偿、目标白名单和持续授权资格。
 3. 统一 Release prepare 命名和文案，避免出现“平台执行发布”的含义；若要改为 L3，必须走上游变更。
 4. 由安全、集成 Owner 定义 scope、有效期、撤销传播和复核周期；所有数值保持 TBD（`../01_domain_and_service_architecture.md:631`）。
-5. 由审批与集成 Owner 冻结基础设施 execution intent 的唯一键、领取租约、调用前/后崩溃恢复和人工接管协议；若需要新增业务字段或状态，先走上游变更。
+5. 由审批与集成 Owner 在实现契约中冻结已接受的 execution intent 状态、唯一键、领取租约、调用前/后崩溃恢复和人工接管协议；若需要新增其他业务字段或状态，先走上游变更。
 
 ## Verification
 
 - 策略表测试覆盖 L0–L4、未声明动作、白名单外目标、L3+ 再认证和 L4 实际发布 DENY（`../../08_prd/prd.md:111`、`../03_security_reliability_and_operations.md:529`）。
-- 并发与崩溃点测试证明 ApprovalRequest 双 consume 只产生一个 execution intent；调用前/后崩溃、响应丢失、Outbox 重投和人工重提不会产生第二个外部效果，参数/权限/版本变化使审批失效。
+- 并发与崩溃点测试证明 ApprovalRequest 双 consume 只产生一个 execution intent；调用前/后崩溃、响应丢失、Outbox/Activity 重投和人工重提不会产生第二个外部效果；无法确认时稳定收敛为 unknown 并阻断自动放行，参数/权限/版本变化使审批失效。
 - 撤销/过期测试证明旧持续授权在队列恢复和 Connector 调用前被拒绝（`../03_security_reliability_and_operations.md:528`）。
 - Release 测试证明只能 prepare、可幂等对账，任何实际生产发布请求均被拒绝（`../03_security_reliability_and_operations.md:533`、`../03_security_reliability_and_operations.md:534`）。
 - 审计测试证明拒绝、审批、消费成功/失败和自动授权动作均可追溯（`../02_api_workflow_and_review.md:700`、`../02_api_workflow_and_review.md:713`）。

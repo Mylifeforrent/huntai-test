@@ -1,7 +1,7 @@
-# 前后端功能边界规范（frontend_backend_boundary_spec · v1.0）
+# 前后端功能边界规范（frontend_backend_boundary_spec · v1.1）
 
 > - **Status: Draft**
-> - **日期**：2026-08-25 · **版本**：v1.0
+> - **日期**：2026-08-29 · **版本**：v1.1
 > - **流程定位**：Stage 6（系统架构设计）**前后端边界分册**——收口「前端职责 / 后端职责 / 数据与逻辑归属 / API 调用与错误边界」；与同目录 [frontend_design_spec-v1.0.md](frontend_design_spec-v1.0.md)（前端分册：页面 / 组件 / 状态呈现）、[architecture.md](architecture.md)（后端架构骨架）共同构成 Stage 6 产出
 > - **上游输入**：[problem_model.md](../03_problem_modeling/problem_model.md)（下称 **05**：§1.1 领域对象 23 个 / §2 状态机全集 / §3 FR×对象 CRUD 矩阵 / §4.2 25 页 IA / §5 A1–A8——唯一建模事实源）· [interaction_flows.md](../04_interaction_design/interaction_flows.md) 及 [chains/](../04_interaction_design/chains/)（下称 **06 / C1–C4**：页面流 / 分支异常 / 审批与副作用点 / 证据落点）· [frontend_design_spec-v1.0.md](frontend_design_spec-v1.0.md)（P01–P25 编号 / §1 职责边界 / §5 本地交互清单）
 > - **下游消费者**：[07_backend_design](../07_backend_design/README.md)（API 契约设计的直接输入——本文 §2 输入/输出语义 + §7 错误类别）· Stage 10 AI 上下文 · Stage 11 前端实现 · Stage 12 后端实施
@@ -78,8 +78,8 @@
 | 功能/操作 | 用户动作 | 前端职责 | 后端职责 | 输入 | 输出 | 状态变化 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 审批队列与卡片渲染 | 浏览待审批列表 / 批量队列 | 九要素卡片分区渲染（顺序冻结，05 §4.3 约束 1）；批量队列 UI；超时升级提示；发起人本人「批准」置灰（四眼**呈现**）；参数失效红色警示条 | 队列查询；card_payload 九要素组装（动作 / 资源 / diff / 数据来源与模型 Skill 版本 / 风险等级 / 成本估计 / 回滚能力 / 参数哈希）；四眼校验（服务端强制） | 查询条件（含审批人视角） | ApprovalRequest 列表 + card_payload | —（只读） |
-| 批准 / 拒绝 / 修改后重新提交 | 三键操作（拒绝附理由；重新提交携带修改参数） | 操作区三键；理由输入；重新提交表单；结果回显（EXECUTED / REJECTED / EXPIRED） | PENDING→APPROVED / REJECTED 迁移 + 审计；重新提交 = **新** ApprovalRequest（新 param_hash、initiator_id=重新提交人、保留 origin_request_id 归因链）；四眼违例拒绝并留痕 | request_id、决定、理由 / 修改参数 | ApprovalRequest 状态 + execution_result | ApprovalRequest：PENDING→APPROVED / REJECTED（05 §2.3） |
-| 执行前复核与执行（系统） | 无（系统：批准后自动） | —（结果回显于发起页） | anti-TOCTOU：Execute 参数哈希重算 + 权限重校验；consume 行锁事务原子创建唯一基础设施 execution intent + Outbox，不提前写 EXECUTED；重复 consume 返回同一执行引用；Worker 以稳定幂等键执行，调用前崩溃重领同一意图，调用后结果未知先按 external_request_id 查询；首次真实尝试后写 EXECUTED + execution_result；失败需重新发起审批 | — | 执行引用；外部写结果 {status, resource_refs, evidence, external_request_id, warnings} | ApprovalRequest：APPROVED→EXECUTED；按 action_ref 联动：perf_high_risk / agent_tool_action → TestRun：WAITING_APPROVAL→RUNNING；release_push → ReleaseTask：PENDING_CONFIRM→SUBMITTED；env_register → ExecutionEnvironment：PENDING_APPROVAL→ACTIVE；jira_write / heal_apply 无 TestRun 联动（run 已终态） |
+| 批准 / 拒绝 / 修改后重新提交 | 三键操作（拒绝附理由；重新提交携带修改参数） | 操作区三键；理由输入；重新提交表单；结果回显（EXECUTED / REJECTED / EXPIRED；unknown 显示“结果待对账”） | PENDING→APPROVED / REJECTED 迁移 + 审计；重新提交 = **新** ApprovalRequest（新 param_hash、initiator_id=重新提交人、保留 origin_request_id 归因链）；四眼违例拒绝并留痕 | request_id、决定、理由 / 修改参数 | ApprovalRequest 状态 + execution_result | ApprovalRequest：PENDING→APPROVED / REJECTED（05 §2.3） |
+| 执行前复核与执行（系统） | 无（系统：批准后自动） | —（结果回显于发起页） | anti-TOCTOU：Execute 参数哈希重算 + 权限重校验；consume 行锁事务原子创建唯一基础设施 execution intent + Outbox，不提前写 EXECUTED；重复 consume 返回同一执行引用；intent 使用 READY/CLAIMED/DISPATCHING/CONFIRMED_*/UNKNOWN/ABANDONED；Worker 以稳定幂等键执行，DISPATCHING/UNKNOWN 先按 external_request_id 查询；首次真实尝试后写 EXECUTED + execution_result=ok/failed/unknown；failed 重新审批，unknown 进入对账/人工接管 | — | 执行引用；外部写结果 {status, resource_refs, evidence, external_request_id, warnings} | ApprovalRequest：APPROVED→EXECUTED；仅 `execution_result=ok` 可触发 action_ref 的成功联动：perf_high_risk / agent_tool_action → TestRun：WAITING_APPROVAL→RUNNING；release_push → ReleaseTask：PENDING_CONFIRM→SUBMITTED；env_register → ExecutionEnvironment：PENDING_APPROVAL→ACTIVE；failed/unknown 均不得自动推进目标聚合，按领域处置或人工对账；jira_write / heal_apply 无 TestRun 联动（run 已终态） |
 | 审批 TTL / 升级 / 失效（系统） | 无（系统；发起人经通知感知） | 临期 / 已过期卡片高亮；「审批已失效」红色警示 | expires_at 独立 TTL；到期升级通知 escalate_to（**不自动放行**）；仍未处理→EXPIRED；撤回 / 上游取消 / 审批后参数变更→EXPIRED + reason（withdrawn / invalidated）+ 审计；关联 TestRun **过期停留 WAITING_APPROVAL**（仅拒绝 / 人工取消走 CANCELLED） | — | 状态与通知 | ApprovalRequest：PENDING→EXPIRED；TestRun 停留 WAITING_APPROVAL（05 §2.2 裁定 5） |
 
 ### 2.6 失败分诊（FR-06/07/10 · C4 · P09/P13 · M1/M2）
@@ -351,3 +351,4 @@
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v1.0 | 2026-08-25 | 首版：基于 05 v1.3（23 对象 / 五状态机 / 25 页 / CRUD 矩阵）、06 v1.1 + C1–C4（页面流 / 分支异常 / 审批与副作用点）、frontend_design_spec v1.0（P01–P25）收口——边界判定七原则、14 模块功能边界总表（七列口径）、数据归属（后端供给 11 类 / 前端本地 / 六条红线）、逻辑归属（后端专属 16 项 / 前端 10 项 / 双层 7 项）、API 调用边界（必调 8 类 / 纯本地清单）、成功判定 16 项（以后端为准）、三类错误边界与呈现纪律；缺口 6 项上报 |
+| v1.1 | 2026-08-29 | 架构复审同步：execution intent 增加 DISPATCHING/UNKNOWN 恢复语义，ApprovalRequest 执行结果明确为 ok/failed/unknown；只有 ok 可推进目标聚合，unknown 必须显示待对账并禁止盲重试或成功放行。 |

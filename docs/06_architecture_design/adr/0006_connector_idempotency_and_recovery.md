@@ -12,10 +12,10 @@ Connector 回调只能形成外部观察，不能直接拥有 TestRun、ReleaseT
 ## Decision
 
 1. **Proposed：所有 Jira/GitHub/CI/Release 连接器遵循统一 Connector Contract。** 组成包括 Auth、Resource Reader、Action Provider、Webhook Adapter、Health Check、RateLimit-Retry、Data Mapper、Permission Mapper；Action 声明 sideEffectLevel、Preview、Idempotency、Compensation，凭证只存引用，写前比较 ETag/版本（`../../01_market_research/market_research.md:70`、`../../01_market_research/market_research.md:73`、`../../08_prd/prd.md:228`、`../../08_prd/prd.md:231`）。
-2. ApprovalRequest 消费事务在行锁内完成当前授权、参数哈希和目标版本复核，并原子创建以 `approval_request_id + bound_hash` 唯一标识的基础设施 execution intent 与同事务 Outbox；重复 consume 返回同一执行引用。该记录不是新领域对象，不使 ApprovalRequest 提前进入 EXECUTED。本地事务不发远程请求；连接器结果先经 Inbox 去重/归一化，再以目标模块命令推进 ApprovalRequest 与目标聚合。
+2. ApprovalRequest 消费事务在行锁内完成当前授权、参数哈希和目标版本复核，并原子创建以 `approval_request_id + bound_hash` 唯一标识的基础设施 execution intent 与同事务 Outbox；重复 consume 返回同一执行引用。该记录不是新领域对象，不使 ApprovalRequest 提前进入 EXECUTED。intent 至少区分 `READY / CLAIMED / DISPATCHING / CONFIRMED_OK / CONFIRMED_FAILED / UNKNOWN / ABANDONED`；本地事务不发远程请求，连接器结果先经 Inbox 去重/归一化，再以目标模块命令推进 ApprovalRequest 与目标聚合。
 3. Outbox 至少一次发布；消费者以 event_id 在 Inbox 原子登记，并把消费记录与自身业务写放在同一事务。命令处理器和消费者必须重复安全，不能以“消息只投一次”为正确性前提（`../01_domain_and_service_architecture.md:462`、`../01_domain_and_service_architecture.md:467`）。
 4. 受理幂等候选 scope 为 tenant + command/action type + idempotency key，并保存请求哈希和结果引用；同 key 同 hash 返回既有结果，同 key 不同 hash 拒绝冲突（`../01_domain_and_service_architecture.md:448`、`../01_domain_and_service_architecture.md:453`）。
-5. Worker 只领取唯一 execution intent，并固定保存 stable idempotency key、external_request_id、目标版本与响应摘要。首次真实调用已发出后，才以控制面命令写 `EXECUTED + execution_result`；调用前崩溃重领同一意图，调用后响应丢失或落账前崩溃先查询外部结果，确认不存在后才按契约重试，不盲目重复创建（`../01_domain_and_service_architecture.md:239`、`../03_security_reliability_and_operations.md:264`、`../03_security_reliability_and_operations.md:274`）。
+5. Worker 只领取唯一 execution intent，并固定保存 stable idempotency key、external_request_id、目标版本与响应摘要；在网络调用前持久化 DISPATCHING。首次真实调用已发出后，以控制面命令写 `EXECUTED + execution_result=ok/failed/unknown`；READY/CLAIMED 崩溃可重领，DISPATCHING/UNKNOWN 或落账前崩溃先查询外部结果。只有提供方能证明请求不存在且契约允许时才重试；既不支持幂等创建也不能查询时保持 unknown、fail-close 并转人工接管（`../01_domain_and_service_architecture.md:239`、`../03_security_reliability_and_operations.md:264`、`../03_security_reliability_and_operations.md:274`）。
 6. webhook 对原始请求字节强制验签并做 tenant/connector/resource 归属校验；delivery id 为首选去重键，无稳定 ID 时使用 connector、event type、resource、revision 和 canonical payload hash（`../01_domain_and_service_architecture.md:469`、`../01_domain_and_service_architecture.md:475`）。
 7. webhook 与持久轮询映射为同一 ExternalObservation 语义：先到且版本较新的观察可触发聚合命令，重复/同版本忽略，较晚/较旧观察只对账和审计；轮询游标持久化（`../01_domain_and_service_architecture.md:469`、`../01_domain_and_service_architecture.md:475`、`../02_api_workflow_and_review.md:385`、`../02_api_workflow_and_review.md:394`）。
 8. 终态吸收：迟到外部成功不能重开 CANCELLED/TIMEOUT 或已结束 ReleaseTask；可追加标记为 late 的结果、Artifact、Evidence 和 divergence 审计，需要新命令/新 run/重评估才可继续（`../01_domain_and_service_architecture.md:477`、`../01_domain_and_service_architecture.md:487`）。
@@ -46,14 +46,14 @@ Connector 回调只能形成外部观察，不能直接拥有 TestRun、ReleaseT
 
 1. 为每个外部系统建立能力清单：幂等创建、按 request id 查询、ETag/revision、webhook delivery id、取消和补偿。
 2. 定义 versioned Connector Contract 与 contract test；供应商差异通过适配器显式表达，不在领域模块中分叉。
-3. 明确 execution intent、Outbox/Inbox、ExternalObservation、游标和 divergence 的基础设施数据归属、唯一键、领取租约与恢复协议；本 ADR 不提供 DDL 或迁移。
+3. 在实现契约中落实已接受的 execution intent 状态、Outbox/Inbox、ExternalObservation、游标和 divergence 的基础设施数据归属、唯一键、领取租约与恢复协议；本 ADR 不提供 DDL 或迁移。
 4. Release、Jira、GitHub、CI Owner 分别批准重试预算、限流和人工对账 runbook。
 
 ## Verification
 
 - contract test 覆盖 Preview、幂等、查询后重试、HMAC、revision、ETag、补偿、rate limit 和迟到状态（`../01_domain_and_service_architecture.md:651`）。
 - 混沌测试覆盖 Outbox 重发、Inbox 重复、webhook/轮询乱序、API/Worker 重启和网络未知结果，不产生重复副作用（`../01_domain_and_service_architecture.md:648`、`../03_security_reliability_and_operations.md:534`）。
-- 崩溃点测试覆盖双 consume、调用前崩溃、调用后响应丢失、结果落账前崩溃和人工重提，证明只存在一个 execution intent，Approval/Audit 状态不虚假。
+- 崩溃点测试覆盖双 consume、调用前崩溃、调用后响应丢失、结果落账前崩溃和人工重提，证明只存在一个 execution intent；不可判定结果稳定进入 unknown，Approval/Audit 不虚假且不会自动放行。
 - 安全测试覆盖 HMAC 绕过、重放、SSRF、DNS rebinding、metadata、TLS 和跨租户归属（`../03_security_reliability_and_operations.md:534`）。
 - 迟到事件测试证明终态不重开，外部状态分叉产生 Evidence/Audit 和人工对账入口（`../01_domain_and_service_architecture.md:481`、`../01_domain_and_service_architecture.md:509`）。
 

@@ -46,7 +46,7 @@
 
 ### 2.1 推荐：模块化单体控制面 + 独立 Worker
 
-**Draft 推荐**：同步控制面采用模块化单体；持久工作流、执行器、连接器、报告和 AI 分别作为独立 Worker 运行。选择依据是内部规模、共享治理需求、长任务恢复要求和执行面隔离要求：平台规模为企业内部、用户规模有限，见 `../README.md:14`、`../README.md:16`；执行面与治理面必须分离，见 `../README.md:46`；Playwright 执行器必须独立于 API 进程，见 `../08_prd/prd.md:124`；持久工作流要求故障重启不重复副作用，见 `../README.md:336`、`../08_prd/prd.md:269`。
+**已接受的架构输入**：同步控制面采用模块化单体，持久工作流采用 Temporal；Workflow Worker 只运行确定性编排，执行器、连接器、报告和 AI 作为隔离 Activity Worker/Task Queue 或明确的普通 Outbox Consumer 运行。选择依据是内部规模、共享治理需求、长任务恢复要求和执行面隔离要求：平台规模为企业内部、用户规模有限，见 `../README.md:14`、`../README.md:16`；执行面与治理面必须分离，见 `../README.md:46`；Playwright 执行器必须独立于 API 进程，见 `../08_prd/prd.md:124`；持久工作流要求故障重启不重复副作用，见 `../README.md:336`、`../08_prd/prd.md:269`。选型状态见 Accepted ADR 0001/0002；本分册其余细节仍为 Draft。
 
 ```mermaid
 flowchart LR
@@ -63,16 +63,20 @@ flowchart LR
       CP --> AIG[AI 治理与助手]
       CP --> EVI[结果、报告与证据]
     end
-    CP --> DB[(事务数据与 Outbox)]
+    CP --> DB[(PostgreSQL 业务事实与 Outbox)]
     CP --> OBJ[(制品存储)]
-    DB --> BUS[(任务队列 / 事件总线)]
-    BUS --> WF[独立工作流 Worker]
-    BUS --> EXE[独立执行器 Worker]
-    BUS --> CON[独立连接器 Worker]
-    BUS --> REP[独立报告 Worker]
-    BUS --> AIW[独立 AI Worker]
-    WF --> CP
+    DB --> RELAY[Outbox Relay]
+    RELAY --> TS[Temporal Server]
+    RELAY --> SIMPLE[普通 Outbox Consumer]
+    TS --> WF[Workflow Worker]
+    TS --> EXE[执行器 Activity Worker]
+    TS --> CON[连接器 Activity Worker]
+    TS --> REP[报告 Activity Worker]
+    TS --> AIW[AI Activity Worker]
     EXE --> CP
+    CON --> CP
+    REP --> CP
+    AIW --> CP
     CON --> EXT[Jira / GitHub / CI / Release]
     REP --> OBJ
     AIW --> MGW[企业模型网关]
@@ -81,20 +85,29 @@ flowchart LR
 | 运行单元 | 主要职责 | 明确禁止 |
 | --- | --- | --- |
 | 模块化单体控制面 | 同步命令、查询、RBAC/租户、Policy Gate、状态机、聚合事务、Outbox、工作台投影 | 执行浏览器、压测、长轮询、超大报告解析或直接调用模型厂商 SDK |
-| 工作流 Worker | 恢复 TestRun、审批等待、外部轮询、Release 等长流程；按命令推进聚合 | 直接更新模块私有表；绕过命令处理器决定业务状态 |
-| 执行器 Worker | 接口/Web/性能确定性执行和 Agent 受限执行；心跳、终止确认、制品上传 | 持有审批裁决权；把内存状态作为唯一终止信号 |
-| 连接器 Worker | Jira/GitHub/CI/Release 外部 I/O、轮询、webhook 规范化、重试和补偿 | 直接修改 TestRun、ReleaseTask、GateEvaluation；绕过 Connector 动作契约 |
-| 报告 Worker | 报告分片、适配、归一化、脱敏、结果入库命令和显式 partial | 自行判门禁、改 TestRun 终态或静默截断失败条目 |
-| AI Worker | A1–A8 调用、Schema 校验、fallback、AIInvocationLog、证据引用校验 | 决定工作流控制流、审批、重试幂等、权限或直接执行外部写 |
+| Temporal Server | 持久保存 workflow history、Timer、Signal 和 Task Queue 调度 | 作为 TestRun/ApprovalRequest 等业务状态源 |
+| Workflow Worker | 以确定性代码恢复 TestRun、审批等待、外部轮询、Release 等长流程；调度 Activity | 直接执行网络/数据库 I/O；绕过命令处理器决定业务状态 |
+| 执行器 Activity Worker | 接口/Web/性能确定性执行和 Agent 受限执行；心跳、终止确认、制品上传 | 持有审批裁决权；把内存状态作为唯一终止信号 |
+| 连接器 Activity Worker | Jira/GitHub/CI/Release 外部 I/O、轮询、webhook 规范化、重试和补偿 | 直接修改 TestRun、ReleaseTask、GateEvaluation；绕过 Connector 动作契约 |
+| 报告 Activity Worker | 报告分片、适配、归一化、脱敏、结果入库命令和显式 partial | 自行判门禁、改 TestRun 终态或静默截断失败条目 |
+| AI Activity Worker | A1–A8 调用、Schema 校验、fallback、AIInvocationLog、证据引用校验 | 决定工作流控制流、审批、业务重试幂等、权限或直接执行外部写 |
 
 Worker 回写控制面的唯一方式是已登记命令；跨模块通知的唯一方式是已登记事件。该约束落实“模型不决定业务控制流”和“副作用可归因”，见 `../README.md:45`、`../README.md:47`，也落实前端与外部系统不得绕过后端的边界，见 `frontend_backend_boundary_spec-v1.0.md:18`、`frontend_backend_boundary_spec-v1.0.md:20`。
 
 ### 2.2 数据与一致性形态
 
-- Draft 起步采用一个事务数据库集群，但按模块私有 schema/仓储隔离；共享数据库不等于共享表。业务模块只能通过公开命令、查询接口或事件读取其他模块事实。
+- 起步采用一个事务数据库集群，但按模块私有 schema/仓储隔离；共享数据库不等于共享表。业务模块只能通过公开命令、查询接口或事件读取其他模块事实。
 - Redis 只用于缓存、限流、短租约或调度提示，不作为工作流、审批、终止信号或幂等记录的唯一事实源；上游已明确 Redis 不作工作流唯一状态，见 `../08_prd/prd.md:221`。
 - Artifact、截图、视频、Trace、报告原件和证据包进入对象存储；事务记录只保存受控引用。既有存储分工见 `../08_prd/prd.md:221`。
-- 模块内强一致使用单本地事务；跨模块流程使用 Outbox + Inbox + 持久工作流达成至少一次投递、幂等消费和最终一致，不使用跨模块分布式事务。
+- 不使用跨进程分布式事务；一致性按下表选择，不能把所有模块协作机械地改成消息，也不能让同一业务步骤同时由普通 Consumer 与 Temporal 调度。
+
+| 场景 | 一致性与机制 | 约束 |
+| --- | --- | --- |
+| 单聚合写入 | 模块私有 PostgreSQL 本地事务 | 同时写 Audit append 请求与 Outbox |
+| 同进程只读或无独立生命周期的校验 | 公开查询/领域端口同步调用 | 不共享 ORM 实体或私有仓储 |
+| 提交后通知、投影、单步可重建任务 | Outbox + Inbox/幂等 Consumer | 无 Timer/Signal/多步补偿需求 |
+| 长等待、取消、外部轮询、多步补偿 | Outbox relay + Temporal Workflow/Activity | PostgreSQL 为业务权威；workflow_id/event_id 去重 |
+| 跨模块独立聚合变更 | 已登记命令 + Outbox，必要时 Temporal saga | 明确中间态、补偿和人工接管；不伪装原子提交 |
 
 ### 2.3 替代方案
 
@@ -103,7 +116,7 @@ Worker 回写控制面的唯一方式是已登记命令；跨模块通知的唯�
 | **A. 模块化单体控制面 + 独立 Worker（推荐）** | 当前内部规模；状态机与治理规则共享；执行负载异构 | 聚合事务简单；策略一致；Worker 可独立扩展与隔离；较少网络契约 | 必须严守模块私有表和依赖规则，否则会退化为耦合单体 |
 | B. 全部微服务 | 团队边界稳定、各域有独立 SLO/容量、跨服务事件治理成熟后 | 故障与容量隔离更强；独立发布 | 早期分布式事务、事件版本、可观测和本地开发成本高；23 对象关系尚在冲突收口期，不宜立即固化服务边界 |
 | C. 单进程单体含全部异步任务 | 仅 POC 或极低负载 | 最少运行单元 | 执行器、长轮询、报告和 AI 会争抢 API 资源；进程重启丢任务，直接违背独立执行器和持久恢复要求 |
-| D. 控制面模块化单体 + 托管持久工作流引擎 | 工作流 POC 证明可运维且团队接受其约束 | 审批等待、轮询、重放与补偿表达更直接 | 引擎选型尚为 TBD；PRD 明确要求先做 POC，见 `../08_prd/prd.md:360`，因此本文不将具体引擎标为已决定 |
+| D. Celery + PostgreSQL 自建持久编排 | Temporal 无法满足生产 Gate，且新 ADR 批准替换 | 团队可能更熟悉；基础组件较少 | 需自建可靠 Timer、Signal、历史、版本演进、恢复和可见性；本轮未选用 |
 
 ## 3. 系统上下文、控制面与执行面
 
@@ -232,9 +245,9 @@ flowchart TB
 
 ### 5.3 特殊事务边界
 
-**审批消费与异步执行协议**：批准、领取和真实尝试是三个不同事实。`APPROVED` 只表示人已批准；消费事务锁定 ApprovalRequest，重算参数哈希、重校验权限、目标版本、持续授权与 kill switch，并原子创建以 `(approval_request_id, bound_hash)` 唯一标识的**基础设施执行意图**及同事务 Outbox。执行意图不是领域对象、不新增状态，也不把 ApprovalRequest 提前写成 EXECUTED。重复 consume 返回既有执行引用，不创建第二个意图。Worker 领取意图后使用稳定外部幂等键执行；首次真实调用已发出后，才通过控制面命令把 ApprovalRequest 写成 `EXECUTED + execution_result=ok/failed`。上游已明确 EXECUTED 表示“已尝试”而非必然成功，见 `../03_problem_modeling/problem_model.md:199`、`../03_problem_modeling/problem_model.md:205`。
+**审批消费与异步执行协议**：批准、领取和真实尝试是三个不同事实。`APPROVED` 只表示人已批准；消费事务锁定 ApprovalRequest，重算参数哈希、重校验权限、目标版本、持续授权与 kill switch，并原子创建以 `(approval_request_id, bound_hash)` 唯一标识的**基础设施执行意图**及同事务 Outbox。执行意图不是领域对象、不新增 ApprovalRequest 状态，也不把 ApprovalRequest 提前写成 EXECUTED。重复 consume 返回既有执行引用，不创建第二个意图。execution intent 至少区分 `READY / CLAIMED / DISPATCHING / CONFIRMED_OK / CONFIRMED_FAILED / UNKNOWN / ABANDONED`：Worker 在远程调用前持久化 DISPATCHING；获得确定响应后写 CONFIRMED_OK/CONFIRMED_FAILED；调用已可能发出但无法确认结果时写 UNKNOWN。首次真实调用已发出后，控制面把 ApprovalRequest 写成 `EXECUTED + execution_result=ok/failed/unknown`。上游已明确 EXECUTED 表示“已尝试”而非必然成功，见 `../03_problem_modeling/problem_model.md:199`、`../03_problem_modeling/problem_model.md:205`。
 
-恢复规则必须与运行时产品无关：调用前崩溃可重新领取同一意图；调用后响应丢失或落账前崩溃先按 external_request_id/稳定幂等键查询外部结果，再决定记录 ok、failed 或继续对账，禁止创建第二个意图或盲目重发；Outbox 重投只唤醒同一意图；人工重提必须创建新的 ApprovalRequest，旧意图继续按原 request 对账，不得授权新参数。若外部系统既不支持幂等创建也不能按请求标识查询，该动作不得自动恢复，只能 fail-close 并转人工接管。
+恢复规则不依赖 workflow 重放提供 exactly-once：READY/CLAIMED 且尚未进入 DISPATCHING 时崩溃可重新领取同一意图；DISPATCHING/UNKNOWN 或结果落账前崩溃先按 external_request_id/稳定幂等键查询外部结果，再确认 ok、failed 或保持 unknown，禁止创建第二个意图或盲目重发；Outbox/Temporal Activity 重投只唤醒同一意图；人工重提必须创建新的 ApprovalRequest，旧意图继续按原 request 对账，不得授权新参数。若外部系统既不支持幂等创建也不能按请求标识查询，UNKNOWN 不得自动重试，只能 fail-close 并转人工接管。
 
 **heal_apply**：Draft 推荐在批准后、消费行锁与 TestCase 版本 CAS 已持有时，立即创建应用前版本快照，并在同一外层事务内以保存点执行“快照 → 新版本 → 指针切换”；快照或应用失败回滚资产写入，但在外层事务将 ApprovalRequest 记为 `EXECUTED + failed`。这样同时满足 fail-close、一次消费与失败需重新审批。来源冲突及替代方案见第 13.7 节。
 
@@ -280,7 +293,7 @@ TestRun 使用 10 态：PENDING、VALIDATING、RUNNING、WAITING_EXTERNAL、WAIT
 | CREATED | Policy Gate 输出 REQUIRE_APPROVAL 后创建的瞬时态 |
 | PENDING | 已入审批队列、已通知审批人、独立 TTL 启动 |
 | APPROVED | 人已批准，但副作用尚未被一次消费成功锁定/尝试 |
-| EXECUTED | 已尝试执行；以 execution_result=ok/failed 表示结果，不等同“成功” |
+| EXECUTED | 已尝试执行；以 execution_result=ok/failed/unknown 表示已确认成功、已确认失败或结果不可判定，不等同“成功” |
 | REJECTED | 审批人明确拒绝；执行中 TestRun 可转 CANCELLED |
 | EXPIRED | TTL 到期、撤回、上游取消或参数失效；不自动放行 |
 
@@ -365,19 +378,19 @@ Draft 兼容规则：
 
 | 异步任务 | Worker | 幂等 / 恢复检查点 |
 | --- | --- | --- |
-| `ProjectMirrorSync` | 连接器 Worker | Jira cursor + external revision |
-| `ApprovalExpiryAndEscalation` | 工作流 Worker | request_id + escalation stage；不自动放行 |
-| `EnvironmentHealthProbe` | 连接器 Worker | env_id + probe window；状态 CAS |
-| `RunDispatchAndRecovery` / `ExecutorHeartbeatReaper` | 工作流 Worker | run_id + workflow step/attempt；run version + last heartbeat |
-| `ExternalCiTrigger` / `ExternalCiPoll` | 连接器 Worker | run idempotency key + external request id；build revision/status cursor |
-| `ArtifactAndLogChunkPull` | 连接器 Worker | artifact/chunk manifest key |
-| `ReportNormalize` | 报告 Worker | run + report + chunk index/schema version |
-| `FailureTriage` | AI/报告 Worker | run + normalized result version + prompt version |
-| `GateEvaluate` / `GitHubCheckRunSync` | 工作流/连接器 Worker | run + policy/result version；evaluation + phase |
-| `ReleaseEvidenceRefresh` / `ReleasePrepareAndReconcile` | 工作流/连接器 Worker | task + evidence version；release idempotency key + external request id |
-| `EvidencePackageBuild` | 报告 Worker | export request + manifest version |
-| `AiInvocation` | AI Worker | invocation id + prompt/model/skill versions |
-| `OutboxPublish` / `InboxReconcile` | 基础 Worker | message id；至少一次投递、重复安全 |
+| `ProjectMirrorSync` | 连接器 Activity Worker | Jira cursor + external revision |
+| `ApprovalExpiryAndEscalation` | Temporal Workflow/Activity | request_id + escalation stage；不自动放行 |
+| `EnvironmentHealthProbe` | 连接器 Activity Worker | env_id + probe window；状态 CAS |
+| `RunDispatchAndRecovery` / `ExecutorHeartbeatReaper` | Temporal Workflow/Activity | run_id + workflow step/attempt；run version + last heartbeat |
+| `ExternalCiTrigger` / `ExternalCiPoll` | 连接器 Activity Worker | run idempotency key + external request id；build revision/status cursor |
+| `ArtifactAndLogChunkPull` | 连接器 Activity Worker | artifact/chunk manifest key |
+| `ReportNormalize` | 报告 Activity Worker | run + report + chunk index/schema version |
+| `FailureTriage` | AI/报告 Activity Worker | run + normalized result version + prompt version |
+| `GateEvaluate` / `GitHubCheckRunSync` | Temporal/连接器 Activity Worker | run + policy/result version；evaluation + phase |
+| `ReleaseEvidenceRefresh` / `ReleasePrepareAndReconcile` | Temporal/连接器 Activity Worker | task + evidence version；release idempotency key + external request id |
+| `EvidencePackageBuild` | 报告 Activity Worker | export request + manifest version |
+| `AiInvocation` | AI Activity Worker | invocation id + prompt/model/skill versions |
+| `OutboxPublish` / `InboxReconcile` | Outbox relay / 基础 Consumer | message id；至少一次投递、重复安全 |
 
 ### 7.4 事件目录
 
@@ -390,7 +403,7 @@ Draft 兼容规则：
 | 执行环境 | `ExecutionEnvironmentRegistered`、`ExecutionEnvironmentActivated`、`ExecutionEnvironmentDegraded`、`ExecutionEnvironmentDisabled` |
 | 执行编排 | `TestRunAccepted`、`TestRunValidationFailed`、`TestRunDispatched`、`TestRunWaitingExternal`、`TestRunWaitingApproval`、`TestRunCancellationRequested`、`TestRunStopped`、`TestRunSucceeded`、`TestRunFailed`、`TestRunTimedOut` |
 | 结果/证据 | `ResultChunkIngested`、`ReportNormalized`、`ReportMarkedPartial`、`FailureClustersCreated`、`FailureClusterCorrected`、`EvidenceAppended`、`AuditEventAppended` |
-| 审批/策略 | `ApprovalRequested`、`ApprovalApproved`、`ApprovalRejected`、`ApprovalExpired`、`ApprovedActionExecuted`、`ApprovedActionFailed`、`PolicyDecisionRecorded` |
+| 审批/策略 | `ApprovalRequested`、`ApprovalApproved`、`ApprovalRejected`、`ApprovalExpired`、`ApprovedActionExecuted`、`ApprovedActionFailed`、`ApprovedActionOutcomeUnknown`、`PolicyDecisionRecorded` |
 | 门禁 | `GatePolicyRevised`、`GateEvaluationCreated`、`GateWaiverRequested`、`GateWaiverApplied`、`CheckRunSyncFailed` |
 | 发布 | `ReleaseTaskCreated`、`ReleaseEvidencePrepared`、`ReleasePrepareSubmitted`、`ReleaseItemReady`、`ReleasePrepareFailed`、`ReleaseTaskCancelled`、`ReleaseExternalStateDiverged` |
 | 集成 | `ConnectorRevised`、`WebhookAccepted`、`WebhookDuplicateIgnored`、`ExternalActionSubmitted`、`ExternalActionReconciled` |
@@ -402,12 +415,12 @@ Draft 兼容规则：
 
 链路范围由 `../04_interaction_design/interaction_flows.md:11` 定义；一期 Confluence/RAG 入口和回流后置，实际以导入与证据包承接，见 `../README.md:38`。
 
-1. 测试资产模块接收导入；AI Worker 生成默认不落库草稿并记录 AIInvocationLog；人工保存后才创建 TestCase DRAFT。
+1. 测试资产模块接收导入；AI Activity Worker 生成默认不落库草稿并记录 AIInvocationLog；人工保存后才创建 TestCase DRAFT。
 2. TestCase 通过 DRAFT→PENDING_REVIEW→ACTIVE；事务提交发 `TestCaseActivated`。
-3. 执行编排读取 ACTIVE 用例版本、ACTIVE 环境与配额，单事务创建 TestRun PENDING、冻结 snapshot、写 Outbox；工作流 Worker 依 C3 调度。
-4. 报告 Worker 分片归一化；结果模块发 `ReportNormalized`；C4 生成 FailureCluster 和 Evidence。
-5. 质量门禁消费合格终态与完整结果，生成不可变 GateEvaluation；连接器 Worker 同步 GitHub Check Run，失败不回滚门禁事实。
-6. 用户从 FailureCluster 发起 jira_write；C2 完成审批后，连接器 Worker 幂等创建 Jira issue，Evidence 记录 external_request_id。
+3. 执行编排读取 ACTIVE 用例版本、ACTIVE 环境与配额，单事务创建 TestRun PENDING、冻结 snapshot、写 Outbox；relay 幂等启动 Temporal Workflow。
+4. 报告 Activity Worker 分片归一化；结果模块发 `ReportNormalized`；C4 生成 FailureCluster 和 Evidence。
+5. 质量门禁消费合格终态与完整结果，生成不可变 GateEvaluation；连接器 Activity Worker 同步 GitHub Check Run，失败不回滚门禁事实。
+6. 用户从 FailureCluster 发起 jira_write；C2 完成审批后，连接器 Activity Worker 幂等创建 Jira issue，Evidence 记录 external_request_id。
 7. Release 模块冻结 Jira 范围，汇聚计划、门禁、性能和缺陷证据；A5 只生成草稿；release_push 经 C2 后调用 prepare，外部状态回传推进 ReleaseTask。
 8. EvidenceObject 和 AuditEvent 全程 append；一期构建证据包供人工归档，M4 机制未获建模前不自动写 Confluence。
 
@@ -419,7 +432,7 @@ Draft 兼容规则：
 2. REQUIRE_APPROVAL 时，审批模块创建 CREATED→PENDING，绑定 param_hash 和九要素卡片；审批 TTL 与 TestRun 心跳完全分离。
 3. 批准命令只推进 PENDING→APPROVED；拒绝推进 REJECTED，并按 action_ref 发联动事件。
 4. Action Executor 以 request_id 消费：锁行、复核四眼/权限/哈希/目标版本/开关，并原子创建唯一基础设施执行意图与 Outbox；重复消费返回同一执行引用。
-5. Worker 领取该意图并以稳定幂等键执行；首次真实尝试后，成功或失败都经控制面命令进入 EXECUTED，写 execution_result、AuditEvent 和结果 Outbox。未知外部结果先查询后落账。
+5. Activity Worker 领取该意图并以稳定幂等键执行；首次真实尝试后，经控制面命令进入 EXECUTED，写 ok/failed/unknown、AuditEvent 和结果 Outbox。unknown 先查询并持续对账，不自动推进目标聚合。
 6. TTL 到期推进 EXPIRED；若关联 TestRun 在 WAITING_APPROVAL，保持等待、告警并提供重新提交/人工取消。
 
 原始主时序和行锁要求见 `../04_interaction_design/chains/c2_approval_chain.md:106` 至 `../04_interaction_design/chains/c2_approval_chain.md:143`、`../04_interaction_design/chains/c2_approval_chain.md:176` 至 `../04_interaction_design/chains/c2_approval_chain.md:182`。
@@ -428,8 +441,8 @@ Draft 兼容规则：
 
 1. manual/schedule/ci_webhook/api_token 触发先规范化为 `StartTestRun`；租户、角色/Token、用例、模式×环境、配额和白名单在控制面复核。
 2. PENDING 冻结 snapshot；VALIDATING 解析双层变量、Job Schema 和 Job 存在性；失败直接 FAILED，不派发。
-3. Script × 平台执行器：工作流 Worker 下发不可变快照，执行器回传心跳、结果和制品。
-4. Script × external_ci：连接器 Worker 用 run 幂等键触发，进入 WAITING_EXTERNAL；轮询与 webhook 先到者经同一 Inbox 去重，构建开始后回 RUNNING。
+3. Script × 平台执行器：Temporal Workflow 调度执行器 Activity Worker 使用不可变快照，执行器回传心跳、结果和制品。
+4. Script × external_ci：连接器 Activity Worker 用 run 幂等键触发，进入 WAITING_EXTERNAL；轮询与 webhook 先到者经同一 Inbox 去重，构建开始后回 RUNNING。
 5. Agent × 平台执行器：每一步经 Tool Router + Policy Gate；L2+ 进入 C2；超步/总超时主动 STOPPING→CANCELLED，进程失联 RUNNING/STOPPING→TIMEOUT。
 6. 终态发事件给 C4 和门禁；CANCELLED/TIMEOUT 已产生结果仍可归一化和分诊，但不重开 run。
 
@@ -438,7 +451,7 @@ Draft 兼容规则：
 ### 8.4 C4 失败分诊链
 
 1. SUCCEEDED/FAILED 且含失败结果是主入口；CANCELLED/TIMEOUT 的已入库失败结果为旁路入口，见 `../04_interaction_design/chains/c4_failure_triage.md:24`、`../04_interaction_design/chains/c4_failure_triage.md:25`。
-2. 报告 Worker 先确定性归一化和脱敏，再由 AI Worker 运行 A2；Schema 或证据引用失败按既有 fallback，不能让 AI 失败阻塞平台报告。
+2. 报告 Activity Worker 先确定性归一化和脱敏，再由 AI Activity Worker 运行 A2；Schema 或证据引用失败按既有 fallback，不能让 AI 失败阻塞平台报告。
 3. FailureCluster 随 run 生成；人工修正走命令并 append correction history/AuditEvent，不回写原 AIInvocationLog。
 4. jira_write 和 heal_apply 都从终态 run 发起 ApprovalRequest，不把 TestRun 改回 WAITING_APPROVAL；该区分见 `../04_interaction_design/chains/c4_failure_triage.md:26`。
 5. heal_apply 按“批准后一次消费 → 快照 fail-close → 新 Version → 指针 CAS”执行；Jira 写按幂等键和 external_request_id 执行。
@@ -464,10 +477,10 @@ C4 原始分诊时序见 `../04_interaction_design/chains/c4_failure_triage.md:6
 
 ### 9.3 Outbox / Inbox
 
-- 每次聚合事务把领域事件写入同事务 Outbox；发布失败可重试，不回滚已提交业务事实。
+- 每次聚合事务把领域事件写入同事务 Outbox；发布失败可重试，不回滚已提交业务事实。需要持久编排时，relay 以 event_id 与确定性 workflow_id 幂等 Start/Signal Temporal；Temporal 暂不可用时保留 Outbox 待重放。
 - 每个消费者以 event_id 在 Inbox 先登记；处理与自身业务写在同一事务完成。崩溃后重复投递只返回既有消费结果。
 - 事件 schema 版本只向后兼容演进；消费者不得依赖未声明字段。敏感正文不放事件总线，只传 Evidence/Artifact 引用和数据分级。
-- 工作流命令同样至少一次投递，因此命令处理器必须幂等；“消息只投一次”不是正确性前提。
+- Workflow Activity 和普通 Outbox Consumer 都按至少一次执行，因此命令处理器必须幂等；同一业务步骤必须登记唯一调度 Owner，“消息只投一次”或“双通道都执行”都不是正确性前提。
 
 ### 9.4 webhook、轮询与去重
 
@@ -496,10 +509,12 @@ C4 原始分诊时序见 `../04_interaction_design/chains/c4_failure_triage.md:6
 | 失败模式 | 自动恢复 / 补偿 | 人工接管点 | 不允许的行为 |
 | --- | --- | --- | --- |
 | 控制面进程重启 | 数据库状态 + Outbox 恢复；未发布事件重发 | SRE 查积压与死信 | 依赖内存回调继续状态机 |
-| 工作流 Worker 崩溃 | 从 workflow step/checkpoint 恢复；命令幂等 | Test Lead 可取消/重新发起 | 重新执行已确认外部副作用 |
+| Workflow/Activity Worker 崩溃 | Temporal history/Task Queue 恢复；命令与 Activity 幂等 | Test Lead 可取消/重新发起 | 重新执行已确认外部副作用 |
+| Temporal 暂不可用 | 控制面事务继续落业务事实与 Outbox；恢复后 relay 重放 | SRE 查 namespace/queue/backlog | 绕过 Outbox 启动第二条流程 |
 | 执行器失联 | 活跃态心跳超时 → TIMEOUT；回收资源 | Test Lead 决定新 run 重跑 | 自动把 TIMEOUT 改 FAILED 或自动重跑 Agent/压测 |
 | STOPPING 卡死 | 心跳治理 → TIMEOUT；继续外部状态对账 | SRE/Test Lead 查看真实执行体并手工隔离 | 永久停在 STOPPING |
 | 外部 CI 触发响应未知 | 按幂等键/external request id 查询；确认不存在才重试 | 集成 Owner 对账 | 网络超时后立即重复触发 |
+| execution intent UNKNOWN | 保持 EXECUTED+unknown，持续按稳定请求标识对账 | 无幂等查询能力时由外部系统 Owner 人工裁决 | 按 failed 自动重发或按 ok 放行 |
 | 外部 CI 排队过久 | 保持 WAITING_EXTERNAL、告警、允许幂等取消 | 测试工程师取消或继续等 | 自动迁移/自动取消外部 Job |
 | webhook 丢失 | 持久轮询兜底 | 集成 Owner 手工触发 reconcile | 仅靠 webhook 决定完成 |
 | 报告解析中断 | 从 chunk/checkpoint 继续；已完成部分显式保存 | Test Lead 查看 partial、重传报告 | 静默截断或把 partial 当完整 |

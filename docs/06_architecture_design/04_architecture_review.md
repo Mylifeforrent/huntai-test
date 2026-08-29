@@ -1,11 +1,11 @@
 # Stage 6 独立架构审查
 
 > - **Status: Draft**
-> - **日期**：2026-08-26
+> - **日期**：2026-08-26（2026-08-29 二次复审修订）
 > - **审查角色**：独立架构审查 Agent D
 > - **审查性质**：本审查是 finding-first 的独立审查建议，不构成批准。
-> - **决策状态**：`adr/0001` 至 `adr/0008` 仍全部为 **Proposed**；本文不提升任何 Draft、Proposed、TBD、假设或 POC 的成熟度。
-> - **写入边界**：本文只记录当前工作树审查结果，不修改被审文档，不恢复 `docs/05_prototype/` 的历史内容。
+> - **决策状态**：初审时 8 份 ADR 均为 Proposed；2026-08-29 用户确认复审计划后，ADR 0001/0002 提升为 Accepted，0003–0008 保持 Proposed。Accepted 不等于生产就绪或部署授权。
+> - **写入边界**：2026-08-26 初审只记录审查结果；2026-08-29 经用户批准后同步登记修订验收，不恢复 `docs/05_prototype/` 的历史内容。
 
 ## 1. 审查结论摘要
 
@@ -28,7 +28,7 @@
 - 23 个最高事实源对象在领域分册与集成架构中均有归属，没有发现漏项或暗增第 24 个领域对象。
 - 审批过期后 TestRun 保持 `WAITING_APPROVAL`、Release 只 prepare、不执行生产发布、未评估不默认通过、Agent 不进门禁等当前推荐口径，在 `architecture.md` 中表达正确。
 - 模块化单体控制面是当前唯一推荐；微服务仅保留有条件替代，不存在过早拆分。
-- Temporal 仍是条件 POC；LangGraph 不承担业务控制面；MCP 在 M0–M3 不采用，均未被写成当前生产依赖。
+- 初审时 Temporal 仍是条件 POC；2026-08-29 用户确认 POC 适配结论后已接受选型。LangGraph 不承担业务控制面；MCP 在 M0–M3 不采用。
 - L2 自动动作采用作用域化持续授权、ProjectMember 权威拆分、ExecutionEnvironment 恢复边均继续保持 Proposed。
 - `heal_apply` 继续采用 CAS/fail-close；etag 不匹配时记录 divergence，不覆盖人工修改。
 - tenant、Artifact、向量检索、模型出站、日志、Evidence 与 Audit 的主要泄露面已有显式控制和验证 Gate。
@@ -46,7 +46,19 @@
 | M-05 | 已修复 | `frontend_design_spec-v1.0.md:7`、`:164`、`:227`、`:248-264` | Stage 5/6 UX 交叉评审仍待 Prototype Owner 恢复或批准替代输入 |
 | L-01 | 延后接受 | 文件名是本任务开始前既有 Stage 6 资产，且本轮要求保留既有边界文件；静默重命名会扩大链接变更面 | Owner：仓库规范 Owner + Stage 6 Lead；下次经变更流程处理，不阻断本轮用户评审 |
 
-修订后未解决的 Critical、High、Medium 为 **0 / 0 / 0**。L-01 的延后不改变架构语义，且已给出接受理由与 Owner。
+2026-08-26 初审修订后当时记录的未解决 Critical、High、Medium 为 **0 / 0 / 0**。二次复审随后发现的语义和状态漂移见下一节，并已在本轮修订。
+
+### 1.2 2026-08-29 二次复审与修订
+
+二次复审接受总体方向，但发现初审 H-01 的关闭仍遗漏“远程请求可能已发出、结果不可判定”的明确语义，同时 Temporal POC 事实、ADR 状态与运行时拓扑已经不一致。用户确认以二次复审结果修订后，本轮完成：
+
+1. ADR 0001/0002 转为 Accepted；Temporal 成为持久工作流运行时，但生产恢复、版本、容量、成本、RPO/RTO 与值班继续作为放量 Gate；
+2. 控制面通过 PostgreSQL Outbox relay 幂等 Start/Signal Temporal；Workflow 只做确定性编排，执行器/连接器/报告/AI 使用隔离 Activity Task Queue；
+3. execution intent 固定 `READY / CLAIMED / DISPATCHING / CONFIRMED_OK / CONFIRMED_FAILED / UNKNOWN / ABANDONED`，ApprovalRequest 增加 `execution_result=unknown`，不可判定结果不得盲重试或放行；
+4. 模块拓扑补回独立执行环境与发布编排，跨模块一致性改为按场景选择，而非一律消息化；
+5. POC 原始数据未随本轮提供，文档只登记用户确认和已批准选型，不虚构测试通过项。
+
+二次复审 findings 已在冻结正文、问题模型、PRD、相关分册、ADR 与索引中同步；实现与生产验证仍由后续 Gate 承担。
 
 ## 2. Findings
 
@@ -59,7 +71,7 @@
 #### H-01 [Resolved] ApprovalRequest 消费与异步外部副作用之间缺少无歧义的原子顺序
 
 - **严重度**：High
-- **修订后文件与准确行号**：
+- **2026-08-26 初审快照位置**：
   - `01_domain_and_service_architecture.md:235-241`
   - `01_domain_and_service_architecture.md:421-423`
   - `architecture.md:206-209`
@@ -91,7 +103,7 @@
 #### H-02 [Resolved] GateEvaluation 资格在集成推荐与直接下游边界规范中仍相互冲突
 
 - **严重度**：High
-- **修订后文件与准确行号**：
+- **2026-08-26 初审快照位置**：
   - `frontend_backend_boundary_spec-v1.0.md:101`
   - `frontend_backend_boundary_spec-v1.0.md:288`
   - `frontend_backend_boundary_spec-v1.0.md:332`
@@ -115,7 +127,7 @@
 #### M-01 [Resolved] 两份前端相关规范仍保留陈旧的 TestRun 固定边数
 
 - **严重度**：Medium
-- **修订后文件与准确行号**：
+- **2026-08-26 初审快照位置**：
   - `frontend_design_spec-v1.0.md:26`
   - `frontend_design_spec-v1.0.md:276`
   - `frontend_backend_boundary_spec-v1.0.md:209`
@@ -131,7 +143,7 @@
 #### M-02 [Resolved] 研究与集成追溯没有消费前端设计规范
 
 - **严重度**：Medium
-- **修订后文件与准确行号**：
+- **2026-08-26 初审快照位置**：
   - `00_research_and_input_traceability.md:50-63`
   - `architecture.md:44-55`
 - **审查时问题**：研究分册明确未读取 `frontend_design_spec-v1.0.md`，集成架构的“已消费输入”也未列该文件，因此不能证明整套 Stage 6 前后端架构已交叉核对。
@@ -143,7 +155,7 @@
 #### M-03 [Resolved] Stage 6 README 与研究分册仍把已生成的集成架构写成占位，并遗漏新增产出
 
 - **严重度**：Medium
-- **修订后文件与准确行号**：
+- **2026-08-26 初审快照位置**：
   - `README.md:1-35`
   - `00_research_and_input_traceability.md:50-60`
   - `architecture.md:1-8`
@@ -160,7 +172,7 @@
 #### M-04 [Resolved] Draft 成熟度标记在分册之间不一致
 
 - **严重度**：Medium
-- **修订后文件与准确行号**：
+- **2026-08-26 初审快照位置**：
   - `00_research_and_input_traceability.md:3-8`
   - `02_api_workflow_and_review.md:3-6`
   - `03_security_reliability_and_operations.md:3-7`
@@ -223,7 +235,7 @@
 | Artifact/对象访问 | PRD 与边界缺口 | `02_api_workflow_and_review.md:595-631`；`03_security_reliability_and_operations.md:149-183`；ADR 0007 | Draft 候选清晰，未伪装为最终方案 |
 | 向量检索 | `../08_prd/prd.md:169`、`:221`、`:374` | `03_security_reliability_and_operations.md:118`、`:206`、`:226-238`；`architecture.md:360`、`:377` | tenant/ACL/分类/删除传播均有落点 |
 | 模型与日志泄露 | `../08_prd/prd.md:226`、`:235` | `03_security_reliability_and_operations.md:185-215`、`:345-355`；`architecture.md:385-389` | 覆盖完整 |
-| Temporal | `../08_prd/prd.md:360` | 研究分册 §5.2/§7.2；安全分册 §13；architecture §15.1；ADR 0002 | 保持条件 POC |
+| Temporal | 用户 2026-08-29 POC 适配确认；`../08_prd/prd.md` | 研究分册 §5.2/§7.2；安全分册 §13；architecture §15.1；Accepted ADR 0002 | 选型已接受；生产 Gate 独立 |
 | LangGraph | 市场研究与产品原则 | 研究分册 §5.1/§7.1；API 分册 §14；architecture §15.2；ADR 0008 | 不承担业务控制面 |
 | MCP | `../08_prd/prd.md:73`、`:303` | 研究分册 §5.3/§7.3；API 分册 §15；architecture §15.3；ADR 0008 | M0–M3 不采用，M4 只读 POC 候选 |
 | 微服务边界 | 内部规模与控制/执行分离 | `01_domain_and_service_architecture.md:99-106`；`architecture.md:70-99`；ADR 0001 | 未过度引入 |
@@ -280,20 +292,20 @@
 | 向量泄露与删除传播 | PASS | 先授权后召回、再次鉴权、删除/恢复重放均覆盖 |
 | 模型出站与日志泄露 | PASS | 四级分类、Restricted 拒绝/本地、Confidential 禁缓存 |
 | 微服务过度引入 | PASS | 当前不采用全部微服务 |
-| Temporal 过度引入 | PASS | 仅条件 POC，与保底同 Gate |
+| Temporal 过度引入 | PASS | 已选作持久运行时，但不替代领域状态且生产 Gate 独立 |
 | LangGraph 越界 | PASS | 仅 Agent/Copilot 受限节点 |
 | MCP 越界 | PASS | M0–M3 不采用；M4 只读 POC 候选 |
-| 假设/TBD 成熟度 | PASS | 分册与前端规范均明确 Draft；ADR 均 Proposed |
-| 三分册、研究、集成与 ADR 一致性 | PASS | H-01/H-02 已闭环 |
+| 假设/TBD 成熟度 | PASS | 分册与前端规范均明确 Draft；ADR 0001/0002 Accepted，其余 Proposed |
+| 三分册、研究、集成与 ADR 一致性 | PASS | 初审 H-01/H-02 与二次复审修订已闭环 |
 | 链接可达性 | PASS | 当前 Markdown 链接均可达；缺失 Prototype 仅以代码路径和公开缺口表示 |
-| 相对路径与行号 | PASS（抽查） | 核心引用路径与当前行号可定位；陈旧内容本身已单列 finding |
+| 相对路径与行号 | PASS（历史快照） | 初审路径可定位；具体行号仅代表 2026-08-26 快照，长期引用以文件/章节/ADR/契约 ID 为准 |
 | snake_case 文件名 | DEFERRED | 两个既有文件名不合规，见 L-01；已给接受理由与 Owner |
-| Draft/Proposed 状态 | PASS | 架构正文/分册均 Draft；8 ADR 均 Proposed |
+| 状态纪律 | PASS | architecture 已定稿；ADR 0001/0002 Accepted；分册与其余 ADR 保持 Draft/Proposed |
 
 ## 6. 剩余风险
 
 1. **外部系统能力风险**：Release、Jira、GitHub、CI 是否支持按 request id 查询、幂等创建、ETag/revision、稳定 delivery id 仍待 contract test；能力不足时自动恢复必须降为人工接管。
-2. **工作流选型风险**：Temporal 托管/自托管、Worker 版本、history/visibility、备份恢复、RPO/RTO、成本和值班能力均未实测；未通过 Gate 应使用保底方案。
+2. **工作流生产风险**：Temporal 已完成架构选型，但托管/自托管、Worker Versioning、history/visibility、备份恢复、RPO/RTO、成本和值班能力仍需证据；未通过 Gate 必须阻断放量并新建替代 ADR。
 3. **持续授权风险**：L2 自动动作的合格清单、scope、有效期、撤销传播和承载位置仍 Proposed；任何隐式永久豁免都会破坏 Policy Gate。
 4. **身份权威风险**：ProjectMember 权威拆分、IdP claim、禁用传播、职能资格和撤权 SLA 仍 Proposed/TBD。
 5. **数据治理风险**：Artifact TTL、扫描器、Restricted 查看方式、Legal Hold、WORM、删除传播和备份恢复策略尚未闭环。
@@ -316,8 +328,8 @@
 
 ## 8. 是否建议该 Draft 进入用户评审
 
-**审查建议：修订后的 Draft 可以进入用户评审。**
+**审查建议：2026-08-29 修订后的已定稿集成架构可进入后续实现设计；生产放量仍受各专项 Gate 阻断。**
 
-两项 High 和五项 Medium 的文档修订均已闭环；L-01 已给出不阻断架构语义的接受理由与 Owner。Stage 5 Prototype 缺失仍须作为明确限制随评审包披露；它阻断 Stage 5/6 UX 一致性确认，但不阻断后端架构 Draft 的用户评审。
+初审两项 High 和五项 Medium，以及二次复审的 Temporal 状态/拓扑、UNKNOWN 外部结果、一致性选择和模块边界修订均已闭环；L-01 已给出不阻断架构语义的接受理由与 Owner。Stage 5 Prototype 缺失仍须作为明确限制随评审包披露；它阻断 Stage 5/6 UX 一致性确认，但不阻断后端架构进入实现设计。
 
-该结论仅是独立审查建议，不代表架构状态发生变化；所有 ADR 继续保持 Proposed。
+初审结论本身不提升状态；后续 ADR 0001/0002 的 Accepted 状态来自 2026-08-29 用户对修订计划的明确批准。

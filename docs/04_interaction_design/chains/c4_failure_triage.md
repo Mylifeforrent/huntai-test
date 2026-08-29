@@ -5,7 +5,7 @@
 > - **上游引用**：[problem_model.md](../../03_problem_modeling/problem_model.md)（§1.1 领域对象 **23 个**、§2 状态机、§4.2 页面清单 **25 页**、§5 AI Schema A1–A8）· [prd.md](../../08_prd/prd.md)（FR-06/07、§2.3 边界场景、§3.2 A2 Prompt Contract **7 值**枚举、第 7 章降级）· [../README.md](../../README.md)（第 1 章产品原则、7.9/7.11、9.7）· [interaction_flows.md](../interaction_flows.md)（Stage 6 骨架）——上游各文档最新版本以其文首版本头为准
 > - **同目录链路**：审批交互细节见 [c2_approval_chain.md](c2_approval_chain.md)；TestRun 执行过程（进入终态之前）见 [c3_execution_kickoff.md](c3_execution_kickoff.md)；端到端闭环见 [c1_north_star_quality_loop.md](c1_north_star_quality_loop.md)
 > - **生成纪律**：页面名仅取 05 §4.2 页面清单（**25 页**，**不得引用「20 个页面」**）；状态名仅取 05 §2 已定义状态机；领域对象仅取 05 §1.1（**23 个**）；不引入 05 / 12-PRD 之外的新功能、新对象、新字段；上游缺口见文末「缺口上报」，不自行补齐
-> - **日期**：2026-08-24 · **版本**：v1.1（v1.0 行为语义不变；一致性复核消费：对齐 05「25 页 / 23 对象」与 12-PRD「A2 7 值」口径）
+> - **日期**：2026-08-29 · **版本**：v1.2（架构复审同步：审批执行结果增加 unknown 对账语义）
 
 ---
 
@@ -224,7 +224,7 @@ sequenceDiagram
 以下缺口均为上游文档既有不一致或未定义项，本链路如实引用并按最接近的收口口径执行，不自行补齐：
 
 1. **「8 类原因」与 A2 schema 枚举数量不一致**（历史缺口，已回写）：上报时 12-PRD FR-06 与 §3.1 A2 行均表述「8 类原因」，但 §3.2 A2 严格输出 schema 的 category 枚举仅列 7 个值（env_down、auth_expired、locator_stale、assertion_real_bug、flaky、data_issue、unknown）。**现口径（12-PRD §3.2 / 05 §2.5）已统一为 7 值枚举（unknown 兜底）**。本链路按 A2 schema 实际 7 值执行。建议归属（已完成）：[prd.md](../../08_prd/prd.md) §3.2 + 05 §2.5；
-2. **ApprovalRequest 缺「审批通过但执行失败」的状态落点**：05 §2.3 状态机仅定义 CREATED→PENDING→APPROVED→EXECUTED 与 REJECTED / EXPIRED 分支，未定义 APPROVED 后执行失败（如 heal_apply 快照失败 fail-close 中止、jira_write 写入失败）的落点。本链路按「不产生副作用 + AuditEvent 留痕 + 需重新发起审批」处理。建议归属：[problem_model.md](../../03_problem_modeling/problem_model.md) §2.3（补充执行失败分支或明确以 AuditEvent + 重试策略表达）；
+2. **ApprovalRequest 的执行失败/不可判定落点（历史缺口，已回写）**：05 v1.4 已明确 EXECUTED 表示“已尝试”，`execution_result=ok/failed/unknown` 区分确定成功、确定失败和效果不可判定；unknown 进入对账/人工接管，不产生盲重试或成功联动。状态机仍保持六态，不为执行结果另增状态；
 3. **FailureCluster「人工修正留痕」与「修改历史」的存储字段未定义**：05 §2.5 字段表（run_id、category、root_cause、confidence、blocking_judgment、evidence_refs[]）无修正记录字段，而 §4.2 TestRun 详情组件要求展示「修改历史」。本链路按 AuditEvent 留痕 + 报告区展示处理。建议归属：[problem_model.md](../../03_problem_modeling/problem_model.md) §2.5（补充修正留痕字段，可标 [建模补全]）；
 4. **僵尸任务终态表述不一致**：12-PRD §7.1 失败模式矩阵表述「执行器僵尸任务：自动标记 FAILED + 回收」，而 05 §2.2 TestRun 状态机为「无心跳超时自动转 TIMEOUT 并回收」。本链路按 05 §2.2 收口口径（RUNNING→TIMEOUT）执行。建议归属：[prd.md](../../08_prd/prd.md) §7.1（对齐 05 状态机口径）。
 
@@ -233,6 +233,6 @@ sequenceDiagram
 | # | 状态 | 裁定与回写落点 |
 | --- | --- | --- |
 | 1 | ✅ 已回写 | 裁定以 A2 schema 为准：12-PRD FR-06 v1.4 改为「7 值枚举（unknown 兜底）」；05 §2.5 v1.2 同步「7 值」（正文 ④#15 已转正） |
-| 2 | ✅ 已回写 | 05 §2.3 v1.2：EXECUTED = 已尝试执行，附 execution_result（ok/failed）；执行失败凭 AuditEvent + 连接器重试策略表达，需重新发起审批，不新增状态（正文 ④#14 已同步） |
+| 2 | ✅ 已回写 | 05 §2.3：EXECUTED = 已尝试执行，附 execution_result（ok/failed/unknown）；`unknown` 进入对账/人工接管，不得按失败盲重试或按成功放行；已确认失败需重新发起审批，不新增 ApprovalRequest 状态（正文 ④#14 已同步） |
 | 3 | ✅ 已回写 | 05 §2.5 v1.2 补 correction_history[]（actor / field / old / new / timestamp，[建模补全]）（正文 ⑤/⑥ 已同步） |
 | 4 | ✅ 已回写 | 12-PRD §7.1 v1.4 对齐 05 §2.2：僵尸任务「自动转 TIMEOUT 并回收」，旧「标记 FAILED」表述作废（正文 ④#11 已同步） |

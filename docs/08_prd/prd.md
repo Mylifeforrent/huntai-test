@@ -1,6 +1,6 @@
 # 12 · HuntAI Test PRD——企业内部 AI 自动化测试平台（Stage 12 · 终版收口位）
 
-> - **文档版本**：v1.5（2026-08-24，全链路一致性复核修复）
+> - **文档版本**：v1.6（2026-08-29，Temporal 架构选型回写）
 > - **流程定位**：开发流程图 Stage 12「生成 PRD 需求文档」槽位（与 Stage 8 后端架构设计并行）。**当前为中期版**——基于决策总纲与竞品拆解生成，尚未吸收 05 业务建模 / 06 核心交互链 / 07 产品原型的结论；按流程图应在 Stage 6、7 完成后重生成 **v2 终版**。FR 编号保持稳定以维持全链路溯源
 > - **依据**：[README.md](../README.md)（决策总纲）、[market_research.md](../01_market_research/market_research.md)、三份竞品拆解（`competitors/`）、研发助手研究包（源仓库 opensource-product-analysis：references/enterprise_ai_dev_assistant_research_2026-07-28/）
 > - **评审对象**：产品、设计、工程、数据、安全、法务（含合规）
@@ -107,7 +107,7 @@ HuntAI Test 是企业内部自用（≤1000 用户、部门级多租户）的 AI
 - **FR-01 多租户与身份**：组织（部门）→ 项目两级；SSO（OIDC）/LDAP 登录；角色 owner/admin/tester/viewer；租户隔离在 ORM/中间件强制。验收：双租户越权回归测试集 100% 阻断；无 SSO 账号无法登录。
 - **FR-02 AI 调用日志与 Token 计量**：所有 AI 调用（无旁路）记录真实 usage、模型、prompt 版本、成本、延迟、数据分级；按部门归集。验收：代码审查确认无绕过 AIInvocationLog 的调用路径；看板可按部门出月账单。
 - **FR-03 预算与看板**：部门级 Token 预算 + 超限熔断提示；成本/质量看板（采纳率、无据结论率、成功率）。验收：超预算后新 AI 调用被拒并通知 Owner。
-- **FR-04 审批中心**：统一 HITL 队列；审批卡片九要素（动作/资源/diff/数据来源/模型与 Skill 版本/风险等级/成本估计/回滚能力/参数哈希）；参数哈希绑定。验收：审批后修改参数再执行 → 被拦截并要求重新审批（自动化测试覆盖）。
+- **FR-04 审批中心**：统一 HITL 队列；审批卡片九要素（动作/资源/diff/数据来源/模型与 Skill 版本/风险等级/成本估计/回滚能力/参数哈希）；参数哈希绑定；执行结果区分 ok/failed/unknown，unknown 进入对账/人工接管。验收：审批后修改参数再执行 → 被拦截并要求重新审批；响应丢失且结果不可判定时不得盲重试或按成功放行（自动化测试覆盖）。
 - **FR-17 副作用分级与 Policy Gate**：所有工具/动作声明 L0–L4；Gate 输出 ALLOW/DENY/REQUIRE_APPROVAL/REQUIRE_REAUTH。REQUIRE_REAUTH 触发条件（v1.4）：L3+ 动作且操作者会话超过再认证窗口（默认值由 08 后端架构配置项定义），或目标资源声明需强认证。验收：策略表驱动的单元测试全覆盖；默认拒绝未声明动作。
 
 **接口自动化（M1）**
@@ -115,7 +115,7 @@ HuntAI Test 是企业内部自用（≤1000 用户、部门级多租户）的 AI
 - **FR-05 用例生成（两步式）**：OpenAPI/Postman 导入 → 生成默认不落库 → 审阅 → 保存并打 `ai-generated` 标签；采纳率/修改幅度埋点。验收：不存在 save=true 直写路径（接口审查）；生成失败有显式告警（禁止静默返回空）。
 - **FR-06 失败归因建议**：输入执行日志+响应 → 输出失败原因分类（A2 category 枚举 **7 值**：env_down / auth_expired / locator_stale / assertion_real_bug / flaky / data_issue / unknown，unknown 兜底——v1.4 与 §3.2 schema 对齐，旧表述「8 类」作废）+ confidence + fixes 建议；confidence ≥0.7 才显示「可应用」，应用必须走 FR-04 审批 + 快照 + 回滚端点。验收：快照失败则中止（fail-close）；有回滚 API 且自动化测试覆盖。
 - **FR-07 run 级失败聚类报告**：归一化结果 → 聚类 + 阻塞判断 + 历史对比；显示证据链接、置信度、无法判断项、用户修改历史。验收：确定性解析准确率 ≥98%（对标注集）；无据结论率 <2%。
-- **FR-08 执行引擎**：真队列（Temporal POC 或 Celery+状态机保底）+ 重试/熔断/fail-fast + 心跳 + 僵尸回收；六类断言；双层变量 `{{env}}`/`${func}`。验收：变量解析失败必报错；进程重启后无「永久 running」任务（混沌测试）。
+- **FR-08 执行引擎**：采用 Temporal 持久工作流 + 隔离 Activity Task Queue，并配合 PostgreSQL 权威状态机、Outbox relay、业务幂等、重试/熔断/fail-fast、心跳和僵尸回收；六类断言；双层变量 `{{env}}`/`${func}`。验收：变量解析失败必报错；进程重启后无「永久 running」任务；Outbox/Activity 重放不重复副作用（混沌测试）。选型不等于生产就绪，恢复、版本、容量、成本和运维 Gate 仍须通过。
 
 **Web 自动化（M2）+ 跨域能力（FR-18 自 M1 起 / FR-19 自 M2 起）**
 
@@ -290,7 +290,7 @@ HuntAI Test 是企业内部自用（≤1000 用户、部门级多租户）的 AI
 
 ### 6.4 外部依赖
 
-企业 SSO(IdP)、Jira REST/Webhook（版本 TBD）、GitHub App 权限、CI API（触发/产物读取）、Release 系统 API（**readiness TBD**）、企业模型网关、Vault、Temporal（POC 结论 TBD：自托管 vs 保底 Celery）。
+企业 SSO(IdP)、Jira REST/Webhook（版本 TBD）、GitHub App 权限、CI API（触发/产物读取）、Release 系统 API（**readiness TBD**）、企业模型网关、Vault、Temporal（持久工作流运行时已选定；托管/自托管、生产容量、成本、RPO/RTO 与值班方案待 Gate）。
 
 ### 6.5 阶段计划（对齐 README 第 8 章）
 
@@ -357,7 +357,7 @@ AI 增强（生成/归因/建议）→ 只读查询 → 平台执行/报告/门�
 | --- | --- | --- | --- |
 | Q1 | 测试分析耗时/采纳率/成本三项基线盘点（第 0 章 FAIL 项） | 平台负责人 + QA 负责人 | M0 第 2 周 |
 | Q2 | 模型与供应商选型（含单价表、数据分级路由） | AI 工程师 + 安全 | M0 结束 |
-| Q3 | Temporal POC 结论（vs Celery 保底） | 平台架构师 | M0 第 4 周 |
+| Q3 | Temporal 生产形态与就绪 Gate（托管/自托管、恢复、版本、容量、成本、值班） | 平台架构师 + SRE | M0 第 4 周 |
 | Q4 | Release 系统 API readiness（幂等/webhook/权限） | 后端/集成 Owner | M2 中期（M3 前） |
 | Q5 | Jira/GitHub/CI 的版本与权限边界确认 | 集成 Owner + 各系统 Owner | M0 结束 |
 | Q6 | 制品保留期与审计留存期的法务确认 | 法务 + 安全 | M1 前 |
@@ -396,3 +396,4 @@ AI 增强（生成/归因/建议）→ 只读查询 → 平台执行/报告/门�
 | v1.3 | 2026-08-23 | 文档编号对齐开发流程图（移至 Stage 12 槽位）；定位更新为终版 PRD 位——待 06 交互链与 07 原型完成后重生成 v2 终版 |
 | v1.4 | 2026-08-24 | Stage 6.5 缺口回写（依据四条交互链「缺口上报」26 项裁定）：FR-06 归因分类对齐 §3.2 枚举 7 值；FR-13 补门禁豁免流程（gate_waiver，L3，走 FR-04 审批）与触发绑定页面指引；FR-17 补 REQUIRE_REAUTH 触发条件；FR-18 验收补校验落点（VALIDATING→FAILED）与排队超时行为；FR-19 验收补 Agent 终态归属；§2.3「Job 被删」补 validity 标记落点；§7.1 僵尸任务对齐 05 §2.2（TIMEOUT） |
 | v1.5 | 2026-08-24 | 全链路一致性复核修复（Stage 3→6 反向核查，含 03/04/05/06/12 交叉验证）：① US-FR 映射补 5 个基座类 FR 无 US 承接（US-15~19：FR-01/02/08/12/17），现双向无孤儿；② 状态数口径统一（10 态，作废「8 态」旧表述）；③ 归因 category 枚举 7 值（作废「8 类」）；④ AI 能力编号 A1–A8（作废「A1–A7」漏 A8）；⑤ FR-12 补验收标准（原缺）与新门禁对象落点（QualityGatePolicy / GateEvaluation，对齐 05 v1.3）；⑥ FR-13 补数据落点（同前）与豁免审批链路；⑦ §7.4 开关层级改 A1–A8 并补开关方向不对称裁定（关停 L1 / 恢复 L3）与页面指引；⑧ §2.3 补等待态滞留可见性边界场景（← 05 v1.3 裁定）；⑨ §5.3 北极星指标补计数口径与去重规则（原缺可测定义）；⑩ §3 核心对象摘要补齐 8 个对象（对齐 05 §1.1 的 23 对象清单）；⑪ FR-18/19 分期澄清（自 M1/M2 起，非始于 M2）；⑫ §0 一致性检查更新（US-FR 双向核查、补「对齐 05 对象清单」条目） |
+| v1.6 | 2026-08-29 | 架构复审回写：FR-08 从 Temporal/Celery 候选收口为 Temporal 持久工作流 + 隔离 Activity Task Queue；明确 PostgreSQL 权威状态机、Outbox relay 与业务幂等，且选型不等于生产就绪；FR-04 增加 external result unknown 的对账/人工接管与禁止盲重试要求；Q3 改为托管方式、恢复、版本、容量、成本与值班 Gate。 |

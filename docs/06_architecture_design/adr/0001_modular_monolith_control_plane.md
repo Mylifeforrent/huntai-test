@@ -1,7 +1,7 @@
 # ADR 0001: Modular Monolith Control Plane and Independent Workers
 
-- **Status: Proposed**
-- **Date: 2026-08-26**
+- **Status: Accepted**
+- **Date: 2026-08-29**
 
 ## Context
 
@@ -11,18 +11,18 @@ HuntAI Test 需要同时承载同步治理、长时间等待、异构执行、�
 
 ## Decision
 
-1. **Proposed：同步控制面采用模块化单体。** 控制面拥有认证/租户、RBAC、同步命令与查询、Policy Gate、领域状态机、聚合事务、Outbox 和工作台投影；模块以私有写模型和公开命令/查询/事件边界隔离（`../01_domain_and_service_architecture.md:81`、`../01_domain_and_service_architecture.md:83`、`../01_domain_and_service_architecture.md:128`、`../01_domain_and_service_architecture.md:130`）。
-2. **Proposed：持久工作流、执行器、连接器、报告和 AI 作为独立 Worker 运行。** Worker 可独立扩展和故障隔离，但不能获得业务状态裁决权（`../01_domain_and_service_architecture.md:84`、`../01_domain_and_service_architecture.md:88`）。
+1. **同步控制面采用模块化单体。** 控制面拥有认证/租户、RBAC、同步命令与查询、Policy Gate、领域状态机、聚合事务、Outbox 和工作台投影；模块以私有写模型和公开命令/查询/事件边界隔离（`../01_domain_and_service_architecture.md:81`、`../01_domain_and_service_architecture.md:83`、`../01_domain_and_service_architecture.md:128`、`../01_domain_and_service_architecture.md:130`）。
+2. **持久工作流、执行器、连接器、报告和 AI 作为独立 Worker 运行。** 持久工作流采用 ADR 0002 已接受的 Temporal；其他 Worker 可按独立 Temporal Activity Task Queue 或明确的 Outbox 消费路径扩展和故障隔离，但都不能获得业务状态裁决权（`../01_domain_and_service_architecture.md:84`、`../01_domain_and_service_architecture.md:88`）。
 3. Worker 回写控制面的唯一业务路径是已登记命令；跨模块通知使用已登记事件。Worker 禁止直接更新模块私有数据，事件也只能陈述已提交事实（`../01_domain_and_service_architecture.md:90`、`../01_domain_and_service_architecture.md:380`、`../01_domain_and_service_architecture.md:382`）。
-4. **Proposed 起步形态**为一个事务数据库集群、模块私有 schema/仓储；共享数据库不表示共享表。跨模块使用 ID、不可变快照、查询端口和事件，不共享 ORM 实体或仓储（`../01_domain_and_service_architecture.md:92`、`../01_domain_and_service_architecture.md:97`、`../01_domain_and_service_architecture.md:198`）。
+4. **起步形态**为一个事务数据库集群、模块私有 schema/仓储；共享数据库不表示共享表。跨模块使用 ID、不可变快照、查询端口和事件，不共享 ORM 实体或仓储（`../01_domain_and_service_architecture.md:92`、`../01_domain_and_service_architecture.md:97`、`../01_domain_and_service_architecture.md:198`）。
 5. Redis 只可作缓存、限流、短租约或调度提示，不得成为工作流、审批、终止信号或幂等记录的唯一事实源（`../01_domain_and_service_architecture.md:94`、`../01_domain_and_service_architecture.md:95`）。
-6. 本 ADR 不决定 Worker 的编排产品、消息产品、进程数量、扩缩容数值或部署拓扑；持久工作流运行时由 ADR 0002 条件评审，当前不存在已选定产品（`../03_security_reliability_and_operations.md:414`、`../03_security_reliability_and_operations.md:416`）。
+6. 本 ADR 接受运行单元和写入边界，不决定消息产品、进程数量、扩缩容数值或部署拓扑；持久工作流产品由 ADR 0002 决定为 Temporal，托管/自托管与生产参数仍受安全和运维 Gate 约束。
 
 ## Alternatives
 
 1. **全部微服务**：可提供更强独立发布和容量隔离，但会在领域冲突尚未收口时提前引入分布式事务、事件版本和运维成本（`../01_domain_and_service_architecture.md:101`、`../01_domain_and_service_architecture.md:105`）。
 2. **单进程单体包含全部任务**：运行单元最少，但执行、轮询、报告和 AI 会争抢 API 资源，且不满足独立执行器与持久恢复要求（`../01_domain_and_service_architecture.md:103`、`../01_domain_and_service_architecture.md:105`）。
-3. **立即采用托管持久工作流引擎**：只有 POC 证明可恢复、可升级且团队可运维后才可选择；当前不能把某个引擎当作既定基础设施（`../01_domain_and_service_architecture.md:106`）。
+3. **Celery + PostgreSQL 自建持久编排**：减少新基础设施，但需要自行实现持久 Timer、Signal、历史、版本演进和可见性；本轮 POC 后未选用，保留为 Temporal 无法满足生产 Gate 时的新 ADR 替代候选。
 
 ## Consequences
 
@@ -40,7 +40,7 @@ HuntAI Test 需要同时承载同步治理、长时间等待、异构执行、�
 ## Migration or Follow-up
 
 1. 在后续设计中定义模块依赖规则、公开命令/查询/事件目录和私有仓储边界；不得先生成实现结构再反推边界（`../01_domain_and_service_architecture.md:183`、`../01_domain_and_service_architecture.md:198`）。
-2. 通过 ADR 0002 收口持久工作流候选；通过 ADR 0006 收口消息与连接器恢复；通过 ADR 0007 收口 Artifact/Audit 数据边界。
+2. 按 ADR 0002 落实 Temporal 与 Outbox、Workflow、Activity Task Queue 的路由；通过 ADR 0006 收口消息与连接器恢复；通过 ADR 0007 收口 Artifact/Audit 数据边界。
 3. 若未来拆微服务，必须以稳定团队边界、独立 SLO/容量和成熟事件治理为前置证据，而不是仅因模块数量增加（`../01_domain_and_service_architecture.md:101`、`../01_domain_and_service_architecture.md:104`）。
 
 ## Verification
