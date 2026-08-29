@@ -1,7 +1,7 @@
 # 前端设计规范（frontend_design_spec · v1.0）
 
 > - **Status: Draft**
-> - **日期**：2026-08-25 · **版本**：v1.0
+> - **日期**：2026-08-25（2026-08-29 修订） · **版本**：v1.1
 > - **流程定位**：Stage 6（系统架构设计）**前端分册**——本仓库前端架构层的收口设计规范；后端架构正文由同目录 [architecture.md](architecture.md) 骨架承接，两者共同构成 Stage 6 产出
 > - **上游输入**：[problem_model.md](../03_problem_modeling/problem_model.md)（§4 IA 与 **25 页**清单、§4.3 三个关键页面结构约束、§2 状态机全集——唯一事实源）· [interaction_flows.md](../04_interaction_design/interaction_flows.md) 及 [chains/](../04_interaction_design/chains/) C1–C4（页面流 / 分支异常 / 审批交互）· [prd.md](../08_prd/prd.md)（US / FR / 边界场景）
 > - **下游消费者**：`../05_prototype/prototype_spec.md`（当前工作树不可用，见 §8 缺口声明）· Stage 10 AI 上下文 · Stage 11 前端实现 · [07_backend_design](../07_backend_design/README.md)（API 的展示契约输入）
@@ -34,7 +34,9 @@
 
 ### 1.3 技术基线（引用 Stage 0 决策，不新增）
 
-React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Query（服务端状态与缓存失效）· Zustand（本地 UI 状态与 SSE 订阅存储）。路由库（React Router / TanStack Router 等）在 Stage 11 初始化时按 AI 红线 R4 依赖审批流程确定；本规范只约束路由结构（§3），不绑定路由库。
+React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Query（服务端状态与缓存失效）· Zustand（本地 UI 状态与 SSE 订阅存储）。
+
+**路由库已定为 React Router**（2026-08-29 修订）：原表述「在 Stage 11 初始化时按 AI 红线 R4 依赖审批流程确定」已作废——该依赖已完成 R4 审批并前移至 Stage 6 冻结，锁定版本与审计见 [tech_stack_decision-v1.0.md](tech_stack_decision-v1.0.md) §3.3/§4.3 与 [ADR 0009](adr/0009_technology_stack_freeze.md)。约束一并冻结：**只用其路由与 URL 状态能力，不启用 loader/action 数据层**——服务端状态统一由 TanStack Query 承担，避免两套并行的数据获取与失效机制对同一份领域数据各自缓存（那会制造 §1.2 与 frontend_backend_boundary_spec §3.3 红线 1 所禁止的「前端自行推演状态」）。本规范仍只约束路由结构（§3），不规定具体路由 API 用法。
 
 ---
 
@@ -275,7 +277,7 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 | 状态引用 ⊆ 05 §2 | PASS：TestRun 10 态且迁移不维护固定边数（含 STOPPING→TIMEOUT，审批过期不迁移 TestRun）、ApprovalRequest 6 态、ReleaseTask 6 态、ExecutionEnvironment 4 态、TestCase 4 态，无新增状态 |
 | 页面流 / 跳转 ⊆ C1–C4 | PASS：§4.1 跳转矩阵逐条标注链路出处，无链路外跳转 |
 | 交互行为 ⊆ 已定义集合 | PASS：§6 每行标注依据；〔工程约定〕仅 §6.14 与 §7（已显式标注） |
-| 无代码 / 无新依赖 | PASS：仅引用 Stage 0 已定技术基线 |
+| 无代码 / 无新依赖 | PASS：仅引用 Stage 0 已定技术基线与 [tech_stack_decision-v1.0.md](tech_stack_decision-v1.0.md) 已冻结选型；本文自身不引入依赖，路由库为该冻结分册经 R4 审批的结论 |
 
 ## 10. 缺口上报（不自行发明，建议归属如下）
 
@@ -293,3 +295,4 @@ React + TypeScript + Vite（纯 SPA）· Tailwind CSS + shadcn/ui · TanStack Qu
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v1.0 | 2026-08-25 | 首版：基于 05 v1.3（25 页 IA / 状态机 / 三约束）与 06 v1.1 + C1–C4（页面流 / 分支异常 / 审批交互）收口——页面清单 P01–P25、路由结构、跳转矩阵、状态与本地交互边界、核心交互要求、响应式工程约定、与 Prototype 的对应关系与验收基线；缺口 6 项上报 |
+| v1.1 | 2026-08-29 | 技术栈冻结同步：§1.3 路由库由「Stage 11 待定」定为 React Router（已完成红线 R4 审批），并冻结「只用路由与 URL 状态、不启用 loader/action 数据层」的约束；§9 一致性检查行同步。页面集、状态集、跳转矩阵与交互要求均未变动 |

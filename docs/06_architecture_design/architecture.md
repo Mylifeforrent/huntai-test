@@ -6,7 +6,7 @@
 > - **文档定位**：把研究、领域、API/工作流、安全运维分册与 8 份 ADR 收口为一套唯一集成推荐；不是各分册的机械汇总
 > - **决策纪律**：本文为 Stage 6 已定稿集成架构，后续阶段以本文为后端架构输入。ADR 0001（模块化单体控制面）与 ADR 0002（Temporal 持久工作流）为 **Accepted**；ADR 0003–0008 仍为 **Proposed**。架构选型不等于生产就绪或部署授权，文内 **Proposed** 冲突处置、生产 Gate 与 **TBD** 数值仍须各自批准或验证
 > - **变更纪律**：修订本文必须先在 `docs/13_changes/change_log.md` 登记并获批准
-> - **实现边界**：本文不包含代码、DDL、迁移、依赖变更或部署配置；本次仅按已登记批准新增 `execution_result=unknown` 结果值与基础设施 execution intent 状态，不新增领域对象或 ApprovalRequest 状态
+> - **实现边界**：本文不包含代码、DDL、迁移、依赖变更或部署配置；本次仅按已登记批准新增 `execution_result=unknown` 结果值与基础设施 execution intent 状态，不新增领域对象或 ApprovalRequest 状态。技术栈、锁定版本与部署形态由同目录 [tech_stack_decision-v1.0.md](tech_stack_decision-v1.0.md) 承接（§2.3 非目标的对应缺口），本文只在 §15.1 登记其分期启用结论
 
 ## 1. 架构结论
 
@@ -465,6 +465,10 @@ Jira、PR、Confluence、日志、网页 DOM、文件和未来 MCP 描述/结果
 7. 单步可重建通知/投影可走普通 Outbox Consumer，但同一步骤不得由两套调度器重复执行。
 
 选型 Accepted 不等于生产就绪。正式放量前仍须证明 API、Worker、Temporal 与数据库重启恢复，重复/乱序 Signal 安全，Worker Versioning 兼容在途 history，secret 不进 history，tenant/actor/classification 在执行点复核，以及备份恢复、可观测、容量、成本、RPO/RTO 和值班能力可承担。任一生产 Gate 失败都阻断放量，并通过新 ADR 重评托管方式或替代运行时，不得静默切换。
+
+**分期启用（2026-08-29 修订，依据 [ADR 0009](adr/0009_technology_stack_freeze.md) 与 [tech_stack_decision-v1.0.md](tech_stack_decision-v1.0.md) §5）**：本文第 5.2 节的概念拓扑是**目标形态**，不是 M0/M1 的运行形态。M0/M1 只运行单 PostgreSQL 数据面——Temporal、Redis、S3/MinIO、Vault 均**推迟至 M2+ 启用**：Outbox 落 PostgreSQL 表，轮询由后端定时任务驱动，秘密经 `.env` + Docker secret 注入，制品存本地卷。该决定**不改变**本文的架构结论，也不推翻 ADR 0002 对 Temporal 的接受，只定义启用节奏；动因是单人运维能力，评估见 `tech_stack_decision-v1.0.md` §7。
+
+分期带来的两点约束必须同时成立：其一，M0/M1 没有 workflow history 可重放，第 11.3 节的幂等键、CAS 与数据库行锁在该阶段是「重启不重复副作用」的**唯一**保障，不得以「M2 将启用 Temporal」为由推迟实现；其二，M2 启用 Temporal 时存在调度 Owner 切换窗口，切换期间同一业务步骤不得同时被后端定时任务与 Temporal 调度，该约束沿用第 11.2 节原文。Temporal 与 Vault 启用前须先补运维方案，为硬前置条件。
 
 ### 15.2 LangGraph：仅限 Agent/Copilot
 

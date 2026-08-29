@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 - **Scope**: Stage 6 architecture decisions
-- **Status: Mixed**（0001/0002 Accepted；0003–0008 Proposed）
+- **Status: Mixed**（0001/0002/0009 Accepted；0003–0008 Proposed）
 - **Date: 2026-08-29**
 
 ## Status Guidance
@@ -22,6 +22,7 @@
 | [0006](0006_connector_idempotency_and_recovery.md) | Proposed | Connector Contract、幂等与恢复 | 0001、0002、0004、0005、0007 |
 | [0007](0007_data_artifact_and_audit_protection.md) | Proposed | 数据、Artifact、证据与审计保护 | 0001、0004、0005、0006、0008 |
 | [0008](0008_agent_langgraph_and_mcp_boundaries.md) | Proposed | Agent、LangGraph 与 MCP 边界 | 0001、0002、0004、0005、0007 |
+| [0009](0009_technology_stack_freeze.md) | Accepted | 技术栈冻结与基础设施分期启用 | 0001、0002 |
 
 ## Dependency Relationships
 
@@ -30,10 +31,11 @@
 3. `0004` 依赖 `0005` 的当前身份与授权、`0006` 的外部副作用可靠性，以及 `0007` 的审计和证据留痕；长流程恢复时持续复核当前授权（`../03_security_reliability_and_operations.md:84`、`../03_security_reliability_and_operations.md:96`）。
 4. `0006` 的事件、回调和外部响应只形成观察或执行结果，最终由目标聚合命令裁决；回调不拥有平台状态机（`../01_domain_and_service_architecture.md:469`、`../01_domain_and_service_architecture.md:475`）。
 5. `0008` 受 `0004` 的 Tool Router/Policy Gate 与 `0007` 的数据分级约束；LangGraph 和 MCP 都不得成为审批、授权或业务状态事实源（`../02_api_workflow_and_review.md:648`、`../02_api_workflow_and_review.md:655`、`../03_security_reliability_and_operations.md:449`、`../03_security_reliability_and_operations.md:461`）。
+6. `0009` 为 `0001`、`0002` 选择落地技术与启用节奏，但不得改变二者的架构结论：Temporal 仍是目标持久工作流运行时，`0009` 只把它连同 Redis、S3/MinIO、Vault 推迟至 M2+ 启用，并要求 M0/M1 照常实现幂等键、CAS 与行锁。
 
 ## Reading and Review Rules
 
 - 每份 ADR 固定使用 `Context / Decision / Alternatives / Consequences / Security and Operations / Migration or Follow-up / Verification / Open Questions / References` 结构。
 - `Decision` 的约束力由该 ADR 自身状态决定；Accepted 可指导设计但不等于生产授权，Proposed 仍是待评审候选。带冲突或上游枚举变化的事项必须先完成上游变更。
 - `TBD` 不得被实现者替换成隐式默认值。新分册明确所有 timeout、retry、retention 与队列数值仍为 TBD（`../03_security_reliability_and_operations.md:429`、`../03_security_reliability_and_operations.md:435`）。
-- 本目录不提供代码、DDL、迁移、依赖或部署配置；实现契约由后续阶段在相应决策获得批准后另行产出。
+- 本目录不提供代码、DDL 或迁移。依赖与部署决策仅由 `0009` 承载（其锁定版本表与审计数据落在 `../tech_stack_decision-v1.0.md`，不在 ADR 内重复维护）；其余 ADR 一律不涉及依赖与部署配置。实现契约由后续阶段在相应决策获得批准后另行产出。
