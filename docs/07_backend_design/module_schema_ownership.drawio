@@ -1,0 +1,288 @@
+<mxfile host="Electron" modified="2026-08-29T13:00:00.000Z" agent="draw-io-diagram-generator" version="26.0.0" type="device">
+  <diagram id="module-schema-ownership" name="模块私有 schema 归属">
+    <mxGraphModel dx="1800" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1520" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="HuntAI Test — 模块私有 PostgreSQL schema 归属" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1">
+          <mxGeometry x="400" y="12" width="1200" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="M0/M1 物理上单一 PostgreSQL；逻辑上按控制面模块隔离。蓝=领域表，绿=从属结构（非第24对象），黄=基础设施表（非第24对象）。跨栏虚线=ID 只读引用，禁止物理 FK 与级联写。" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#4b5563;" vertex="1" parent="1">
+          <mxGeometry x="200" y="44" width="1600" height="28" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-iam" value="identity_tenancy  ·  身份与租户" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="640" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-organizations" value="organizations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-iam">
+          <mxGeometry x="20" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-users" value="users" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-iam">
+          <mxGeometry x="180" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-projects" value="projects" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-iam">
+          <mxGeometry x="340" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-project-members" value="project_members" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="lane-iam">
+          <mxGeometry x="500" y="50" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-iam-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-iam">
+          <mxGeometry x="20" y="130" width="200" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t-iam-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-iam">
+          <mxGeometry x="240" y="130" width="220" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="n-iam" value="对象 1–3 · kill switch 治理字段在 organizations" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-iam">
+          <mxGeometry x="20" y="190" width="580" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-quota" value="quota_governance  ·  配额账本" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="700" y="80" width="280" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-org-quotas" value="org_quotas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-quota">
+          <mxGeometry x="20" y="50" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-quota-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-quota">
+          <mxGeometry x="20" y="120" width="240" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-quota-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-quota">
+          <mxGeometry x="20" y="175" width="240" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-assets" value="test_assets  ·  测试资产" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="80" width="960" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-test-cases" value="test_cases" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-assets">
+          <mxGeometry x="20" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-tc-versions" value="test_case_versions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="lane-assets">
+          <mxGeometry x="180" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-test-plans" value="test_plans" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-assets">
+          <mxGeometry x="350" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-plan-cases" value="test_plan_cases" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="lane-assets">
+          <mxGeometry x="510" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-baselines" value="perf_baselines" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-assets">
+          <mxGeometry x="670" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-assets-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-assets">
+          <mxGeometry x="20" y="130" width="200" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t-assets-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-assets">
+          <mxGeometry x="240" y="130" width="220" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="n-assets" value="对象 5 / 6 / 16 · Version 不可变 · AI 草稿不落 test_cases" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-assets">
+          <mxGeometry x="20" y="190" width="700" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-env" value="execution_registry  ·  执行环境" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="370" width="480" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-envs" value="execution_environments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-env">
+          <mxGeometry x="20" y="50" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-jobs" value="job_contracts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="lane-env">
+          <mxGeometry x="240" y="50" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-env-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-env">
+          <mxGeometry x="20" y="120" width="200" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-env-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-env">
+          <mxGeometry x="240" y="120" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-env" value="对象 4 · credential_ref only · 无 Proposed 恢复边" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-env">
+          <mxGeometry x="20" y="180" width="430" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-run" value="run_orchestration  ·  执行编排" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="540" y="370" width="400" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-runs" value="test_runs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-run">
+          <mxGeometry x="20" y="50" width="360" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-run-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-run">
+          <mxGeometry x="20" y="120" width="170" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-run-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-run">
+          <mxGeometry x="200" y="120" width="180" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-run" value="对象 7 · 10 态 · snapshot 不可变 · 终态吸收" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-run">
+          <mxGeometry x="20" y="180" width="360" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-results" value="results_evidence  ·  结果 / 证据 / 审计" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="960" y="370" width="1000" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-case-results" value="case_results" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-results">
+          <mxGeometry x="20" y="50" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-step-runs" value="step_runs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="lane-results">
+          <mxGeometry x="170" y="50" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-artifacts" value="artifacts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="lane-results">
+          <mxGeometry x="310" y="50" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-clusters" value="failure_clusters" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-results">
+          <mxGeometry x="450" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-evidence" value="evidence_objects" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-results">
+          <mxGeometry x="610" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-audit" value="audit_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-results">
+          <mxGeometry x="780" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-res-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-results">
+          <mxGeometry x="20" y="130" width="200" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t-res-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-results">
+          <mxGeometry x="240" y="130" width="220" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="n-res" value="对象 8–10 / 13 · 制品只存 object_key · Audit 仅 append 端口 · 禁止推进 TestRun" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-results">
+          <mxGeometry x="20" y="190" width="900" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-appr" value="approval_policy  ·  审批与策略" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="660" width="560" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-approvals" value="approval_requests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-appr">
+          <mxGeometry x="20" y="50" width="250" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-intents" value="execution_intents" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="lane-appr">
+          <mxGeometry x="290" y="50" width="230" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-appr-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-appr">
+          <mxGeometry x="20" y="120" width="230" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-appr-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-appr">
+          <mxGeometry x="270" y="120" width="250" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-appr" value="对象 11 · execution_result=ok/failed/unknown · intent 非第24对象 · Policy Gate 无表" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-appr">
+          <mxGeometry x="20" y="180" width="520" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-gate" value="quality_gates  ·  质量门禁" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="620" y="660" width="460" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-policies" value="quality_gate_policies" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-gate">
+          <mxGeometry x="20" y="50" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-evals" value="gate_evaluations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-gate">
+          <mxGeometry x="240" y="50" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-gate-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-gate">
+          <mxGeometry x="20" y="120" width="190" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-gate-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-gate">
+          <mxGeometry x="230" y="120" width="210" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-gate" value="对象 22–23 · 评估不可变 · 无 not_evaluated 行" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-gate">
+          <mxGeometry x="20" y="180" width="420" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-rel" value="release_orchestration  ·  发布编排" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="660" width="860" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="t-releases" value="release_tasks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-rel">
+          <mxGeometry x="20" y="50" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-item-refs" value="release_item_refs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="lane-rel">
+          <mxGeometry x="240" y="50" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-rel-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-rel">
+          <mxGeometry x="20" y="120" width="200" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-rel-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-rel">
+          <mxGeometry x="240" y="120" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-rel" value="对象 17 · 只 prepare item · 不执行生产发布 · 无 Temporal 表" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-rel">
+          <mxGeometry x="20" y="180" width="700" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-int" value="integration_hub  ·  集成中心" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="950" width="920" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="t-connectors" value="connectors" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-int">
+          <mxGeometry x="20" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-tokens" value="api_tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-int">
+          <mxGeometry x="190" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-inbox" value="inbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="lane-int">
+          <mxGeometry x="360" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-obs" value="external_observations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-int">
+          <mxGeometry x="530" y="50" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-int-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-int">
+          <mxGeometry x="20" y="120" width="200" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-int-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-int">
+          <mxGeometry x="240" y="120" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-int" value="对象 18–19 · webhook 先观察再命令 · 禁止直写 TestRun/ReleaseTask/GateEvaluation" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-int">
+          <mxGeometry x="20" y="180" width="860" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane-ai" value="ai_governance  ·  AI 治理与助手" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;html=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="980" y="950" width="980" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="t-ailogs" value="ai_invocation_logs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-ai">
+          <mxGeometry x="20" y="50" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-skills" value="skills" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-ai">
+          <mxGeometry x="210" y="50" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-skill-ver" value="skill_versions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="lane-ai">
+          <mxGeometry x="350" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-routes" value="model_routes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-ai">
+          <mxGeometry x="510" y="50" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-copilot" value="copilot_sessions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="lane-ai">
+          <mxGeometry x="670" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="t-ai-outbox" value="outbox_events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-ai">
+          <mxGeometry x="20" y="120" width="200" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t-ai-idem" value="command_idempotency_records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane-ai">
+          <mxGeometry x="240" y="120" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n-ai" value="对象 12 / 14 / 15 / 20 · 无 Prompt 原文 · 无 LangGraph checkpoint / MCP / pgvector 表" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#4b5563;" vertex="1" parent="lane-ai">
+          <mxGeometry x="20" y="180" width="900" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="图例：蓝=23对象领域表 · 绿=从属结构 · 黄=Outbox/幂等/Inbox/intent（非第24对象）· 虚线=跨模块 ID 只读引用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1250" width="1920" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="note-m01" value="不出现：Temporal 持久库表、Redis 表、MinIO/Vault 专用表、共享仓储、跨模块双写。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#4b5563;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1300" width="1920" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-iam-quota" value="organization_id 只读" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;endArrow=open;endFill=0;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-organizations" target="t-org-quotas" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-proj-cases" value="project_id 只读" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;endArrow=open;endFill=0;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-projects" target="t-test-cases" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-env-run" value="env_id 只读" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;endArrow=open;endFill=0;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-envs" target="t-runs" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-run-result" value="test_run_id 只读；结果模块不得推进状态" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;endArrow=open;endFill=0;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-runs" target="t-case-results" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-eval-run" value="gate_evaluation_id 只读挂接" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;endArrow=open;endFill=0;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-evals" target="t-runs" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-appr-intent" value="同模块 FK" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-approvals" target="t-intents" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-obs-inbox" value="同模块去重" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" source="t-obs" target="t-inbox" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
