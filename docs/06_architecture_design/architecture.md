@@ -484,7 +484,7 @@ MCP 的 host/client/server、tools/resources/prompts 和协议授权都不是平
 
 ## 16. ADR 摘要
 
-ADR 0001、0002 为 **Accepted**；ADR 0003–0008 仍为 **Proposed**。Accepted 只表示架构决策已作出，不等于生产 Gate、供应商、部署参数或其依赖的 Proposed 业务变化已经批准。
+ADR 0001、0002、0009 为 **Accepted**；ADR 0003–0008 仍为 **Proposed**。Accepted 只表示架构决策已作出，不等于生产 Gate、供应商、部署参数或其依赖的 Proposed 业务变化已经批准。
 
 | ADR | 决策主题 | 本集成推荐中的位置 |
 | --- | --- | --- |
@@ -496,6 +496,7 @@ ADR 0001、0002 为 **Accepted**；ADR 0003–0008 仍为 **Proposed**。Accepte
 | [0006](adr/0006_connector_idempotency_and_recovery.md) | Connector、幂等、双通道观察 | Outbox/Inbox、查询后重试、终态吸收和人工对账 |
 | [0007](adr/0007_data_artifact_and_audit_protection.md) | 数据、Artifact、Evidence、Audit | 四级分类、Vault 引用、私有对象与混合访问候选 |
 | [0008](adr/0008_agent_langgraph_and_mcp_boundaries.md) | Agent、LangGraph、MCP | LangGraph 限 Agent/Copilot；M0–M3 无 MCP，M4 只读 POC |
+| [0009](adr/0009_technology_stack_freeze.md) | **Accepted**：技术栈冻结与分期基础设施 | 八类技术栈锁定版本（见 `tech_stack_decision-v1.0.md`）；M0/M1 单 PostgreSQL 数据面，Temporal / Redis / MinIO / Vault 推迟至 M2+（见 §15.1） |
 
 ADR 之间的依赖关系见 `adr/README.md:26` 至 `adr/README.md:32`；任何状态提升必须附评审、验证和上游一致性证据。
 

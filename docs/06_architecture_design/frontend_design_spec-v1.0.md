@@ -1,7 +1,8 @@
-# 前端设计规范（frontend_design_spec · v1.0）
+# 前端设计规范（frontend_design_spec · v1.1）
 
 > - **Status: Draft**
 > - **日期**：2026-08-25（2026-08-29 修订） · **版本**：v1.1
+> - **文件名说明**：文件名后缀 `-v1.0` 为迁入时的**稳定文件名标识**，不随内容升版重命名（已被 12 份文档与 ADR 0009 交叉引用）；**权威版本以本行「版本」字段为准**。
 > - **流程定位**：Stage 6（系统架构设计）**前端分册**——本仓库前端架构层的收口设计规范；后端架构正文由同目录 [architecture.md](architecture.md) 骨架承接，两者共同构成 Stage 6 产出
 > - **上游输入**：[problem_model.md](../03_problem_modeling/problem_model.md)（§4 IA 与 **25 页**清单、§4.3 三个关键页面结构约束、§2 状态机全集——唯一事实源）· [interaction_flows.md](../04_interaction_design/interaction_flows.md) 及 [chains/](../04_interaction_design/chains/) C1–C4（页面流 / 分支异常 / 审批交互）· [prd.md](../08_prd/prd.md)（US / FR / 边界场景）
 > - **下游消费者**：`../05_prototype/prototype_spec.md`（当前工作树不可用，见 §8 缺口声明）· Stage 10 AI 上下文 · Stage 11 前端实现 · [07_backend_design](../07_backend_design/README.md)（API 的展示契约输入）

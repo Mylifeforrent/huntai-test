@@ -1,23 +1,28 @@
 # HuntAI Test PRD v2 综合交付版——企业内部 AI 自动化测试平台
 
-> - **文档版本**：v2（2026-08-29）
+> - **文档版本**：v2.1（2026-08-30）——上游一致性复审回写版；v2 综合交付（2026-08-29）的正文结论与编号不变
 > - **状态**：终版需求综合（可评审、可测试）
 > - **仓库阶段**：Stage 8（`docs/08_prd`）；历史别名「12-PRD / 流程图 Stage 12 槽位」仅作溯源，不另起阶段
 > - **替代**：v1.6 中期版
 > - **评审对象**：产品、设计、工程、数据、安全、法务（含合规）
-> - **吸收范围**：本文已吸收建模（problem_model.md v1.4）、C1–C4 交互链、前后端边界规范、API 挂钩与架构已定稿原则。`docs/05_prototype` 无约定产出，禁止虚构 `prototype_spec`；页面以 [frontend_design_spec](../06_architecture_design/frontend_design_spec-v1.0.md) P01–P25 为准
+> - **吸收范围**：本文已吸收建模（`problem_model.md` v1.4）、C1–C4 交互链、前后端边界规范、API 挂钩与架构已定稿原则。`docs/05_prototype` **目录在当前工作树已不存在**、无约定产出，禁止虚构 `prototype_spec`；页面以 [frontend_design_spec](../06_architecture_design/frontend_design_spec-v1.0.md) P01–P25 为准（该规范为 Stage 6 前端分册，**当前是 Stage 5/7 原型缺位下的临时页面权威**，原型产出后须重跑 UX 一致性评审——见 §8.5 [GAP] G6）
 
 **输入优先级**（冲突不自行裁决，标 `[CONFLICT]` 并见第 8 章）：
 
 1. 现行 US/FR 编号（本仓库原 `prd.md` v1.6）
-2. `problem_model.md` v1.4（23 对象与状态机唯一事实源）
+2. [`problem_model.md`](../03_problem_modeling/problem_model.md) v1.4（23 对象与状态机唯一事实源）
 3. C1–C4 交互链
-4. `frontend_backend_boundary_spec`（路径 v1.0 文件，文内 Draft v1.1）
-5. `frontend_design_spec` P01–P25
-6. `api_spec.md` 仅作验收挂钩，不把接口清单写成功能清单
-7. `architecture.md` 已定稿原则
+4. [`frontend_backend_boundary_spec`](../06_architecture_design/frontend_backend_boundary_spec-v1.0.md) v1.1
+5. [`frontend_design_spec`](../06_architecture_design/frontend_design_spec-v1.0.md) v1.1 的 P01–P25
+6. [`api_spec.md`](../07_backend_design/api_spec.md) v1.0 仅作验收挂钩，不把接口清单写成功能清单
+7. [`architecture.md`](../06_architecture_design/architecture.md) 已定稿原则
 
-**编号纪律**：US-01…US-19、FR-01…FR-19 不得改号、不得删除另起；验收标准为新序列 `AC-001` 起（第 7 章）；禁止 `BR-xxx`、禁止编造 `API-xxx`。
+**引用约定**（v2.1 收口，消除既有歧义）：
+
+- **版本标识**：上游两份 Stage 6 分册的文件名后缀 `-v1.0` 是**迁入时的稳定文件名标识，不随内容升版重命名**；**权威版本一律以该文件文首「版本」字段为准**（两者当前均为 v1.1）。引用时写内容版本，不写文件名后缀。
+- **「05」歧义**：本文不再以裸「05」指代业务建模。业务建模一律写 `problem_model.md §N`（其文档标题中的「05」为开发流程图的历史 Stage 编号）；`docs/05_prototype` 仅在指仓库路径时出现。同理「06」「07」「12」等历史 Stage 编号只在溯源语境使用。
+
+**编号纪律**：US-01…US-19、FR-01…FR-19 不得改号、不得删除另起；验收标准为新序列 `AC-001` 起（第 7 章，当前至 AC-096）；禁止 `BR-xxx`、禁止编造 `API-xxx`。
 
 **纪律**（验收与表述不得相反）：受理 ≠ 完成；SSE ≠ 命令通道；`APPROVED` ≠ `EXECUTED` + `execution_result=ok`；`execution_result=unknown` 须对账 / 人工接管，禁止盲重试或按成功放行；不得要求展示 Restricted 明文、token 明文、Prompt 原文。
 
@@ -33,22 +38,28 @@ v2 正文按七块组织：① 需求背景与用户目标（第 1 章）；② 
 | --- | --- | --- |
 | ① 需求背景与用户目标（第 1 章） | ✅ PASS | 承接 v1.6 §1：P1–P5、目标用户、BG-1/2/3、非目标六条；未另起故事。基线仍 TBD，未把未批「90 天」写成默认 |
 | ② 用户故事 + 功能清单（第 2–3 章） | ✅ PASS | US-01…US-19 故事原文未改；每个 US 对应 1 个 FR，反向 19 个 FR 均有 US。**FR-01…FR-19 全在第 3 章清单**，无改号、无删除另起、无 `BR-xxx` |
-| ③ 核心流程与关键交互（第 4 章） | ✅ PASS | C1–C4 用户可感知步骤已标本地 vs 必调 API；权威成功对照边界 §6 |
+| ③ 核心流程与关键交互（第 4 章） | ✅ PASS（v2.1 修复后） | C1–C4 用户可感知步骤已标本地 vs 必调 API；权威成功对照边界 §6（§6-1…§6-16 十六条全部被引用且释义与上游一致）。v2.1 修复：v2 时点只有 C1 有异常表且漏 5 条上游分支，现已补齐并新建 §4.2.3 / §4.3.2 / §4.4.2 三张异常表 |
 | ④ 状态、异常、权限（第 5 章） | ✅ PASS | 状态 ⊆ problem_model；无第 24 对象；`not_evaluated` 仅 Proposed；角色四值；跨租户「资源不存在」 |
-| ⑤ 数据与接口关联（第 6 章） | ✅ PASS | 每 FR 列对象与查询/命令/SSE；系统内部单独标注；未编造 `API-xxx` |
-| ⑥ 验收标准 AC-xxx（第 7 章） | ✅ PASS | AC-001…AC-088，每 FR ≥1 条；可二元判定；LDAP 非 M0 必过 |
+| ⑤ 数据与接口关联（第 6 章） | ✅ PASS（v2.1 修复后） | 每 FR 列对象与查询/命令/SSE；系统内部单独标注；未编造 `API-xxx`（全文 119 个不同 API 编号逐一核对 `api_spec` §6 的 132 个已定义端点，**零 phantom ID**）。v2.1 修复：对象列补齐至与 `problem_model.md` §3 CRUD 矩阵逐行对齐（FR-01 +ApiToken、FR-02 +ModelRoute、FR-07 +TestRun、FR-13 +TestRun/AuditEvent、FR-15 +TestPlan/Connector、FR-19 +轨迹存储对象）；横切端点补 AC（见 ⑥）；API-001/002 的 GET-but-not-read 例外在 §6.2 第 5 条显式说明 |
+| ⑥ 验收标准 AC-xxx（第 7 章） | ✅ PASS | AC-001…AC-096，每 FR ≥1 条；可二元判定；LDAP 非 M0 必过。v2.1 补 AC-089–096 覆盖横切端点 |
 | ⑦ Out of Scope（第 8 章） | ✅ PASS | 含 §1.5、边界 §5.2、M4、Proposed、[GAP]、[CONFLICT] |
-| 领域对象 ⊆ 05 §1.1（23 个） | ✅ PASS（本章） | 本草稿未新增对象。23 对象唯一事实源为 problem_model.md v1.4：Organization、User/ProjectMember、Project、ExecutionEnvironment、TestCase(+Version)、TestPlan、TestRun、CaseResult/StepRun/Artifact、FailureCluster、EvidenceObject、ApprovalRequest、AIInvocationLog、AuditEvent、Skill(+SkillVersion)、ModelRoute、PerfBaseline、ReleaseTask、ApiToken、Connector、CopilotSession、OrgQuota、QualityGatePolicy、GateEvaluation |
+| 领域对象 ⊆ `problem_model.md` §1.1（23 个） | ✅ PASS | 未新增对象；v2.1 逐对象复核，名称、分组与计数与上游完全一致（斜杠与 `(+X)` 为分组写法，真实计数即 23）。唯一事实源为 `problem_model.md` v1.4：Organization、User/ProjectMember、Project、ExecutionEnvironment、TestCase(+Version)、TestPlan、TestRun、CaseResult/StepRun/Artifact、FailureCluster、EvidenceObject、ApprovalRequest、AIInvocationLog、AuditEvent、Skill(+SkillVersion)、ModelRoute、PerfBaseline、ReleaseTask、ApiToken、Connector、CopilotSession、OrgQuota、QualityGatePolicy、GateEvaluation |
 | 无 `not_evaluated` 已批准枚举 | ✅ PASS（本章） | FR-12 简述改为「缺配时无 GateEvaluation + 明确 reason，不得默认通过」；Proposed `not_evaluated` 不得写入已定需求（见第 8 章） |
-| 页面 ⊆ P01–P25 | ✅ PASS | 第 2/3 章「主页面」均取 frontend_design_spec；无虚构页面、无 `prototype_spec`（`docs/05_prototype` 无约定产出） |
+| 页面 ⊆ P01–P25 | ✅ PASS | 25 行页面表与 `frontend_design_spec` §2 逐行核对，编号与名称完全一致；无虚构页面、无 `prototype_spec` |
+| 页面覆盖（P01–P25 是否都有 FR 承接） | ⚠️ **PARTIAL** | v2 时点有 5 个 M0–M2 页面（P02 项目总览、P20 证据中心、P22 模型路由配置、P23 AI 能力开关、P24 审计检索）只出现在第 4 章叙述、不在第 2/3 章主页面列。**v2.1 已补入并成对更新 US/FR 两表**；P19 技能管理仍不覆盖——按 `frontend_design_spec` 该页为 **M4**，属预期外（见 §8.3） |
+| 页面权威来源 | ⚠️ **PARTIAL** | `frontend_design_spec` 是 **Stage 6 前端分册**，其 §8 把 `05_prototype/prototype_spec.md` 列为**下游消费者**而非自身上位。当前 Stage 5/7 原型缺位（目录已不存在），本 PRD 以该分册作**临时页面权威**；此替代关系与「原型产出后须重跑 Stage 5/6 UX 一致性评审」登记为 [GAP] **G6** |
 | 业务/用户目标 → 指标 | ✅ PASS | 第 1.4 节 BG-1/2/3 均配可测指标 + 目标值 + 时间范围 |
 | 指标 → 基线 | ❌ **FAIL（3 项，同 v1.6）** | ① 测试分析中位耗时基线无我方数据；② AI 生成采纳率基线无数据；③ 每成功工作流成本基线无数据。全部标 **TBD**，由平台负责人 + QA 负责人在 M0 第 2 周前盘点回填（Q1）；本文目标值为假设目标，基线回填后须复核。**不阻塞评审，阻塞 M1 放行** |
 | 风险 → 负责人 | ⚠️ **PARTIAL（同 v1.6）** | 风险已配角色级负责人（附录 / 第 8 章沿用）；**具体人名 TBD**（Q8，M0 启动会指派） |
 | AI 能力编号完整性 | ✅ PASS（沿用） | A1–A8 连续无断号；正文迁入附录，本章不展开 |
 | 「智能 / 准确 / 实时」禁用 | ✅ PASS（本章） | 未引入不可测形容词。US-03「15 分钟内决策」为故事原文，可测时效以附录 SLO / BG-1 为准，本章不发明新 SLO |
-| 引用文档版本对齐 | ✅ PASS（v2 时点） | 输入按文首优先级：prd.md v1.6（编号）、problem_model.md v1.4、C1–C4、边界规范路径 v1.0 / 文内 Draft v1.1、frontend_design_spec P01–P25、api_spec.md（仅挂钩）、architecture.md 已定稿原则。各被引文档以文首版本头为唯一事实源 |
+| 引用文档版本对齐 | ✅ PASS（v2.1 时点） | 输入按文首优先级：prd.md v1.6（编号）、`problem_model.md` v1.4、C1–C4、边界规范 v1.1、`frontend_design_spec` v1.1 的 P01–P25、`api_spec.md` v1.0（仅挂钩）、`architecture.md` 已定稿原则。各被引文档以文首版本头为唯一事实源；文件名 `-v1.0` 后缀为稳定标识，见文首「引用约定」 |
+| 交叉引用可解析性 | ✅ PASS（v2.1 修复后） | v2 时点存在 6 处失效引用：`PRD §6.2`（v2 无此锚点，实为附录 B.6）、两处裸 `§2.3`（v1.6 旧章号）、`架构 C1`（实为 `architecture.md` §8.1）、`api_spec §8`（实为 §7.L，文档级 §8 是 SSE 契约）、`边界 §6` 引文（实出自边界 §1 原则 6）。**均已修正** |
+| ADR 状态陈述 | ✅ PASS（v2.1 修复后） | v2 时点 §8.4 称「Accepted 仅 ADR 0001 / 0002」，**漏 ADR 0009（技术栈冻结，Accepted）**；同源错误存在于 `architecture.md` §16，已一并修正。现行：Accepted = 0001 / 0002 / 0009；Proposed = 0003–0008 |
 
-**结论：第 1–8 章与附录已齐。仍存在 1 项 FAIL（指标基线 TBD）与 1 项 PARTIAL（风险人名 TBD），不假装通过。不阻塞评审，但指标基线阻塞 M1 放行。**
+**结论：第 1–8 章与附录已齐。仍存在 1 项 FAIL（指标基线 TBD）与 3 项 PARTIAL（风险人名 TBD、页面权威为原型缺位下的临时替代、P19 属 M4 不覆盖），不假装通过。不阻塞评审，但指标基线阻塞 M1 放行。**
+
+> **v2.1 复审说明**：本版对五份上游文档（`problem_model.md` / C1–C4 / 边界规范 / `frontend_design_spec` / `api_spec.md`，另核 `architecture.md` 与 ADR 0001–0009）做了逐条交叉核对。**未发现编造的 API 编号、未发现被发明的领域状态或对象**；修复集中在失效交叉引用、ADR 状态陈述、追溯断链（对象列 / 页面列 / 横切端点验收）与异常分支覆盖。**本版不新增业务功能、页面、领域对象、状态或 API 编号；US/FR 编号不变。** 新登记 [CONFLICT-5]（`gate_waiver` 是否覆盖 Readiness 豁免）与 [GAP] G6（原型缺位下的页面权威替代），均只登记不裁决。
 
 ---
 
@@ -113,20 +124,20 @@ HuntAI Test 是企业内部自用（≤1000 用户、部门级多租户）的 AI
 | --- | --- | --- | --- | --- | --- |
 | US-01 | 测试工程师：导入 OpenAPI 后 AI 生成接口用例草稿，人工审阅后入库 | FR-05 | M1 | P07 / P05 | C1 |
 | US-02 | 测试工程师：接口失败时得到带证据的归因与修复建议（不自动应用） | FR-06 | M1 | P09 / P13 | C4 |
-| US-03 | Test Lead：一次执行后看到失败聚类 + 阻塞判断 + 历史对比，15 分钟内决策 | FR-07 | M1 | P09 | C4 |
+| US-03 | Test Lead：一次执行后看到失败聚类 + 阻塞判断 + 历史对比，15 分钟内决策 | FR-07 | M1 | P09 / P20 | C4 |
 | US-04 | 测试工程师：Web 用例执行自动留存截图/视频/Trace，可回放 | FR-09 | M2 | P13 / P09 | C1 |
 | US-05 | 测试工程师：定位器失效时收到自愈建议，diff 预览确认后生效并可回滚 | FR-10 | M2 | P13 | C2 / C4 |
 | US-06 | 开发：PR 上看到 Check Run 门禁结论，FAIL 时 CI 变红 | FR-13 | M2 | P12 / P03 / P25 | C1 |
-| US-07 | Test Lead：失败用例一键创建 Jira 缺陷，附证据与复现步骤 | FR-14 | M2 | P09 | C4 / C1 |
+| US-07 | Test Lead：失败用例一键创建 Jira 缺陷，附证据与复现步骤 | FR-14 | M2 | P09 / P25 | C4 / C1 |
 | US-08 | 性能工程师：配置压测场景（白名单环境 + 审批 + 并发预算）并得到基线对比 | FR-11 | M3 | P16 | C2 / C3 |
-| US-09 | Release Manager：基于 Jira 版本创建 Release Task，Readiness Gate 通过后经确认调用 Release 系统 | FR-15 | M3 | P17 / P06 | C1 |
-| US-10 | 全员：Copilot 用自然语言查询测试资产（只读） | FR-16 | M3 | P18 | 无 |
-| US-11 | 平台管理员：按部门设置 AI Token 预算并查看成本/质量看板 | FR-03 | M0 | P21 / P01 | 无 |
-| US-12 | 平台管理员：在审批中心统一处理所有 HITL 请求（参数哈希绑定） | FR-04 | M0 | P10 | C2 |
+| US-09 | Release Manager：基于 Jira 版本创建 Release Task，Readiness Gate 通过后经确认调用 Release 系统 | FR-15 | M3 | P17 / P06 / P25 | C1 |
+| US-10 | 全员：Copilot 用自然语言查询测试资产（只读） | FR-16 | M3 | P18 / P23 | 无 |
+| US-11 | 平台管理员：按部门设置 AI Token 预算并查看成本/质量看板 | FR-03 | M0 | P21 / P01 / P23 | 无 |
+| US-12 | 平台管理员：在审批中心统一处理所有 HITL 请求（参数哈希绑定） | FR-04 | M0 | P10 / P24 | C2 |
 | US-13 | 测试工程师：对难以脚本化的流程，用自然语言用例经 Skill+Agent 动态执行探索，成功轨迹一键固化为脚本入库 | FR-19 | M2 / M4 | P14 | C3 |
-| US-14 | 已有 Jenkins pipeline 的系统 Owner：在平台创建引用型用例绑定我的 Job，触发后平台采集日志/报告并进入统一分诊与门禁，零迁移获得平台能力 | FR-18 | M1 / M2 | P15 / P08 | C3 |
-| US-15 | 部门 Owner / 全体用户：用企业 SSO 账号登录，只能看到本部门与本项目的测试资产，越权访问一律不可达 | FR-01 | M0 | P04 | 无 |
-| US-16 | 平台管理员 / 安全：任何 AI 调用都能在一处查到调用者、模型、prompt 版本、真实用量与成本，不存在绕过日志的调用路径 | FR-02 | M0 | P21 | 无 |
+| US-14 | 已有 Jenkins pipeline 的系统 Owner：在平台创建引用型用例绑定我的 Job，触发后平台采集日志/报告并进入统一分诊与门禁，零迁移获得平台能力 | FR-18 | M1 / M2 | P15 / P08 / P25 | C3 |
+| US-15 | 部门 Owner / 全体用户：用企业 SSO 账号登录，只能看到本部门与本项目的测试资产，越权访问一律不可达 | FR-01 | M0 | P04 / P02 | 无 |
+| US-16 | 平台管理员 / 安全：任何 AI 调用都能在一处查到调用者、模型、prompt 版本、真实用量与成本，不存在绕过日志的调用路径 | FR-02 | M0 | P21 / P22 | 无 |
 | US-17 | 测试工程师 / SRE：执行任务不会永久卡在运行中——重启、失联、超时都有确定的收敛状态，等待态可见且可人工取消 | FR-08 | M1 | P09 / P08 | C3 |
 | US-18 | 性能工程师 / Test Lead：压测的 p95 与错误率与接口/Web 用同一套门禁阈值和结论对象，发布决策看到的是同一份质量口径 | FR-12 | M3 | P11 / P12 | C1 |
 | US-19 | 安全工程师：每个有副作用的动作在执行前都经统一策略裁决（放行/拒绝/需审批/需重认证），未声明副作用等级的动作默认拒绝 | FR-17 | M0 | P10 | C2 |
@@ -139,24 +150,24 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
 
 | FR | 简述 | US | 里程碑 | 主页面 | 主流程 |
 | --- | --- | --- | --- | --- | --- |
-| FR-01 | 组织（部门）→ 项目两级；SSO（OIDC）登录；角色 owner / admin / tester / viewer；租户隔离在 ORM / 中间件强制。LDAP **[CONFLICT]**（见第 8 章），不作为 M0 双登录必做 | US-15 | M0 | P04 | 无 |
-| FR-02 | 所有 AI 调用（无旁路）记录真实 usage、模型、prompt 版本、成本、延迟、数据分级，按部门归集。不要求展示 token 明文或 Prompt 原文 | US-16 | M0 | P21 | 无 |
-| FR-03 | 部门级 Token 预算 + 超限熔断提示；成本 / 质量看板（采纳率、无据结论率、成功率）。超预算后新 AI 调用被拒并通知 Owner | US-11 | M0 | P21 / P01 | 无 |
-| FR-04 | 统一 HITL 队列；审批卡片九要素；参数哈希绑定。执行结果区分 ok / failed / unknown，unknown 进入对账 / 人工接管。`APPROVED` ≠ `EXECUTED` + `execution_result=ok` | US-12 | M0 | P10 | C2 |
+| FR-01 | 组织（部门）→ 项目两级；SSO（OIDC）登录；角色 owner / admin / tester / viewer；租户隔离在 ORM / 中间件强制；ApiToken 签发 / 列表 / 吊销（明文仅一次）。LDAP **[CONFLICT]**（见第 8 章），不作为 M0 双登录必做 | US-15 | M0 | P04 / P02 | 无 |
+| FR-02 | 所有 AI 调用（无旁路）记录真实 usage、模型、prompt 版本、成本、延迟、数据分级，按部门归集；模型路由表可查可改（数据分级与成本上限约束）。不要求展示 token 明文或 Prompt 原文 | US-16 | M0 | P21 / P22 | 无 |
+| FR-03 | 部门级 Token 预算 + 超限熔断提示；成本 / 质量看板（采纳率、无据结论率、成功率）。超预算后新 AI 调用被拒并通知 Owner | US-11 | M0 | P21 / P01 / P23 | 无 |
+| FR-04 | 统一 HITL 队列；审批卡片九要素；参数哈希绑定。执行结果区分 ok / failed / unknown，unknown 进入对账 / 人工接管。`APPROVED` ≠ `EXECUTED` + `execution_result=ok` | US-12 | M0 | P10 / P24 | C2 |
 | FR-05 | OpenAPI / Postman 导入 → 生成默认不落库 → 审阅 → 保存并打 `ai-generated` 标签；采纳率 / 修改幅度埋点。生成失败有显式告警，禁止静默返回空 | US-01 | M1 | P07 / P05 | C1 |
 | FR-06 | 输入执行日志 + 响应 → 失败原因分类（7 值：env_down / auth_expired / locator_stale / assertion_real_bug / flaky / data_issue / unknown）+ confidence + fixes 建议；confidence ≥0.7 才显示「可应用」，应用必须走 FR-04 审批 + 快照 + 回滚 | US-02 | M1 | P09 / P13 | C4 |
-| FR-07 | 归一化结果 → 聚类 + 阻塞判断 + 历史对比；显示证据链接、置信度、无法判断项、用户修改历史 | US-03 | M1 | P09 | C4 |
+| FR-07 | 归一化结果 → 聚类 + 阻塞判断 + 历史对比；显示证据链接、置信度、无法判断项、用户修改历史；报告挂载到 TestRun，证据可在证据中心检索与导出 | US-03 | M1 | P09 / P20 | C4 |
 | FR-08 | 执行有确定收敛态（重启 / 失联 / 超时不永久卡在运行中）；等待态可见且可人工取消；变量解析失败必报错；受理回执 ≠ 业务完成 | US-17 | M1 | P09 / P08 | C3 |
 | FR-09 | Playwright 执行器独立于 API 进程；证据三件套（截图 / 视频 / Trace）自动上传对象存储；失败步骤有 Trace 可回放 | US-04 | M2 | P13 / P09 | C1 |
 | FR-10 | 主备定位器 + 健康度；失效时 AI 给出修复建议（仅建议），落地走 diff → 审批 → 快照 → 回滚。无自动改写路径 | US-05 | M2 | P13 | C2 / C4 |
 | FR-11 | 包装 Locust / k6；执行走统一 TestRun 10 态；目标环境白名单 + 高危审批 + 全局并发预算 + kill switch。不自研压测引擎 | US-08 | M3 | P16 | C2 / C3 |
 | FR-12 | max_p95_ms / max_error_rate 与 FR-13 同一 QualityGatePolicy、同一 GateEvaluation。缺配时无 GateEvaluation + 明确 reason，不得默认通过 | US-18 | M3 | P11 / P12 | C1 |
 | FR-13 | PR / push 触发 → 执行 → Check Run 三段式回写；门禁结论写入 CI exit code。豁免须走 FR-04。阈值与模式 = QualityGatePolicy，单次结论 = GateEvaluation | US-06 | M2 | P12 / P03 / P25 | C1 |
-| FR-14 | 单向创建 Jira 缺陷 + 链接回写；用例关联 story；未经审批不得写入；缺陷含证据附件 | US-07 | M2 | P09 | C4 / C1 |
-| FR-15 | Jira 版本圈定 → 范围快照 → 质量证据汇聚 → Readiness Gate → AI 草稿 → 审批后调用 Release 系统。AI 草稿禁止自动推送 | US-09 | M3 | P17 / P06 | C1 |
-| FR-16 | Copilot 最小版：只读技能 + 全量日志 + 权限感知 + 服务端会话。越权阻断；能力开关真实生效 | US-10 | M3 | P18 | 无 |
+| FR-14 | 单向创建 Jira 缺陷 + 链接回写；用例关联 story；未经审批不得写入；缺陷含证据附件；连接器在集成中心统一注册与观测 | US-07 | M2 | P09 / P25 | C4 / C1 |
+| FR-15 | Jira 版本圈定 → 范围快照 → 质量证据汇聚（含测试计划级结果）→ Readiness Gate → AI 草稿 → 审批后调用 Release 系统。AI 草稿禁止自动推送 | US-09 | M3 | P17 / P06 / P25 | C1 |
+| FR-16 | Copilot 最小版：只读技能 + 全量日志 + 权限感知 + 服务端会话。越权阻断；能力开关真实生效 | US-10 | M3 | P18 / P23 | 无 |
 | FR-17 | 所有工具 / 动作声明 L0–L4；Gate 输出 ALLOW / DENY / REQUIRE_APPROVAL / REQUIRE_REAUTH。未声明副作用等级的动作默认拒绝 | US-19 | M0 | P10 | C2 |
-| FR-18 | 执行环境为一等注册对象；引用型用例不托管脚本，仅声明目标 Job / 触发参数 / 采集配置 / 门禁阈值映射；归一化统一 TestRun 后与 FR-07 同一分诊、同权进门禁。M1 交付 Jenkins 触发 + JUnit 采集，M2 完善多格式适配器 | US-14 | M1 / M2 | P15 / P08 | C3 |
+| FR-18 | 执行环境为一等注册对象；引用型用例不托管脚本，仅声明目标 Job / 触发参数 / 采集配置 / 门禁阈值映射；归一化统一 TestRun 后与 FR-07 同一分诊、同权进门禁。M1 交付 Jenkins 触发 + JUnit 采集，M2 完善多格式适配器 | US-14 | M1 / M2 | P15 / P08 / P25 | C3 |
 | FR-19 | Script Mode = 确定性脚本执行（进门禁 / 发布证据）；Agent Mode = 用例意图动态执行，结果不进门禁，轨迹可一键转脚本草稿（人工确认后入库）。M2 试点、M4 完整 | US-13 | M2 / M4 | P14 | C3 |
 
 > **脚注（FR-08）**：实现选型见 `architecture.md`（Temporal 持久工作流等）；**选型 ≠ 生产就绪**（开放问题 Q3：托管 / 自托管、恢复、版本、容量、成本、值班 Gate）。不把 Temporal / Outbox / Worker 管理面写成用户功能。
@@ -205,7 +216,7 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
 
 以下规则对 C1–C4 全部适用，后文步骤不再重复展开。
 
-1. **命令回执 / API-071 ≠ 业务完成。** API-071 查询的是操作回执（协议面，非领域对象）。回执可查、命令「已受理」不等于领域进入权威成功态。对照边界 §6：「按钮反馈 ≠ 业务成功；前端在收到后端确认前只可呈现『受理 / 提交中』乐观态，不得将 UI 推进为『已完成』。」
+1. **命令回执 / API-071 ≠ 业务完成。** API-071 查询的是操作回执（协议面，非领域对象）。回执可查、命令「已受理」不等于领域进入权威成功态。对照边界 §1 原则 6（权威条件逐条见 §6 表）：「按钮反馈 ≠ 业务成功；前端在收到后端确认前只可呈现『受理 / 提交中』乐观态，不得将 UI 推进为『已完成』。」
 2. **SSE API-210–213 是非命令通道。** 只订阅进度 / 解析 / 聚类 / 轻量 hint，不承载取消、批准等写意图。与 GET 资源冲突时 **以 GET 为准**。SSE **断连 ≠** TestRun `FAILED` / `TIMEOUT`，也 ≠ ApprovalRequest `EXPIRED`（断连属网络类，业务语义未知）。
 3. **`APPROVED` ≠ `EXECUTED` + `execution_result=ok`。** 边界 §6-6：「操作回执」非权威；权威成功条件为「ApprovalRequest=APPROVED；**执行成功另判** EXECUTED + execution_result=ok（两段不同）。」`execution_result=unknown` 必须进入对账 / 人工接管，**禁止盲重试，禁止当成功放行**。
 4. **发起执行的权威成功 = TestRun `PENDING` + `run_id`（边界 §6-3），不是跳转 P09。** 边界 §6-3：前端即时反馈是「跳转 P09」（非权威）；权威成功条件是「TestRun(PENDING) 创建返回 run_id」。
@@ -315,9 +326,14 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
 | 引用型 Job 被删 / 改名 | 不进执行队列；`validity=invalid`（系统标记，可逆，不是第五生命周期态）。 |
 | Check Run 回写失败 | 重试 + 告警；门禁结论仍以评估结果为准，不默认通过。 |
 | Release 调用失败 | SUBMITTED → FAILED_RETRYABLE；人工幂等重试 → SUBMITTED，或放弃 → CANCELLED。 |
-| Readiness 不达标 | 允许带豁免说明发布，须 `gate_waiver`（C2），留痕可审计。 |
+| Readiness 不达标 | 允许带豁免说明发布，留痕可审计、不得静默放行。豁免动作是否复用 `gate_waiver` 见 **[CONFLICT-5]**（C1 与边界 §2.7 不一致，v2.1 不裁决）。 |
 | 超大报告 | 分片解析进度可见；超时则已完成部分入库 + 显式失败标记，不静默截断。 |
 | Agent 超步 / 总超时 | 强制终止，轨迹 incomplete，无自动重试。 |
+| CI 触发后平台重启 | `idempotency_key` 保证不重复触发外部 Job；轮询从中断处恢复。状态连续，无重复副作用（AC-079）。 |
+| Agent 请求白名单外工具 / 越权资源 | Policy Gate DENY + 安全事件记录；**连续 3 次拒绝自动终止任务**（AC-082 / AC-085）。 |
+| 同一压测场景并发触发 | 场景级互斥：第二次进入排队并提示，**不并行施压**（AC-054）。 |
+| 敏感数据进入日志 / 报告 | 落库前脱敏管道（正则 + 字典）；Prompt 不含 Restricted 级内容（AC-010）。 |
+| 执行环境降级 | ExecutionEnvironment ACTIVE → DEGRADED（健康检查失败）；**只阻断新发起**（选择器不可选），**在途 run 不中断**（见 §5.1.4）。 |
 | 跨租户引用 | 用户看到「资源不存在」（见第 5 章）。 |
 
 ---
@@ -364,6 +380,19 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
 - `heal_apply`：应用前快照失败则 fail-close，不写新版本。  
   **权威成功（边界 §6-12）：** 「新 TestCaseVersion + current_version_id 更新（EXECUTED + execution_result=ok；快照失败 fail-close = 未成功）。」
 - 第二次 consume：「该审批已被消费」，不产生第二次副作用（行锁，系统内部）。
+
+### 4.2.3 异常与分支（浓缩）
+
+| 用户可见情况 | 走向（已有状态 / 行为，不新造） |
+| --- | --- |
+| 审批拒绝 | ApprovalRequest → REJECTED（附理由，留痕）；执行中 L2+ 的 TestRun WAITING_APPROVAL → CANCELLED；**ReleaseTask 停留 PENDING_CONFIRM**（可改后重提，不回退到 DRAFT）。 |
+| 审批超时 | TTL 到期 → 升级 `escalate_to` → 仍未处理则 EXPIRED，**任何情况不自动放行**；关联 TestRun 停留 WAITING_APPROVAL（AC-020）。 |
+| 上游对象先终止 / 撤回 | 待审卡片因执行前提消失而不可执行；执行前复核对已离开等待态的对象**不 consume**；置 EXPIRED + reason（withdrawn / invalidated）+ AuditEvent。 |
+| 参数失效（anti-TOCTOU） | 哈希不一致 → 拦截，卡片「审批已失效」；原 APPROVED 不再可执行，须经 API-113 生成新请求（新 `param_hash`、重新四眼与 TTL）。 |
+| AI 降级 | 仅 AI 增强降级，审批与执行不受影响；`heal_apply` 依赖 AI 建议，降级期间**不产生新 heal_apply 审批**，已入队卡片照常可批；卡片区 3 仍展示生成时的模型与版本（历史事实不变）。 |
+| 执行环境降级 | ACTIVE → DEGRADED 属健康检查治理，发生在 `env_register` 审批之后，**不回流审批链**（停用走 DISABLED）。 |
+| 僵尸回收 | **不适用本链**：心跳回收治理执行进程活跃态（C3）；WAITING_APPROVAL 是等待态，由审批独立 TTL（EXPIRED）治理。两套超时职责分离，防止「任务超时连带放行」。 |
+| 执行后失败（补偿） | `release_push` → FAILED_RETRYABLE（幂等重试不得重复写入）；`jira_write` 按连接器重试策略，幂等键 + `external_request_id` 防重复建缺陷；`heal_apply` 异常走快照恢复（API-039）。外部对象不自动删除。 |
 
 ---
 
@@ -416,6 +445,23 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
 11. 工作台监控活跃 run；事后 P20 / P24 取证。  
     **必须调 API（边界 §5.1）：** API-020、API-026、API-024。
 
+### 4.3.2 异常与分支（浓缩）
+
+| 用户可见情况 | 走向（已有状态 / 行为，不新造） |
+| --- | --- |
+| 人工终止 | RUNNING → STOPPING → CANCELLED；PENDING 阶段直达 CANCELLED；排队中走 WAITING_EXTERNAL → CANCELLED（幂等取消）。外部 Job cancel 后**已产生的构建记录照常采集入库**。 |
+| 外部 Job 排队超时 | 停留 WAITING_EXTERNAL，可见 + 告警 + 可幂等取消；**仅告警，不自动迁移、不自动取消外部 Job**（阈值 TBD）。 |
+| 心跳超时（僵尸回收） | RUNNING → TIMEOUT 自动回收；已产生的 CaseResult / StepRun / Artifact 照常入库（旁路进 C4）；**不自动重跑**，重跑由 Test Lead 决定。 |
+| Agent 超步 / 总超时 | 系统主动终止走 STOPPING → CANCELLED，轨迹 incomplete；进程失联由心跳兜底 RUNNING → TIMEOUT（AC-083 / AC-088）。 |
+| 执行环境降级 / 停用 | 发起时该环境在第二层不可选；**在途 run 不中断**——RUNNING 失败按 FAILED 正常落账，WAITING_EXTERNAL 继续幂等采集。 |
+| 参数校验失败 | Job Schema 不过或双层变量解析失败 → PENDING → VALIDATING → FAILED，不进执行队列；**变量解析失败必报错**，禁止静默保留原文的「假绿」。 |
+| 引用型 Job 被删 / 改名 | 存在性校验失败 → `validity=invalid`（系统标记，可逆）+ 通知 Owner，不进执行队列。 |
+| AI 降级 | Script / external_ci 链路不依赖模型，照常执行；**Agent Mode 在网关不可用时任务排队不启动**（不派发 TestRun）；横幅显式提示，不静默。 |
+| 自动重试适用性 | 功能回归 run 可按 FR-08 重试 / 熔断 / fail-fast 治理；**压测任务不适用自动重试**（语义错误，FR-11 / AC-053）；**Agent 任务不适用自动重试**（FR-19）。两者终态后仅提供人工重新发起入口。 |
+| WAITING_EXTERNAL 适用范围 | 仅 `execution_source=external_ci` 出现；平台执行器（script / agent）**不适用**。 |
+| Agent × 外部 CI | **一期不支持**：第二层选外部 CI 时第一层 Agent 置灰并显示原因。 |
+| 超大报告 | 仅 external_ci 适用：分片解析进度可见；超时则已完成部分入库 + 显式失败标记，不静默截断。 |
+
 ---
 
 ## 4.4 C4 失败分诊链
@@ -428,7 +474,7 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
 
 主入口：终态 SUCCEEDED / FAILED 且含失败 CaseResult。旁路：CANCELLED / TIMEOUT 已入库失败结果同样归一化与聚类。无失败的 SUCCEEDED 不触发失败聚类。
 
-既有 SLO（非新指标）：A2 在 run 完成后 **≤5 分钟**出报告（10k 用例级）。心跳 / 审批 TTL 等其它数值仍 **TBD**。
+既有 SLO（非新指标）：A2 在 run 完成后 **≤5 分钟**出报告（10k 用例级）；出处见 §5.5 与附录 B.6，本章不发明新 SLO。心跳 / 审批 TTL 等其它数值仍 **TBD**。
 
 ### 4.4.1 用户可感知步骤
 
@@ -467,7 +513,28 @@ FR 编号与含义冻结自 v1.6 §2.2，简述压缩为用户可感知能力。
    **必须调 API（边界 §5.1）：** API-061、API-111。
 
 9. 证据中心 / 审计检索复用与追溯。Agent 型失败上下文在 P14（不进门禁，证据照常入链）。  
-   **必须调 API（边界 §5.1）：** API-026、API-024；P14 为 API-067。
+   **必须调 API（边界 §5.1）：** API-026、API-024；P14 为 API-067。降级率与无据结论率在 AI 成本看板（P21）观测：  
+   **必须调 API（边界 §5.1）：** API-183。
+
+### 4.4.2 异常与分支（浓缩）
+
+**本链不迁移 TestRun 状态**（见 §4.4 硬约束）；下表分支均只作用于聚类报告、建议与 ApprovalRequest。
+
+| 用户可见情况 | 走向（已有状态 / 行为，不新造） |
+| --- | --- |
+| run 为 CANCELLED / TIMEOUT | 已产生的 CaseResult / Artifact 照常入库并进入分诊（旁路入口）。 |
+| 聚类生成中「取消」 | **不适用**：聚类是系统自动任务，无用户可取消的执行体；用户离开页面不取消生成，离开再进入不丢结果。 |
+| A2 调用超时 / schema 失败 | 同参数重试 1 次（temperature 0）→ 仍失败走规则聚类 fallback（按错误码 / 接口路径分组，confidence 0.3），`AIInvocationLog.result=degraded`。超时数值见附录 A。 |
+| AI 降级横幅 | 聚类报告区顶部显式横幅「当前为规则聚类」；降级期间无 A4 建议、自愈入口不出现，人工修复路径不受影响。禁止静默。 |
+| 审批超时 | ApprovalRequest → EXPIRED，不自动放行；自愈不应用、缺陷不创建。**本链不存在「任务停在 WAITING_APPROVAL」**（该状态仅执行中 L2+ 出现）。 |
+| 审批拒绝 | REJECTED：不产生新 TestCaseVersion、无 Jira 写入；可修改后重新提交（新审批）。 |
+| 参数失效（anti-TOCTOU） | 哈希不匹配 → 拦截，卡片「审批已失效」，须重新审批。 |
+| 快照失败 | `heal_apply` fail-close 中止，不写新版本；EXECUTED 附 `execution_result=failed` + AuditEvent 留痕（AC-029）。 |
+| 无法判断项 | `unclustered_refs` 独立区块显式展示，逐条可追溯原始 CaseResult 与证据；禁止编造 root_cause，不确定必须 unknown / uncertain。 |
+| confidence < 0.7 | 仅展示诊断，不显示「可应用」；簇标注 uncertain，人工接管点为 Test Lead 审阅（AC-028）。 |
+| 无据结论 | `evidence_refs` 只允许引用输入证据池内 ID，服务端校验违规则**整批拒收** → fallback；无据结论率 <2%（AC-034）。 |
+| 敏感数据脱敏 | 报告 / 日志落库前经脱敏管道；证据查看器呈脱敏后形态（AC-010）。 |
+| 跨租户引用 | `evidence_id` / `case_result_id` 跨租户一律 404「资源不存在」（AC-003）。 |
 
 ---
 
@@ -620,7 +687,7 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 | 项 | 数值 | 性质 |
 | --- | --- | --- |
 | 压测 kill switch 停止全部施压进程 | **60s** | 已有验收（FR-11），非新指标 |
-| A2 分诊报告 | run 完成后 **≤5 分钟**（10k 用例级） | 已有 SLO（PRD §6.2），非新指标、非硬超时 |
+| A2 分诊报告 | run 完成后 **≤5 分钟**（10k 用例级） | 已有 SLO（[附录 B.6](#b6-延迟slo均为可测定义)），非新指标、非硬超时 |
 | 其余 TTL / 心跳 / 排队告警 / 幂等时效 / SSE 心跳间隔 | **TBD** | 不得在 PRD 中填写未批数字 |
 
 ---
@@ -633,7 +700,7 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 
 | 列 | 含义 |
 | --- | --- |
-| 领域对象 | 仅 05 §1.1 的 23 个；操作语义见 05 §3 CRUD 矩阵，此处不展开字段 |
+| 领域对象 | 仅 `problem_model.md` §1.1 的 23 个；操作语义见 `problem_model.md` §3 CRUD 矩阵，此处不展开字段。本列**与 §3 CRUD 矩阵逐行对齐**，含读引用（`:R`）与副作用落点（`:EXE`） |
 | 查询 API | GET（及等价只读） |
 | 命令 API | 浏览器会话下的写 / 状态迁移 / Preview / AI 受理；**不含** HMAC 入站 |
 | SSE | `api_spec` §6.18 |
@@ -641,45 +708,46 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 
 **API-090**：HMAC 入站观察入口，先验签再 Inbox；不是浏览器会话命令，一律记入「系统内部 / 无产品 API」。  
 **API-222**：Proposed M2+ 短期授权，**不作为 M0 必过端点**，不列入下表查询列。  
-**横切（不构成新 FR）**：`API-020` 工作台聚合；`API-024` / `API-025` 审计检索；`API-026`–`API-028` 证据检索与导出。另：`API-021`–`API-023` / `API-029` / `API-040` 通知与 SIEM 配置；`API-050`–`API-055` TestPlan；`API-170`–`API-172` ApiToken 管理；`API-196`–`API-198` ModelRoute——均无独立 FR 编号，验收挂到既有 FR（见第 7 章）。  
+**横切（不构成新 FR）**：`API-020` 工作台聚合；`API-024` / `API-025` 审计检索；`API-026`–`API-028` 证据检索与导出受理、`API-223` 导出包代理下载（受理 ≠ 导出完成，见 AC-096）。另：`API-021`–`API-023` / `API-029` / `API-040` 通知与 SIEM 配置；`API-050`–`API-055` TestPlan（挂 FR-15，见 AC-094 / AC-095）；`API-160`–`API-166` 连接器与集成中心 P25（挂 FR-13 / FR-14 / FR-15 / FR-18，见 AC-091–AC-093）；`API-170`–`API-172` ApiToken 管理（挂 FR-01，见 AC-006 / AC-090）；`API-196`–`API-198` ModelRoute（挂 FR-02，见 AC-089）——均无独立 FR 编号，验收挂到既有 FR，条目见 [第 7 章补充验收](#补充验收横切能力ac-089ac-096)。  
 **M4 超出本期产品面必过**：`API-194` / `API-195`（技能三级发布）对 FR-16 M3 最小版为 Out of Scope。
 
 ### 6.1 FR → 对象 → API
 
 | FR | 领域对象（只读引用建模） | 查询 API | 命令 API | SSE | 系统内部 / 无产品 API |
 | --- | --- | --- | --- | --- | --- |
-| FR-01 多租户与身份 | Organization、User/ProjectMember、Project | API-005、API-006、API-010–013 | API-001–004、API-014–016 | — | 无组织上下文拒绝（非放行）；租户过滤在 ORM/中间件 |
-| FR-02 AI 日志计量 | AIInvocationLog | API-184、API-185 | — | — | 全量写入（LLM 工厂唯一出口）；无产品面「写日志」API |
+| FR-01 多租户与身份 | Organization、User/ProjectMember、Project、ApiToken | API-005、API-006、API-010–013、API-170 | API-003、API-004、API-014–016、API-171、API-172；**认证跳转**：API-001、API-002（见 §6.2 第 5 条） | — | 无组织上下文拒绝（非放行）；租户过滤在 ORM/中间件 |
+| FR-02 AI 日志计量 | AIInvocationLog、ModelRoute | API-184、API-185、API-196 | API-197、API-198 | — | 全量写入（LLM 工厂唯一出口）；无产品面「写日志」API |
 | FR-03 预算与看板 | OrgQuota | API-017、API-018、API-183 | API-199（关停/收紧相关） | — | 超限拒绝经对应 AI 命令失败返回，无独立 reject API；配额扣减内部 |
 | FR-04 审批中心 | ApprovalRequest、AuditEvent | API-110、API-111、API-121 | API-112、API-113、API-120 | — | Execute consume / execution intent；参数哈希复核与行锁 |
 | FR-05 用例生成两步式 | TestCase(+Version)、AIInvocationLog | API-030、API-031、API-181、API-182、API-204 | API-205、API-180、API-032–035 | API-211 | 生成默认不落库；AIInvocationLog 写入内部 |
 | FR-06 失败自愈 | FailureCluster、TestCase Version、ApprovalRequest、EvidenceObject | API-130、API-131 | API-120、API-112、API-039 | — | heal_apply 执行与应用前快照（失败 fail-close） |
-| FR-07 失败聚类报告 | FailureCluster、EvidenceObject、CaseResult | API-130、API-131、API-133 | API-132 | API-210（聚类进度） | A2 聚类生成、归一化管道、evidence_refs 校验 |
+| FR-07 失败聚类报告 | FailureCluster、EvidenceObject、CaseResult、TestRun（挂报告） | API-130、API-131、API-133 | API-132 | API-210（聚类进度） | A2 聚类生成、归一化管道、evidence_refs 校验；报告挂载到 TestRun 为内部写 |
 | FR-08 执行收敛 | TestRun、CaseResult/StepRun/Artifact | API-060、API-061、API-064–066、API-071 | API-062、API-063、API-080 | API-210 | Temporal / Outbox / Worker、心跳与僵尸回收、状态机迁移 |
 | FR-09 Playwright 执行器 | Artifact、ExecutionEnvironment | API-066、API-220、API-221 | 无额外命令（制品由 run 产出） | —（进度走 FR-08 的 API-210） | 容器执行与三件套上传对象存储 |
 | FR-10 定位器自愈 | TestCase Version、ApprovalRequest | API-031、API-037、API-038 | API-120、API-112、API-039 | — | 建议生成（A3）；无自动改写路径 |
 | FR-11 压测编排 | TestRun、PerfBaseline、ApprovalRequest、OrgQuota | API-056、API-059 | API-057、API-058、API-062、API-120 | — | 白名单外 DENY（不进审批）；场景互斥；kill 关停走 API-199 |
 | FR-12 性能门禁 | QualityGatePolicy、GateEvaluation、PerfBaseline | API-140、API-141、API-144–146、API-056 | API-142、API-143 | — | 评估管线（与 FR-13 同一模型）；缺配不创建 GateEvaluation |
-| FR-13 Check Run 门禁 | QualityGatePolicy、GateEvaluation、Connector、ApprovalRequest | API-144–146 | API-167、API-120、API-112 | — | Check Run 三段式回写；HMAC 入站 **API-090**（非会话命令） |
-| FR-14 Jira 缺陷 | Connector、ApprovalRequest、EvidenceObject | —（读走横切 API-026 / API-160） | API-120、API-112 | — | 连接器 jira_write 执行（审批通过后） |
-| FR-15 Release | ReleaseTask、EvidenceObject | API-150、API-151、API-155 | API-152–154、API-120 | — | `release_push` 执行（域仅准备）；Release webhook 观察走 API-090 |
+| FR-13 Check Run 门禁 | QualityGatePolicy、GateEvaluation、Connector、ApprovalRequest、TestRun、AuditEvent | API-144–146、API-160、API-161、API-164 | API-167、API-162、API-163、API-120、API-112 | — | Check Run 三段式回写与豁免写 AuditEvent；HMAC 入站 **API-090**（非会话命令） |
+| FR-14 Jira 缺陷 | Connector、ApprovalRequest、EvidenceObject | —（读走横切 API-026 / API-160 / API-161） | API-120、API-112 | — | 连接器 jira_write 执行（审批通过后） |
+| FR-15 Release | ReleaseTask、EvidenceObject、TestPlan、Connector | API-150、API-151、API-155、API-050、API-051 | API-152–154、API-052–055、API-120 | — | `release_push` 执行（域仅准备，Connector(release):EXE）；Release webhook 观察走 API-090 |
 | FR-16 Copilot | CopilotSession、Skill、AIInvocationLog | API-190、API-193 | API-191、API-192 | — | AIInvocationLog 写入内部；**API-194 / API-195 M4 Out of Scope** |
 | FR-17 Policy Gate | AuditEvent（无独立门禁表） | —（审计读走横切 API-024） | API-120、API-004 | — | 四值裁决（ALLOW / DENY / REQUIRE_APPROVAL / REQUIRE_REAUTH）系统内部；产品面 Preview + 再认证 |
 | FR-18 执行环境 / 引用型 | ExecutionEnvironment、TestCase（referenced）、TestRun | API-100、API-101、API-104、API-105、API-070 | API-102、API-103、API-106、API-062、API-080 | API-210（解析进度，同 FR-08 通道） | 外部 Job 幂等触发 / 轮询；HMAC 入站 **API-090** |
-| FR-19 双执行模式 | TestRun（agent）、TestCase、Skill | API-067 | API-062、API-063、API-068 | — | Agent Worker；工具经 Policy Gate；不产生 GateEvaluation |
+| FR-19 双执行模式 | TestRun（agent）、TestCase、Skill、CaseResult/StepRun/Artifact（轨迹存储） | API-067 | API-062、API-063、API-068 | — | Agent Worker；工具经 Policy Gate；轨迹以 Artifact + CaseResult 存储；不产生 GateEvaluation |
 
 ### 6.2 列使用说明
 
 1. **查询 / 命令 / SSE 已拆分**；同一 ID 不在两列重复，除非语义确为不同入口（无此情况）。  
 2. **FR-02** 写 AIInvocationLog、**FR-04** Execute consume、**FR-08** Temporal/Outbox/Worker、**FR-17** Policy Gate 裁决：均无产品面写 API。  
 3. **API-080** 与 **API-062** 同路径、不同鉴权（Tok `execute` vs Sess），同属命令列。  
-4. M0/M1 制品内容访问为 **API-221 代理下载**；**API-222 不出现在上表**。
+4. M0/M1 制品内容访问为 **API-221 代理下载**，导出包内容访问为 **API-223 代理下载**；**API-222 不出现在上表**。  
+5. **认证跳转例外（API-001 / API-002）**：两者 HTTP 方法为 GET，但不是领域只读——它们发起 IdP 跳转并在回调处签发服务端会话（产生状态变化），鉴权模式为 `Pub` 而非 `Sess`。因此不归入「查询 API」列，在命令列单列为「认证跳转」，本条为列口径的唯一显式例外。
 
 ---
 
 ## 7. 验收标准
 
-编号 **AC-001** 起全局唯一、按 FR 分组、连续无断号。每条可二元判定（Pass / Fail）。LDAP 登录**不是** M0 必过项；M0 身份必过为 OIDC（API-001 / API-002 / API-005）。时间与比例只采用既有数字或 TBD。v1.6 §2.3 边界场景全部挂到既有 FR，不新开 FR。
+编号 **AC-001** 起全局唯一、按 FR 分组、连续无断号（AC-001–088 按 FR 分节；AC-089–096 为横切补充块，每条仍显式标注所挂 FR）。每条可二元判定（Pass / Fail）。LDAP 登录**不是** M0 必过项；M0 身份必过为 OIDC（API-001 / API-002 / API-005）。时间与比例只采用既有数字或 TBD。v1.6 §2.3 边界场景全部挂到既有 FR，不新开 FR。
 
 判定写法：Given / When / Then，或「若…则…」。权威成功条件以后端结果为准（边界规范 §6）：回执 ≠ 终态；SSE 进度 ≠ 终态。
 
@@ -881,7 +949,7 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 - **ID**：AC-027
 - **FR**：FR-05
 - **API 挂钩**：API-182
-- **判定**：Given 生成批次中单条输出未通过 schema 校验，When 返回草稿，Then 整批为 partial，该条进入失败列表可见（与 AC-024 同纪律，覆盖 §2.3「生成批次单条失败」）。
+- **判定**：Given 生成批次中单条输出未通过 schema 校验，When 返回草稿，Then 整批为 partial，该条进入失败列表可见（与 AC-024 同纪律，覆盖 v1.6 §2.3「生成批次单条失败」）。
 - **里程碑**：M1
 
 ### FR-06 失败归因建议
@@ -1339,19 +1407,81 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 - **判定**：Given Agent 进程失联，When 心跳超时，Then RUNNING→TIMEOUT（与系统主动超步的 STOPPING→CANCELLED 区分）。不得永久 RUNNING。
 - **里程碑**：M2
 
+### 补充验收：横切能力（AC-089…AC-096）
+
+> 本节覆盖第 6 章「横切（不构成新 FR）」列出、但此前无验收条目的既有端点：ModelRoute、ApiToken 吊销、连接器与集成中心、TestPlan、证据包导出下载。  
+> **不新增 FR 编号、不新增页面 / 对象 / API**——每条仍显式挂到既有 FR。编号接续 AC-088，全局唯一、连续无断号；分组仍按 FR 标注（本节为跨 FR 的横切块，故集中排列以保编号升序）。
+
+**AC-089**
+- **ID**：AC-089
+- **FR**：FR-02
+- **API 挂钩**：API-196、API-197、API-198
+- **判定**：Given 管理员在模型路由配置页（P22），When GET API-196 读路由表、PUT API-197 更新路由、POST API-198 测试连接，Then ① 响应不含供应商凭证明文与 Restricted 正文；② 路由声明的可处理数据分级真实生效（Restricted 不出站）；③ 更新与测试连接均写 AuditEvent。仅改展示不生效者为 Fail。
+- **里程碑**：M0
+
+**AC-090**
+- **ID**：AC-090
+- **FR**：FR-01
+- **API 挂钩**：API-172、API-170、API-080
+- **判定**：Given 已签发且可用的 ApiToken，When 调用 API-172 吊销，Then 该 token 此后调用 Tok 端点（如 API-080）一律被拒；API-170 列表反映吊销投影。吊销后仍可执行者为 Fail。
+- **里程碑**：M0
+
+**AC-091**
+- **ID**：AC-091
+- **FR**：FR-13（连接器为 FR-13 / FR-14 / FR-15 / FR-18 共用基础设施）
+- **API 挂钩**：API-162、API-163、API-160、API-161
+- **判定**：Given 管理员在集成中心（P25）注册（API-162）或更新（API-163）连接器，When 随后读取 API-160 / API-161，Then 响应**不含** secret、webhook secret 或凭证明文（凭证只存引用）；配置变更写 AuditEvent。任一读出口出现明文即 Fail。
+- **里程碑**：M0
+
+**AC-092**
+- **ID**：AC-092
+- **FR**：FR-18
+- **API 挂钩**：API-164、API-090
+- **判定**：Given 入站 webhook 已投递，When GET API-164，Then 可查投递历史与失败重试记录；**验签失败的投递同样可查且明确标记为已拒绝**（与 AC-080 同纪律：可观测不等于放行）。静默丢弃投递记录为 Fail。
+- **里程碑**：M1
+
+**AC-093**
+- **ID**：AC-093
+- **FR**：FR-13
+- **API 挂钩**：API-165、API-166
+- **判定**：Given 出站通知渠道配置，When PUT API-166 配置后 GET API-165 读回，Then 配置一致且**不内联 Webhook secret**；配置成功 ≠ 某条通知已投递成功（投递结果另判）。
+- **里程碑**：M2
+
+**AC-094**
+- **ID**：AC-094
+- **FR**：FR-15
+- **API 挂钩**：API-052、API-054、API-055、API-051
+- **判定**：Given 在测试计划页（P06）创建计划，When 依次调用 API-052 创建、API-054 绑定用例集、API-055 绑定定时，Then 三步各自独立且权威状态以 API-051 读回为准：**创建成功 ≠ 已绑定用例集 ≠ 已绑定定时 ≠ 已发起执行**。把创建回执当作计划就绪者为 Fail。
+- **里程碑**：M1
+
+**AC-095**
+- **ID**：AC-095
+- **FR**：FR-15
+- **API 挂钩**：API-051、API-155
+- **判定**：Given Release 任务汇聚质量证据，When 该版本关联的测试计划结果参与 Readiness 评估，Then 计划级结果经 API-051 作为输入之一；若计划结果缺失或未执行，Readiness 投影须**显式标注数据缺口**，**不得**按通过处理（与 AC-057 / AC-061「缺配不默认通过」同一纪律）。
+- **里程碑**：M3
+
+**AC-096**
+- **ID**：AC-096
+- **FR**：FR-09
+- **API 挂钩**：API-028、API-212、API-223
+- **判定**：Given 已受理证据包导出（API-028），When 经 API-212 观察进度并在完成后调用 API-223，Then 取得导出包内容；**受理回执与 SSE 进度均 ≠ 导出完成**（权威为 API-223 可授权取得内容）；导出包内不得含 Restricted 明文，`receipt_id` 不得当作授权令牌。
+- **里程碑**：M2
+
 ---
 
 ## 7.1 覆盖核对
 
 | 项 | 结果 |
 | --- | --- |
-| AC 编号 | AC-001 … AC-088，连续无断号，共 **88** 条 |
+| AC 编号 | AC-001 … AC-096，连续无断号，共 **96** 条（AC-089–096 为横切补充块，见上节） |
 | FR-01…FR-19 | 每一 FR 至少 1 条（见各节标题） |
+| 横切端点验收 | ModelRoute AC-089；ApiToken 吊销 AC-090；连接器与集成中心 AC-091–093；TestPlan AC-094 / 095；导出包下载 AC-096——第 6 章「验收挂到既有 FR」不再是空头声明 |
 | LDAP | 未列为 M0 必过 |
 | API-222 | 仅 AC-047 负向：非 M0 必过 |
 | Gate 缺配 | AC-057 / AC-061：无 GateEvaluation + reason，不用 `not_evaluated` 枚举 |
 | 制品保留 | 无默认天数；保留期 TBD / Q6 |
-| §2.3 边界 | 超大报告 AC-035；生成 partial AC-027；AI 降级 AC-070；审批超时不放行 AC-020；压测互斥 AC-054；CI 重启幂等 AC-079；跨租户 404 AC-003；脱敏 / Restricted AC-010；Agent 超步 AC-083；Job 失效 AC-077；等待态可见 AC-043 / AC-078；注入 AC-071 / AC-082 |
+| v1.6 §2.3 边界场景 → AC 映射 | 超大报告 AC-035；生成 partial AC-027；AI 降级 AC-070；审批超时不放行 AC-020；压测互斥 AC-054；CI 重启幂等 AC-079；跨租户 404 AC-003；脱敏 / Restricted AC-010；Agent 超步 AC-083；Job 失效 AC-077；等待态可见 AC-043 / AC-078；注入 AC-071 / AC-082 |
 
 **关键 FR 路径对照**：FR-04 含批准成功（AC-015）、拒绝（AC-019）、过期等待（AC-020）、哈希失效（AC-016）、unknown（AC-017）；FR-05 含生成不落库（AC-022）与失败/partial（AC-024/027）；FR-08 含受理（AC-037）、回执非终态（AC-038）、取消受理非 CANCELLED（AC-040）；FR-12/13 含缺配不放行；FR-18 含 VALIDATING→FAILED 与幂等；FR-19 含 DENY、incomplete 无重试、无 GateEvaluation。
 
@@ -1379,22 +1509,16 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 
 ## 8.2 纯本地操作（边界 §5.2，验收不为其编造 API）
 
-下列操作属于前端 UI，**无服务端状态变更、无 API 调用**。验收标准不为这些条目发明接口、资源或 OpenAPI 路径。对照 [frontend_backend_boundary_spec-v1.0.md](../06_architecture_design/frontend_backend_boundary_spec-v1.0.md) §4.2 / §5.2。
+下列操作属于前端 UI，**无服务端状态变更、无 API 调用**。验收标准不为这些条目发明接口、资源或 OpenAPI 路径。对照 [frontend_backend_boundary_spec](../06_architecture_design/frontend_backend_boundary_spec-v1.0.md) §4.2 / §5.2。
 
-| # | 纯本地操作 | 说明（不构成后端事实） |
-| --- | --- | --- |
-| 1 | 七态渲染 | 七态基线 + 链路特殊态的页面呈现（`frontend_design_spec` §5.1）；终态只认后端下发 |
-| 2 | 表单即时校验 | 格式 / 必填 / 类型的提示性校验；权威校验在后端（Job Schema / 双层变量 / 存在性 / 配额） |
-| 3 | 联动置灰 | 模式 × 环境组合、非 ACTIVE 环境、角色只读；置灰 ≠ 安全边界 |
-| 4 | 动态表单 | 按后端下发的 `params_schema_ref` 渲染控件，前端不自造 schema |
-| 5 | 查看器控件 | diff 查看器、参数哈希折叠、Trace 回放、证据三件套切换 |
-| 6 | URL 状态 | 列表筛选 / 排序 / 分页进 URL，可分享可回溯；不落库 |
-| 7 | 响应式 | 布局降级，语义不变 |
-| 8 | 入口可见性 | confidence ≥0.7 的「可应用」、发起人「批准」置灰、M3+/M4 里程碑入口隐藏——**均仅呈现层** |
-| 9 | P07 草稿 / 聚类提交前暂存 | P07 草稿编辑、聚类修正的本地内存暂存；**提交才调 API** |
-| 10 | 确认对话与防抖 | 确认对话框、按钮 loading / 防抖；权威防重是幂等键 + 行锁 |
+**全表见 [§4.5 前端本地操作对照](#45-前端本地操作对照边界-52-全表)**（十条：七态渲染、表单即时校验、联动置灰、动态表单、查看器控件、URL 状态、响应式、入口可见性、提交前暂存、确认对话与防抖）。v2 曾在 §4.5 与本节各维护一份，已合并为单一事实源以避免两处漂移；本节只保留验收口径补充：
 
-**补充（属 §4.2，不为本地操作编造 API）**：SSE **订阅与渲染**只展示进度与变化提示，不是命令通道或状态机。断线重连、降级轮询、保留窗口的协议细节登记为 [GAP] G3，不在本章发明产品接口。
+- **置灰 / 隐藏 ≠ 安全边界**：权限与租户过滤每请求由后端判定（边界 §6-14）。验收 Pass 条件一律是**服务端拒绝**，前端不呈现入口不构成 Pass（AC-004 / AC-018）。
+- **本地校验 ≠ 受理保证**：权威校验在后端（Job Schema / 双层变量 / 存在性 / 配额），权威条件为 VALIDATING→RUNNING（边界 §6-4 / AC-041 / AC-075）。
+- **防抖 ≠ 防重**：权威防重是幂等键 + 行锁（AC-076 / AC-079）。
+- **入口可见性 ≠ 授权**：`confidence ≥ 0.7` 只放开「可应用」的呈现，落地仍必须 Preview + 审批（AC-028）。
+
+**补充（属边界 §4.2，不为本地操作编造 API）**：SSE **订阅与渲染**只展示进度与变化提示，不是命令通道或状态机（订阅连接本身属边界 §5.1 第 6 类）。断线重连、降级轮询、保留窗口的协议细节登记为 [GAP] G3，不在本章发明产品接口。
 
 ---
 
@@ -1406,7 +1530,7 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 | --- | --- |
 | Prompt A/B | M4；一期不交付 |
 | A7 LLM Judge | 规格见附录 A；**交付范围 = M4 Out of Scope** |
-| RAG / Confluence 回流 | M0–M3 以证据包导出承接知识回流，不擅自实现 M4 Confluence/RAG（架构 C1） |
+| RAG / Confluence 回流 | M0–M3 以证据包导出承接知识回流，不擅自实现 M4 Confluence/RAG（`architecture.md` §8.1「C1 北极星质量闭环」第 7 点） |
 | NL2Script | 与 §1.5 第 6 条一致；M4 评估 |
 | MCP 对外 | **M0–M3 不采用**（不引入 client/server、SDK、传输或对外承诺）；M4 仅条件只读 POC 候选，**不是**本 PRD 的必须需求 |
 | Copilot 写操作 `copilot_write` | M4 预留 action_ref；M0–M3 调用一律拒绝、不得入队 |
@@ -1423,9 +1547,10 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 | --- | --- |
 | GateEvaluation `not_evaluated` | **Proposed**（[ADR 0003](../06_architecture_design/adr/0003_canonical_state_and_gate_semantics.md)）。现行枚举仅 `pass / fail / waived`。当前兼容：无 GateEvaluation + 查询投影明确 reason，**绝不默认 pass** |
 | API-222 制品短期授权 | **Proposed M2+**（`api_spec` §14.2 / ADR 0007 混合预签名）。M0/M1 调用视为能力未启用。Restricted 永不走普通预签名 |
-| ADR 0003–0008 | 全部 **Proposed**。Accepted 仅为 ADR 0001（模块化单体控制面）与 ADR 0002（Temporal 运行时选型）。Proposed 不得指导实现为最终定论 |
+| ADR 0003–0008 | 全部 **Proposed**：0003 权威状态与门禁语义、0004 副作用审批与预授权、0005 身份租户与项目成员、0006 连接器幂等与恢复、0007 数据制品与审计保护、0008 Agent/LangGraph/MCP 边界。Proposed 不得指导实现为最终定论 |
+| ADR 0001 / 0002 / 0009 | **Accepted**：0001 模块化单体控制面与独立 Worker、0002 Temporal 持久工作流（Outbox relay 与 Activity 边界）、0009 技术栈冻结与分期基础设施。Accepted 只表示架构决策已作出，**不等于**生产 Gate、供应商或部署参数已批准（见附录 B.9 / C.5） |
 | 环境恢复边 `DEGRADED→ACTIVE` / `DISABLED→PENDING_APPROVAL` | **Proposed**。现行状态仅 `PENDING_APPROVAL → ACTIVE → DEGRADED → DISABLED`。批准前不得后台改库或把建议边当已存在迁移 |
-| L2 作用域化持续授权（standing authorization） | **Proposed**（ADR 0004 / `api_spec` §8）。不新增第 24 对象、不提供独立 API 资源；未批准前不得做成绕过审批的通道 |
+| L2 作用域化持续授权（standing authorization） | **Proposed**（ADR 0004 / `api_spec` §7.L「作用域化持续授权」；文档级 §8 是 SSE 契约，勿混引）。不新增第 24 对象、不提供独立 API 资源；未批准前不得做成绕过审批的通道 |
 | LDAP 独立端点 | **Proposed**（`api_spec` §14.2）。当前契约不另列 LDAP 产品端点。见下方 [CONFLICT] |
 
 ---
@@ -1437,10 +1562,11 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 | ID | 缺口 | 建议阶段 / 归属 | 本 PRD 处置 |
 | --- | --- | --- | --- |
 | G1 | AI 生成草稿（默认不落库）的暂存与获取：同步 vs 轮询、暂存生命周期（TTL）、多端续审 | 07 API 契约 | **不入 FR**。M0/M1 已有生成挂钩，TTL 数值 TBD |
-| G2 | Excel 导入的格式契约与导入用例初始态（DRAFT 还是 PENDING_REVIEW）、是否复用两步式审阅 | 05 §2.1 或后续 FR-05 补充 | **不入 FR**。初始态 TBD |
+| G2 | Excel 导入的格式契约与导入用例初始态（DRAFT 还是 PENDING_REVIEW）、是否复用两步式审阅 | `problem_model.md` §2.1 或后续 FR-05 补充 | **不入 FR**。初始态 TBD；`api_spec` 已列 API-200–203，但本阶段不作为必过 |
 | G3 | SSE 断线重连、降级轮询、无 SSE 页面的自动刷新 | 07 推送契约 | **不入 FR**。协议细节 TBD；不为本地渲染编造 API |
-| G4 | 通知的前端呈现形态与获取方式（站内中心 / 角标 / 列表） | 05 组件或原型确认 | **不入 FR**。通知产生与投递仍属后端，形态 TBD |
-| G5 | Artifact / 证据包 / 导出的访问形态（直链 / 预签名 / 代理） | 07 API 契约 | **不入 FR**。M0/M1 **以 API-221 代理下载为已有挂钩**；API-222 见 §8.4 Proposed |
+| G4 | 通知的前端呈现形态与获取方式（站内中心 / 角标 / 列表） | `problem_model.md` §4.2 组件或原型确认 | **不入 FR**。通知产生与投递仍属后端，形态 TBD |
+| G5 | Artifact / 证据包 / 导出的访问形态（直链 / 预签名 / 代理） | 07 API 契约 | **不入 FR**。M0/M1 **制品以 API-221、导出包以 API-223 代理下载为已有挂钩**（AC-096）；API-222 见 §8.4 Proposed |
+| G6 | Stage 5/7 产品原型缺位：`docs/05_prototype` 目录在当前工作树已不存在，`frontend_design_spec`（Stage 6 前端分册）被临时用作页面与 IA 权威 | 05 原型阶段 / Stage 6 | **不入 FR**。页面清单 P01–P25 事实上稳定可用；但七态呈现、审批九要素分区、等待态滞留等 **UX 一致性无法跨阶段复核**（同 `architecture_review` §8 残留限制）。原型产出或正式豁免后须重跑 Stage 5/6 UX 评审，并经 `docs/13_changes/` 登记 |
 | — | 审批 TTL / 心跳周期 / 僵尸回收阈值 / 排队超时告警 / Agent 超时等数值 | 配置项表（架构开放问题） | **TBD**。禁止隐式默认 |
 
 ---
@@ -1493,6 +1619,20 @@ SSE 订阅（API-210–213）属于边界 §5.1 进度订阅通道（SSE），**
 ### CONFLICT-4 · v1.6 文首「尚未吸收 05/06/07」已过时
 
 v1.6 文首声称「尚未吸收 05 业务建模 / 06 核心交互链 / 07 产品原型」。该声明对 **v2 已失效**：v2 综合交付已对齐建模、交互、边界、P01–P25 与 API 挂钩。本 CONFLICT 只纠正文档状态，不改变 US/FR 编号稳定性。
+
+### CONFLICT-5 · `gate_waiver` 是否覆盖 Readiness 豁免
+
+| 来源 | 表述 |
+| --- | --- |
+| C1 交互链 §④ 第 12 行 / §⑤ 第 12 行 | Readiness Gate 不达标允许「带豁免说明发布」，**豁免走 `gate_waiver` 审批**（owner / Test Lead 发起，L3），并注明依据 12-PRD FR-13 v1.4 |
+| 边界规范 §2.7 | `gate_waiver` 输入为 **evaluation / run 引用** + 豁免说明；作用对象是 **GateEvaluation**（挂 FR-13），豁免不改写原评估 |
+| 边界规范 §6-13 | 权威成功条件表述为「**门禁**豁免：`gate_waiver` 审批 EXECUTED 且豁免记录可查」 |
+| 边界规范 §2.8 | ReleaseTask DRAFT → PENDING_CONFIRM 的 Readiness 评估链路**未定义独立的 Readiness 豁免动作** |
+
+**分歧点**：Readiness Gate（发布就绪度，FR-15 / ReleaseTask）与 Quality Gate（单次评估结论，FR-13 / GateEvaluation）是两个对象；C1 复用同一 `action_ref` 承接两者，边界规范只把 `gate_waiver` 定义在后者。
+
+**v2.1 不裁决。** 现行可测口径按边界规范：`gate_waiver` 的权威成功以 GateEvaluation 豁免记录可查为准（§6-13 / AC-060）。Readiness 不达标时的产品语义「必须留痕可审计、不得静默放行」两方一致，本 PRD 保留该语义（§4.1.2）。  
+**待裁定项**：Readiness 豁免是复用 `gate_waiver`，还是需要在边界规范 §2.8 与冻结 `action_ref` 集合中登记独立动作。裁定前**不得扩 `action_ref` 枚举**（§4.2 八值冻结不变），也不得把 Readiness 豁免写成已有独立端点。归属 Stage 6 边界规范修订，走 `docs/13_changes/` 变更流程。
 
 ---
 
@@ -1623,17 +1763,21 @@ v1.6 文首声称「尚未吸收 05 业务建模 / 06 核心交互链 / 07 产�
 
 企业 SSO(IdP)、Jira REST/Webhook（版本 TBD）、GitHub App 权限、CI API（触发/产物读取）、Release 系统 API（**readiness TBD**）、企业模型网关、Vault、Temporal（持久工作流运行时已选定；托管/自托管、生产容量、成本、RPO/RTO 与值班方案待 Gate）。**选型不等于生产就绪**，见 Q3。
 
+**分期启用（ADR 0009 Accepted，`architecture.md` §15.1）**：上表是**目标形态，不是 M0 依赖清单**。M0/M1 为**单 PostgreSQL 数据面**——Temporal / Redis / MinIO / Vault **推迟至 M2+**；该期间秘密经 `.env` 注入、制品落本地卷、「重启不重复副作用」由幂等键 + CAS + 行锁保证（不依赖工作流运行时）。实现层技术栈（框架 / ORM / 路由库 / 构建部署）已冻结于 ADR 0009 与 `tech_stack_decision-v1.0.md`，**本 PRD 不重复版本表**，也不把其中任何组件写成用户可见功能。
+
 ## B.10 阶段计划（M0–M4，对齐 README 第 8 章）
 
 | 阶段 | 里程碑 | 放行条件 |
 | --- | --- | --- |
-| M0（1–2 月） | 基座：租户/SSO/AI 日志/审批中心/集成骨架/队列化 TestRun/执行环境注册中心（Jenkins 注册 + 健康检查 + Job 发现）+ **基线盘点与评测集建设** | 一致性检查 FAIL 项闭环；越权测试通过；注册 CI 实例健康检查与 Job 发现可用 |
-| M1 | 接口自动化 + A1/A2/A4 + 执行环境抽象与引用型用例 v1（Jenkins 触发 + JUnit 采集） | Gate：解析 ≥98%；首次接受率开始计量；引用用例重放不重复触发外部 Job |
-| M2 | Web 自动化 + 门禁 + Jira + CI 接入完善（多格式适配器 + 日志分片 + webhook 回调） | Gate：BG-2 覆盖 100% 核心项目 |
-| M3 | 性能 + Release v1 + Copilot 最小版 | Gate：压测 kill switch 演练通过 |
-| M4 | Prompt A/B + Judge + RAG + NL2Script + MCP | Gate：A7 一致性 ≥75% |
+| M0（1–2 月） | 基座：租户/SSO/RBAC/AI 日志/审批中心/集成骨架（API Token + GitHub webhook 接收）/队列化 TestRun/执行环境注册中心（Jenkins 注册 + 健康检查 + Job 发现 + 参数 Schema 读取）+ **基线盘点与评测集建设** | Gate：一致性检查 FAIL 项闭环；越权回归集全阻断；**AI 调用无旁路**；**任务无永久 running**；注册 CI 实例健康检查与 Job 发现可用 |
+| M1 | 接口自动化 + A1/A2/A4 + 执行环境抽象与引用型用例 v1（Jenkins 触发 + JUnit 采集） | Gate：解析 ≥98%；首次接受率开始计量；变量解析失败必报错；引用用例重放不重复触发外部 Job |
+| M2 | Web 自动化 + 门禁 + Jira + CI 接入完善（多格式适配器 + 日志分片 + webhook 回调）+ **Agent Mode v1 试点**（不入门禁） | Gate：门禁从「仅报告」切「阻断」、BG-2 覆盖 100% 核心项目；脚本沙箱渗透测试通过；CI 存量报告解析 ≥98%；**Agent 终止信号持久化（多 worker 可停）** |
+| M3 | 性能 + Release v1 + Copilot 最小版 | Gate：压测 kill switch 演练通过；压力机自监控可区分「目标慢 vs 压力机饱和」；Release 推送全链路可审计；Copilot 越权测试集通过 |
+| M4 | Prompt A/B + Judge + RAG + NL2Script + MCP + Release 深化 + Copilot 完整版 + **Agent Mode 完整闭环** | Gate：A/B 统计可回算；A7 与人工一致性 ≥75%；Copilot 写操作可回滚可审计；轨迹转脚本采纳率有数据 |
 
-M4 行是阶段愿景，**不等于本 PRD 已启用**。MCP / A7 / Prompt A/B / RAG / NL2Script / P19 / `copilot_write` / Agent 完整闭环见 §8.3。
+**依赖关系**（同 `docs/README.md` §8）：M1 依赖 M0；M2 / M3 可并行；Release v1 依赖 M2 的 Jira 集成；Copilot 最小版只依赖 M0 的 AI 日志底座，可提前到 M2；M4 各项可穿插前置。
+
+M4 行是阶段愿景，**不等于本 PRD 已启用**。MCP / A7 / Prompt A/B / RAG / NL2Script / P19 / `copilot_write` / Agent 完整闭环见 §8.3。基础设施按 ADR 0009 分期启用（见 B.9），阶段内容与放行 Gate 以本表为准、与 `docs/README.md` §8 一致。
 
 ---
 
@@ -1651,7 +1795,7 @@ M4 行是阶段愿景，**不等于本 PRD 已启用**。MCP / A7 / Prompt A/B /
 | 越权尝试（Copilot/工具） | Policy Gate + 越权测试集 | DENY + 安全事件记录 | 安全工程师周审 |
 | Prompt Injection | 分层校验 + 注入模式检测 | 拒绝执行工具调用 | 安全工程师分析样本 |
 | 解析失败/幻觉 | schema 校验、evidence_refs 校验 | 整批拒收 → fallback；无据结论计入指标 | 评测责任人修订 prompt |
-| 执行器僵尸任务 | 心跳超时 | 自动转 TIMEOUT 并回收（对齐 05 §2.2；旧表述「标记 FAILED」作废） | Test Lead 决定重跑 |
+| 执行器僵尸任务 | 心跳超时 | 自动转 TIMEOUT 并回收（对齐 `problem_model.md` §2.2；旧表述「标记 FAILED」作废） | Test Lead 决定重跑 |
 | 审批超时/过期 | TTL 计时 | 升级通知 → 过期不自动放行 | 备审批人 |
 | 压测失控 | SLA 熔断 + 自监控 | abort_on_breach 自动停 + kill switch | 性能工程师确认 |
 | 外部误写 | 审计对账 | — | **P1 事故流程**（C.3） |
@@ -1742,3 +1886,4 @@ Temporal 已作为持久工作流运行时选型（ADR 0002 Accepted）。**选�
 | v1.5 | 2026-08-24 | 全链路一致性复核修复（Stage 3→6 反向核查，含 03/04/05/06/12 交叉验证）：① US-FR 映射补 5 个基座类 FR 无 US 承接（US-15~19：FR-01/02/08/12/17），现双向无孤儿；② 状态数口径统一（10 态，作废「8 态」旧表述）；③ 归因 category 枚举 7 值（作废「8 类」）；④ AI 能力编号 A1–A8（作废「A1–A7」漏 A8）；⑤ FR-12 补验收标准（原缺）与新门禁对象落点（QualityGatePolicy / GateEvaluation，对齐 05 v1.3）；⑥ FR-13 补数据落点（同前）与豁免审批链路；⑦ §7.4 开关层级改 A1–A8 并补开关方向不对称裁定（关停 L1 / 恢复 L3）与页面指引；⑧ §2.3 补等待态滞留可见性边界场景（← 05 v1.3 裁定）；⑨ §5.3 北极星指标补计数口径与去重规则（原缺可测定义）；⑩ §3 核心对象摘要补齐 8 个对象（对齐 05 §1.1 的 23 对象清单）；⑪ FR-18/19 分期澄清（自 M1/M2 起，非始于 M2）；⑫ §0 一致性检查更新（US-FR 双向核查、补「对齐 05 对象清单」条目） |
 | v1.6 | 2026-08-29 | 架构复审回写：FR-08 从 Temporal/Celery 候选收口为 Temporal 持久工作流 + 隔离 Activity Task Queue；明确 PostgreSQL 权威状态机、Outbox relay 与业务幂等，且选型不等于生产就绪；FR-04 增加 external result unknown 的对账/人工接管与禁止盲重试要求；Q3 改为托管方式、恢复、版本、容量、成本与值班 Gate。 |
 | v2 | 2026-08-29 | 综合交付：对齐建模/交互/边界/P01–P25/API 挂钩；US/FR 编号稳定；验收改为 AC-001 起；LDAP/90天/not_evaluated 登记 CONFLICT 或 Proposed；FR-08 用户可感知化，实现细节不作为用户功能 |
+| v2.1 | 2026-08-30 | 上游一致性复审回写（逐条核对 `problem_model.md` v1.4 / C1–C4 / 边界规范 v1.1 / `frontend_design_spec` v1.1 / `api_spec.md` v1.0 / `architecture.md` / ADR 0001–0009）。**不新增业务功能、页面、领域对象、状态或 API 编号；US/FR 编号不变**。① 事实修正：§8.4 ADR Accepted 集合补 ADR 0009（技术栈冻结）；② 交叉引用修复 6 处（`PRD §6.2`→附录 B.6、两处裸 `§2.3`→v1.6 §2.3、`架构 C1`→`architecture.md` §8.1、`api_spec §8`→§7.L、`边界 §6` 引文→边界 §1 原则 6）；③ 第 6 章对象列对齐 `problem_model.md` §3 CRUD 矩阵（FR-01/02/07/13/15/19），§6.2 增列口径第 5 条说明 API-001/002 的 GET 例外；④ 追溯补全：新增 **AC-089–AC-096**（ModelRoute、ApiToken 吊销、连接器与集成中心、TestPlan、导出包 API-223），AC 总数 88 → 96，第 6 章「验收挂到既有 FR」不再是空头声明；⑤ 主页面列成对补入 P02 / P20 / P22 / P23 / P24 / P25 六个此前无 FR 承接的 M0–M2 页面；⑥ 第 4 章补 C1 缺的 5 条异常分支，新建 §4.2.3 / §4.3.2 / §4.4.2 三张异常表；⑦ 新登记 **[CONFLICT-5]**（`gate_waiver` 是否覆盖 Readiness 豁免）与 **[GAP] G6**（原型缺位下的页面权威替代）；⑧ §0 自检两项 PASS 降级为 PARTIAL 并新增 3 条检查项；⑨ 文首增「引用约定」消除文件名版本与「05」歧义；⑩ 附录 B.9 / B.10 补 ADR 0009 分期基础设施口径并与 `docs/README.md` §8 对齐；⑪ §8.2 与 §4.5 重复表合并为单一事实源 |

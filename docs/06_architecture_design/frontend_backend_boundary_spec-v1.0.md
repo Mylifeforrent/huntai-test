@@ -2,6 +2,7 @@
 
 > - **Status: Draft**
 > - **日期**：2026-08-29 · **版本**：v1.1
+> - **文件名说明**：文件名后缀 `-v1.0` 为迁入时的**稳定文件名标识**，不随内容升版重命名（已被 12 份文档与 ADR 0009 交叉引用）；**权威版本以本行「版本」字段为准**。
 > - **流程定位**：Stage 6（系统架构设计）**前后端边界分册**——收口「前端职责 / 后端职责 / 数据与逻辑归属 / API 调用与错误边界」；与同目录 [frontend_design_spec-v1.0.md](frontend_design_spec-v1.0.md)（前端分册：页面 / 组件 / 状态呈现）、[architecture.md](architecture.md)（后端架构骨架）共同构成 Stage 6 产出
 > - **上游输入**：[problem_model.md](../03_problem_modeling/problem_model.md)（下称 **05**：§1.1 领域对象 23 个 / §2 状态机全集 / §3 FR×对象 CRUD 矩阵 / §4.2 25 页 IA / §5 A1–A8——唯一建模事实源）· [interaction_flows.md](../04_interaction_design/interaction_flows.md) 及 [chains/](../04_interaction_design/chains/)（下称 **06 / C1–C4**：页面流 / 分支异常 / 审批与副作用点 / 证据落点）· [frontend_design_spec-v1.0.md](frontend_design_spec-v1.0.md)（P01–P25 编号 / §1 职责边界 / §5 本地交互清单）
 > - **下游消费者**：[07_backend_design](../07_backend_design/README.md)（API 契约设计的直接输入——本文 §2 输入/输出语义 + §7 错误类别）· Stage 10 AI 上下文 · Stage 11 前端实现 · Stage 12 后端实施
