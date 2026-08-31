@@ -1,7 +1,7 @@
 # HuntAI Test 逻辑数据模型（Stage 7）
 
 > - **Status: Draft**
-> - **日期**：2026-08-29 · **版本**：v1.0
+> - **日期**：2026-08-29（2026-08-31 修订）· **版本**：v1.1
 > - **阶段**：Stage 7 · 数据模型与 API 规范 · 本文件只覆盖逻辑数据模型
 > - **文档定位**：把已冻结的 23 个领域对象与已批准的基础设施写需求落到 PostgreSQL **逻辑表设计**。物理数据面在 M0/M1 仍是**单一 PostgreSQL**（ADR 0009）；逻辑上按控制面模块私有 schema 隔离。共享数据库不等于共享仓储。
 > - **实现边界**：本文不含代码、DDL、`CREATE INDEX` 可执行语句、Alembic 脚本、ORM 实体、OpenAPI、错误码、SSE 帧或部署配置。
@@ -27,7 +27,7 @@
 ### 1.2 范围
 
 - 23 个领域对象 → 表（或「不落库」）的逐条映射。
-- 从属结构与已批准基础设施表（Outbox、Inbox/ExternalObservation、execution intent、命令幂等记录）——**不另算第 24 个领域对象**。
+- 从属结构与已批准基础设施表（Outbox、Inbox/ExternalObservation、execution intent、命令幂等记录、认证会话 / OIDC 登录草稿）——**不另算第 24 个领域对象**。
 - 模块私有 schema 归属、ER、字段、主键/逻辑引用、唯一约束、索引、状态字段、分级、生命周期、多租户、迁移政策。
 
 ### 1.3 非目标
@@ -63,7 +63,7 @@
 
 | PostgreSQL schema | 控制面模块 | 拥有的领域对象（23 口径） | 本 schema 还拥有（非第 24 对象） |
 | --- | --- | --- | --- |
-| `identity_tenancy` | 身份、租户与配额 | 1 Organization；2 User / ProjectMember；3 Project | `outbox_events`、`command_idempotency_records` |
+| `identity_tenancy` | 身份、租户与配额 | 1 Organization；2 User / ProjectMember；3 Project | `outbox_events`、`command_idempotency_records`、`auth_sessions`、`oidc_login_drafts` |
 | `quota_governance` | 身份、租户与配额（配额账本） | 21 OrgQuota | 同上 |
 | `test_assets` | 测试资产 | 5 TestCase(+Version)；6 TestPlan；16 PerfBaseline | `test_case_versions`、`test_plan_cases`；同上 |
 | `execution_registry` | 执行环境 | 4 ExecutionEnvironment | `job_contracts`；同上 |
@@ -150,6 +150,7 @@
 | L2 持续授权独立对象 | **不建表**（Proposed） | 兼容存法见 §14 |
 | LangGraph checkpoint / MCP / 页面专用投影表 | 不建 | 架构非目标；M0–M3 不采用 MCP |
 | 采纳率埋点 | 不另建表；从 `ai_invocation_logs.result` 聚合 | FR-05 CRUD 矩阵 |
+| 认证会话 / OIDC 登录草稿 | **不升格对象**；落 `identity_tenancy` 基础设施表（§5.5） | api_spec §1.2 / §3.6；API-001–003。Cookie 只持不透明会话 ID |
 
 Kill switch：问题模型有页面与 `action_ref=kill_switch_restore`，**无第 24 对象**。落在 Organization / Connector 的 [建模补全] 治理字段（§7.1、§7.11），关停 L1 即时、恢复走审批。
 
@@ -174,7 +175,10 @@ Kill switch：问题模型有页面与 `action_ref=kill_switch_restore`，**无�
 
 ## 5. 基础设施表（不是第 24 个领域对象）
 
-已批准的写需求来自 architecture.md §7.2 / §11 与 ADR 0002/0009：聚合事实与 Outbox 同事务；Inbox 去重；execution intent 承接审批消费与外部尝试；命令幂等 scope = tenant + command type + key。它们是**平台一致性机制**，不是领域对象。
+已批准的写需求分两类，均**不是领域对象**：
+
+1. **平台一致性机制**（architecture.md §7.2 / §11 与 ADR 0002/0009）：聚合事实与 Outbox 同事务；Inbox 去重；execution intent 承接审批消费与外部尝试；命令幂等 scope = tenant + command type + key。
+2. **身份传输协调面**（api_spec.md §3.6 / API-001–003；architecture.md §13.1「可吊销的服务端会话」）：仅 `identity_tenancy` 拥有 `auth_sessions` 与 `oidc_login_drafts`。Cookie 名、SameSite、会话时长、再认证窗口、并发会话数仍为 **TBD**，本模型不写默认秒数或 Cookie 名。
 
 ### 5.1 每模块同构：`outbox_events`
 
@@ -200,6 +204,15 @@ Kill switch：问题模型有页面与 `action_ref=kill_switch_restore`，**无�
 
 - **Inbox**：消费者以 `event_id` 去重；Inbox 行与本模块业务写同事务。跨模块领域事件的消费方在**本模块 Inbox** 去重，不读他模块 Inbox 表。
 - **ExternalObservation**：webhook / 轮询先落观察（验签、归属、乱序），再经本模块 Outbox 发出控制面命令。**禁止**观察行直接 UPDATE `test_runs` / `release_tasks` / `gate_evaluations`。
+
+### 5.5 `identity_tenancy.auth_sessions` 与 `oidc_login_drafts`
+
+仅本 schema 拥有。**不是**第 24 对象，也**不是**对象 20 `CopilotSession`。浏览器 Cookie 只持不透明 `auth_sessions.id`；IdP access / refresh token **禁止**入库、禁止进 Cookie、禁止进响应体。
+
+- **`auth_sessions`**：API-002 签发、API-003 吊销、API-004 更新再认证事实时间、每请求校验。行内存身份引用（`user_id` + `organization_id`）与认证新鲜度时间戳，**不**缓存 ProjectMember 角色快照（角色每请求现读）。`revoked_at` 非空或已过 `expires_at` → 同一 Cookie 不得再通过认证（`HT-AUTH-001`）。无组织上下文不得插入本表（API-002：拒绝且不创建默认租户）。
+- **`oidc_login_drafts`**：API-001 写入的服务端登录草稿（`state` / `nonce` / PKCE `code_verifier`）。发生在租户解析之前，**无** `organization_id`（§10 例外）。API-002 校验成功后标记消费并签发 `auth_sessions`；草稿不得当作已登录会话。`code_verifier` 必须可逆以完成 token 交换，消费后清除或使 `consumed_at` 非空后不可再换票；**禁止**进日志 / Trace / 错误 `details`。
+
+M0/M1 无 Redis；会话与草稿不得放入进程内存作为多实例权威，也不得把 Redis 当授权事实源。
 
 ---
 
@@ -256,9 +269,11 @@ erDiagram
     connectors ||--o{ external_observations : inbound
     external_observations ||--o{ inbox_events : dedupe
     inbox_events ||--o{ outbox_events : signal_command
+    users ||--o{ auth_sessions : browser_session
+    organizations ||--o{ auth_sessions : tenant
 ```
 
-`outbox_events` / `command_idempotency_records` 在每个写模块重复出现，上图不画 11 份拷贝。
+`outbox_events` / `command_idempotency_records` 在每个写模块重复出现，上图不画 11 份拷贝。`oidc_login_drafts` 无租户/用户 FK（登录完成前无主体），不上领域 ER。
 
 ---
 
@@ -270,7 +285,7 @@ erDiagram
 
 **主键**：[建模补全] 全部 `id` 为 UUID。租户作用域表必须有 `organization_id`（语义 = problem_model `tenant_id`）。
 
-**分级**：`Public / Internal / Confidential / Restricted`。分类缺失按 **Confidential fail-close**。Restricted / 密钥类**禁止明文**，只存 `credential_ref` 或单向哈希；**禁止**进入日志 / Trace / Prompt / Outbox payload / Artifact 正文。Confidential **禁缓存**，读取最小化并脱敏。Public 本模型几乎不用（内部平台对象默认至少 Internal）。
+**分级**：`Public / Internal / Confidential / Restricted`。分类缺失按 **Confidential fail-close**。Restricted / 密钥类**禁止明文**，只存 `credential_ref` 或单向哈希；**禁止**进入日志 / Trace / Prompt / Outbox payload / Artifact 正文。唯一例外：§5.5 `oidc_login_drafts.code_verifier` 为 PKCE 短时协议材料，必须可逆以完成 token 交换（§8）。Confidential **禁缓存**，读取最小化并脱敏。Public 本模型几乎不用（内部平台对象默认至少 Internal）。
 
 **通用列（可变业务表默认具备，下表不重复）**：
 
@@ -350,7 +365,44 @@ erDiagram
 
 #### 本 schema 基础设施
 
-同构 `outbox_events`、`command_idempotency_records`（列定义见 §7.12）。
+同构 `outbox_events`、`command_idempotency_records`（列定义见 §7.12）。本 schema 另有认证传输表（非同构、非领域对象）：
+
+#### `auth_sessions`（基础设施 · API-002/003/004/006）
+
+无 `aggregate_version` / `updated_at` / `created_by`。吊销与再认证只改 `revoked_at` / `last_reauth_at`。无 CAS（API-003）。
+
+| 字段 | 类型语义 | 可空 | 约束 | 分级 | 生命周期 |
+| --- | --- | --- | --- | --- | --- |
+| `id` | UUID PK | 否 | Cookie 只持此不透明 ID | Internal | 轮换 session id 时新行，旧行吊销 |
+| `organization_id` | UUID | 否 | 只读引用 `organizations.id` | Internal | 无租户不得插入 |
+| `user_id` | UUID | 否 | 模块内只读引用 `users.id` | Internal | |
+| `created_at` | timestamptz | 否 | | Internal | |
+| `expires_at` | timestamptz | 否 | 签发时写入绝对时间 | Internal | 时长数值 TBD，模型不写默认秒数 |
+| `revoked_at` | timestamptz | 是 | 非空即吊销 | Internal | API-003；账号禁用等撤权可批处理本列（传播时延 TBD） |
+| `last_reauth_at` | timestamptz | 是 | | Internal | API-004 完成时写入；再认证窗口秒数 TBD |
+
+禁止列：角色快照、IdP access / refresh token、Cookie 名、会话秘密明文。有效判定 = `revoked_at IS NULL` 且当前时间 `< expires_at`。
+
+索引：PK `id`（Cookie 查找）；btree `(organization_id, user_id)`（按主体吊销）；btree `expires_at` WHERE `revoked_at IS NULL`（过期扫描；清理窗口 TBD）。
+
+#### `oidc_login_drafts`（基础设施 · API-001/002）
+
+登录完成前无主体与租户。无 `organization_id`（§10 例外）。无 `aggregate_version`。
+
+| 字段 | 类型语义 | 可空 | 约束 | 分级 | 生命周期 |
+| --- | --- | --- | --- | --- | --- |
+| `id` | UUID PK | 否 | | Internal | |
+| `state` | text | 否 | unique | Internal | OIDC `state`；校验失败 `HT-AUTH-003` |
+| `nonce` | text | 否 | | Internal | |
+| `code_verifier` | text | 否 | 必须可逆以完成 PKCE | Restricted | 禁止进日志 / Trace / 错误体；消费后不可再换票 |
+| `return_path` | text | 是 | 仅相对路径；开放重定向校验归 API-001 | Internal | 非法值 `HT-VAL-005` |
+| `created_at` | timestamptz | 否 | | Internal | |
+| `expires_at` | timestamptz | 否 | 签发时写入绝对时间 | Internal | 草稿 TTL 数值 TBD，模型不写默认秒数 |
+| `consumed_at` | timestamptz | 是 | 非空 = 已用于 callback | Internal | 重复使用 `state` → `HT-AUTH-003` |
+
+禁止列：IdP token 明文。响应体不得返回 `code_verifier`。
+
+索引：unique `state`；btree `expires_at` WHERE `consumed_at IS NULL`（过期扫描；清理窗口 TBD）。
 
 ---
 
@@ -910,7 +962,7 @@ erDiagram
 
 索引：unique `(organization_id, command_type, idempotency_key)`。
 
-拥有这两张表的 schema：§2.1 全部 11 个写模块。`inbox_events` / `external_observations` **仅** `integration_hub`。`execution_intents` **仅** `approval_policy`。
+拥有这两张表的 schema：§2.1 全部 11 个写模块。`inbox_events` / `external_observations` **仅** `integration_hub`。`execution_intents` **仅** `approval_policy`。`auth_sessions` / `oidc_login_drafts` **仅** `identity_tenancy`（列定义见 §7.1，禁止复制到其他模块）。
 
 ---
 
@@ -920,7 +972,7 @@ erDiagram
 
 1. 输入、证据、历史上下文、工具结果取**最高**分类；缺失 = Confidential fail-close。
 2. Confidential：最小化、脱敏、**禁缓存**（含 Redis；M0/M1 无 Redis 也禁止应用层把 Confidential 当可重建缓存键值长期存放）。
-3. Restricted：默认禁止模型出站；只允许经批准本地模型或拒绝处理。表内只存引用。
+3. Restricted：默认禁止模型出站；只允许经批准本地模型或拒绝处理。长期密钥表内只存引用或单向哈希。PKCE `code_verifier` 例外见下表。
 4. 制品正文不进数据库。
 
 **Restricted 字段（禁止明文、禁止进日志/Trace/Prompt/Outbox/Artifact）**：
@@ -931,8 +983,9 @@ erDiagram
 | `connectors` | `credential_ref`、`webhook_secret_ref` | 引用 |
 | `api_tokens` | `token_hash` | argon2 哈希，非明文 |
 | `model_routes` | `credential_ref` | 引用 |
+| `oidc_login_drafts` | `code_verifier` | PKCE 短时协议材料：必须可逆以完成 token 交换；**禁止**进日志 / Trace / Prompt / Outbox / 错误 `details`；`consumed_at` 非空后不得再换票。**不是**长期密钥，**禁止**存 IdP access / refresh token |
 
-不存在「密钥明文列」。M2 迁 Vault 时只改引用解析，不改表内存值形态。
+长期密钥不存在明文列（`credential_ref` / `token_hash`）。M2 迁 Vault 时只改引用解析，不改表内存值形态。`code_verifier` 不迁 Vault（登录窗口内消费即失效）。
 
 ---
 
@@ -950,7 +1003,7 @@ erDiagram
 
 ## 10. 多租户
 
-1. 租户作用域表必须有 `organization_id`。例外：`organizations` 以 `id` 自身为 tenant 根。
+1. 租户作用域表必须有 `organization_id`。例外：`organizations` 以 `id` 自身为 tenant 根；`oidc_login_drafts` 发生在租户解析之前，无 `organization_id`（不得用本例外回退默认租户）。`auth_sessions` **必须**有 `organization_id`。
 2. 唯一约束与列表索引必须把 tenant 纳入 scope（见各表 unique/index）。
 3. 无组织上下文 = **拒绝**，不是放行。
 4. 跨租户对象存在性不可探测（HTTP 映射归 `api_spec.md`）。
@@ -969,6 +1022,8 @@ erDiagram
 | FailureCluster | insert | 只追加 `correction_history` | 禁止删历史 | 无 |
 | Artifact 元数据 | insert | 可补 checksum；禁止改 `object_key` 指向他人对象 | 删除传播 TBD | 正文在对象存储 |
 | Outbox / Inbox / intent | insert | 发布标记 / 状态机列 | 清理窗口 TBD | 重投幂等 |
+| `auth_sessions` | API-002 insert | 只改 `revoked_at` / `last_reauth_at`；禁止改 `user_id` / `organization_id` | 清理窗口 TBD；禁止把过期行当仍有效 | `revoked_at` 非空或过 `expires_at` = 失效 |
+| `oidc_login_drafts` | API-001 insert | 只改 `consumed_at` | 清理窗口 TBD | 消费或过期后不得再换票 |
 
 **保留期、Legal Hold、WORM、备份 RPO/RTO：全部 TBD。** 禁止把「90 天」写成默认。append-only **不等于** WORM。
 
@@ -1022,7 +1077,7 @@ TestRun 终态吸收：SUCCEEDED / FAILED / CANCELLED / TIMEOUT 收到旧 RUNNIN
 
 - [x] 23 个领域对象均有对应表或「不落库」说明及理由（§3）
 - [x] 从属结构与基础设施表已列出，且未计成第 24 个领域对象（§4–§5）
-- [x] 每个字段完成 Public/Internal/Confidential/Restricted 分级；Restricted/密钥无明文落库（§7–§8）
+- [x] 每个字段完成 Public/Internal/Confidential/Restricted 分级；长期密钥无明文落库；PKCE `code_verifier` 短时例外见 §8
 - [x] 状态枚举 ⊆ problem_model；含 `execution_result=unknown`（§13）
 - [x] 租户列与唯一约束已按 tenant scope 设计（§7、§10）
 - [x] 不可变对象（EvidenceObject / AuditEvent / AIInvocationLog / GateEvaluation / 已发布 SkillVersion / TestCaseVersion）禁止原地覆盖（§3、§7、§11）
@@ -1035,4 +1090,5 @@ TestRun 终态吸收：SUCCEEDED / FAILED / CANCELLED / TIMEOUT 收到旧 RUNNIN
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-08-31 | 按基础设施表补 `identity_tenancy.auth_sessions` 与 `oidc_login_drafts`（传输/安全协调面，非第 24 对象）；对齐 api_spec API-001–003 可吊销服务端会话。时长/Cookie 名/窗口仍 TBD |
 | v1.0 | 2026-08-29 | 首版逻辑数据模型：11 个模块私有 schema、23 对象映射、从属结构与基础设施表、分级与 M0/M1 单 PostgreSQL 边界 |
