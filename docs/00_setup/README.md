@@ -6,7 +6,8 @@
 **约定输出**：
 
 - `project_rules.md` — 工程规范（Markdown）
-- 根目录 `AGENTS.md` — 仓库级 Agent 指令（物理位置在仓库根，逻辑上属本阶段产物）
+- 根目录 `AGENTS.md` — 仓库级 Agent 指令完善版（物理位置在仓库根；Stage 0 初始版，已吸收 Stage 3–8 设计资产约束）
+- 根目录 `CLAUDE.md` — Claude Code 入口，正文以 `AGENTS.md` 为唯一权威
 - 根目录 `.zcode/` — ZCode 项目配置（当前为 MCP）
 - 根目录 `.cursor/` — Cursor 项目配置（MCP 与 rules，与 `.zcode/` 并列保留）
 - 根目录 `.mcp.json` — Claude 兼容的 MCP 入口

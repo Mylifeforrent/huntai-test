@@ -5,7 +5,7 @@ alwaysApply: true
 
 # huntai-test 工程约定
 
-本仓库以根目录 `AGENTS.md` 为跨工具 Agent 指令源，完整规范见 `docs/00_setup/project_rules.md`。两文冲突时以 `project_rules.md` 为准。
+本仓库以根目录 `AGENTS.md` 为跨工具 Agent 指令源（Claude Code 读根 `CLAUDE.md`，指向 `AGENTS.md`）。完整工程规范见 `docs/00_setup/project_rules.md`。工程过程冲突以 `project_rules.md` 为准；设计事实冲突按 `AGENTS.md` §8。
 
 ## Cursor 配置
 
@@ -17,7 +17,7 @@ alwaysApply: true
 
 - 业务目录只有 `frontend/`、`backend/`、`docs/`；设计文档只进 `docs/`，可执行代码只进 `frontend/` / `backend/`。
 - 阶段产出只落入对应 `docs/NN_*`；约定输出文件不存在则该阶段未完成。
-- `backend/` / `frontend/` 内部子结构由 Stage 6/7 定稿；定稿前不得预建子目录。
+- `backend/` / `frontend/` 内部子结构按 Stage 6/7 设计落地；禁止预建设计未规定的模块目录。
 
 ## 配置、依赖与提交
 
