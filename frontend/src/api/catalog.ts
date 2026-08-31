@@ -66,6 +66,9 @@ export const PAGE_APIS = {
     { id: "API-112", method: "POST", path: "/api/v1/approval-requests/{approval_request_id}/decisions", summary: "批准/拒绝" },
     { id: "API-113", method: "POST", path: "/api/v1/approval-requests/{approval_request_id}/resubmissions", summary: "修改后重新提交" },
   ],
+  P10_preview: [
+    { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "Policy Gate Preview" },
+  ],
   P11: [{ id: "API-140", method: "GET", path: "/api/v1/quality-gate-policies", summary: "门禁策略" }],
   P12: [{ id: "API-144", method: "GET", path: "/api/v1/gate-evaluations", summary: "门禁评估历史" }],
   P13: [

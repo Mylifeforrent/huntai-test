@@ -226,3 +226,44 @@ export interface WorkbenchProjection {
 }
 
 export type JsonObject = Record<string, unknown>;
+
+export const POLICY_GATES = ["ALLOW", "DENY", "REQUIRE_APPROVAL", "REQUIRE_REAUTH"] as const;
+export type PolicyGate = (typeof POLICY_GATES)[number];
+
+export const PREVIEW_ACTION_TYPES = [
+  "jira_write",
+  "heal_apply",
+  "perf_high_risk",
+  "release_push",
+  "env_register",
+  "agent_tool_action",
+  "gate_waiver",
+  "kill_switch_restore",
+] as const;
+export type PreviewActionType = (typeof PREVIEW_ACTION_TYPES)[number];
+
+export interface ActionPreviewRequest {
+  action_type: PreviewActionType;
+  target_object_type: string;
+  target_object_id: string;
+  payload: JsonObject;
+  project_id?: string;
+  expected_target_version?: number;
+}
+
+export interface ActionPreview {
+  preview_id: string;
+  action_type: PreviewActionType | "copilot_write";
+  gate: PolicyGate;
+  param_hash: string;
+  card_payload: JsonObject;
+  side_effect_level: RiskLevel;
+  created_at: string;
+  approval_request_id?: string;
+  bound_hash?: string;
+  target: {
+    object_type: string;
+    object_id: string;
+    version?: number;
+  };
+}
