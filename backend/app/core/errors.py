@@ -84,6 +84,50 @@ def forbidden(trace_id: str, message: str = "Forbidden") -> AppError:
     )
 
 
+def not_found(trace_id: str, message: str = "Resource not found") -> AppError:
+    return AppError(
+        status_code=404,
+        code="HT-RES-001",
+        error_class="permission",
+        subclass="not_found",
+        message=message,
+        retryable=False,
+    )
+
+
+def validation_failed(trace_id: str, message: str = "Validation failed") -> AppError:
+    return AppError(
+        status_code=400,
+        code="HT-VAL-001",
+        error_class="business",
+        subclass="validation",
+        message=message,
+        retryable=False,
+    )
+
+
+def precondition_failed(trace_id: str, message: str = "Precondition failed") -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-STATE-001",
+        error_class="business",
+        subclass="precondition",
+        message=message,
+        retryable=False,
+    )
+
+
+def version_conflict(trace_id: str, message: str = "Version conflict") -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-VER-001",
+        error_class="business",
+        subclass="version_conflict",
+        message=message,
+        retryable=False,
+    )
+
+
 def open_redirect(trace_id: str) -> AppError:
     return AppError(
         status_code=400,

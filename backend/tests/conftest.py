@@ -90,6 +90,9 @@ async def _truncate_tables() -> AsyncGenerator[None]:
         for table in tables:
             await conn.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
     yield
+    # Function-scoped event loops must not reuse a pooled engine from a prior loop.
+    await dispose_engine()
+    get_settings.cache_clear()
 
 
 @pytest.fixture

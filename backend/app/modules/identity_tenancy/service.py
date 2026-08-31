@@ -13,8 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.modules.identity_tenancy import repository as repo
-from app.modules.identity_tenancy.models import AuthSession, Organization, User
-from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
+from app.modules.identity_tenancy.models import (
+    AuthSession,
+    Organization,
+    Project,
+    ProjectMember,
+    User,
+)
+from app.modules.results_evidence.audit_port import (
+    AuditAppendInput,
+    append_audit_event,
+    list_recent_for_project,
+)
 
 
 @dataclass(frozen=True)
@@ -344,3 +354,534 @@ def build_session_payload(ctx: SessionContext) -> dict[str, Any]:
             ctx.session, reauth_window_seconds=settings.reauth_window_seconds
         ),
     }
+
+
+def is_last_owner_violation(
+    *, current_role: str, target_role: str | None, owner_count: int
+) -> bool:
+    """Return True when demoting/removing would leave the project with zero owners.
+
+    ``target_role`` is None for remove; otherwise the new role after patch.
+    """
+    if current_role != "owner":
+        return False
+    if target_role == "owner":
+        return False
+    return owner_count <= 1
+
+
+def require_idempotency_key(raw: str | None) -> str:
+    if raw is None or not raw.strip():
+        raise ValueError("validation")
+    try:
+        return str(uuid.UUID(raw.strip()))
+    except ValueError as exc:
+        raise ValueError("validation") from exc
+
+
+def _iso(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.isoformat()
+
+
+def build_project_list_item(row: repo.ProjectListRow) -> dict[str, Any]:
+    project = row.project
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "version": project.aggregate_version,
+        "my_role": row.my_role,
+        "jira_project_key": project.jira_project_key,
+        "created_at": _iso(project.created_at),
+        "updated_at": _iso(project.updated_at),
+    }
+
+
+def build_project_member_payload(
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    role: str,
+    display_name: str | None,
+) -> dict[str, Any]:
+    return {
+        "project_id": str(project_id),
+        "user_id": str(user_id),
+        "role": role,
+        "display_name": display_name or "",
+    }
+
+
+async def list_projects(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    cursor: str | None,
+    limit: int | None,
+    q: str | None,
+    sort: str | None,
+) -> dict[str, Any]:
+    if sort is not None:
+        raise ValueError("validation")
+    if limit is not None and limit < 1:
+        raise ValueError("validation")
+
+    cursor_name: str | None = None
+    cursor_id: uuid.UUID | None = None
+    if cursor is not None:
+        cursor_name, cursor_id = repo.decode_name_id_cursor(cursor)
+
+    fetch_limit = None if limit is None else limit + 1
+    rows = await repo.list_member_projects(
+        session,
+        organization_id=ctx.organization.id,
+        user_id=ctx.user.id,
+        q=q,
+        cursor_name=cursor_name,
+        cursor_id=cursor_id,
+        fetch_limit=fetch_limit,
+    )
+
+    has_more = False
+    if limit is not None and len(rows) > limit:
+        has_more = True
+        rows = rows[:limit]
+
+    items = [build_project_list_item(row) for row in rows]
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = repo.encode_name_id_cursor(name=last.project.name, item_id=last.project.id)
+
+    page: dict[str, Any] = {"next_cursor": next_cursor, "has_more": has_more}
+    if limit is not None:
+        page["limit"] = limit
+    return {"data": {"items": items}, "page": page}
+
+
+async def get_project_overview(
+    session: AsyncSession, ctx: SessionContext, *, project_id: uuid.UUID
+) -> dict[str, Any]:
+    project = await repo.get_project(
+        session, organization_id=ctx.organization.id, project_id=project_id
+    )
+    member = await repo.get_project_member(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        user_id=ctx.user.id,
+    )
+    if project is None or member is None:
+        raise ValueError("not_found")
+
+    events = await list_recent_for_project(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        limit=50,
+    )
+    recent_activity = [
+        {
+            "occurred_at": _iso(event.created_at),
+            "summary": event.action or "",
+            "resource_type": event.resource_type,
+            "resource_id": str(event.resource_id) if event.resource_id else None,
+            "audit_event_id": str(event.id),
+        }
+        for event in events
+    ]
+    bind_env_ids = [str(env_id) for env_id in (project.bind_env_ids or [])]
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "version": project.aggregate_version,
+        "my_role": member.role,
+        "jira": {"project_key": project.jira_project_key},
+        "bind_env_ids": bind_env_ids,
+        "connector_health": [],
+        "recent_activity": recent_activity,
+        "created_at": _iso(project.created_at),
+        "updated_at": _iso(project.updated_at),
+    }
+
+
+async def list_members(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    cursor: str | None,
+    limit: int | None,
+    role: str | None,
+) -> dict[str, Any]:
+    if limit is not None and limit < 1:
+        raise ValueError("validation")
+    if role is not None and role not in repo.PROJECT_ROLES:
+        raise ValueError("validation")
+
+    project = await repo.get_project(
+        session, organization_id=ctx.organization.id, project_id=project_id
+    )
+    caller = await repo.get_project_member(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        user_id=ctx.user.id,
+    )
+    if project is None or caller is None:
+        raise ValueError("not_found")
+
+    cursor_id = repo.decode_uuid_cursor(cursor) if cursor is not None else None
+    fetch_limit = None if limit is None else limit + 1
+    rows = await repo.list_project_members(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        role=role,
+        cursor_id=cursor_id,
+        fetch_limit=fetch_limit,
+    )
+
+    has_more = False
+    if limit is not None and len(rows) > limit:
+        has_more = True
+        rows = rows[:limit]
+
+    include_email = caller.role in repo.WRITE_ROLES
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        item: dict[str, Any] = {
+            "user_id": str(row.member.user_id),
+            "role": row.member.role,
+            "display_name": row.display_name or "",
+            "created_at": _iso(row.member.created_at),
+            "updated_at": _iso(row.member.updated_at),
+        }
+        if include_email:
+            item["email"] = row.email
+        items.append(item)
+
+    next_cursor = None
+    if has_more and rows:
+        next_cursor = repo.encode_uuid_cursor(rows[-1].member.user_id)
+    page: dict[str, Any] = {"next_cursor": next_cursor, "has_more": has_more}
+    if limit is not None:
+        page["limit"] = limit
+    return {"data": {"items": items}, "page": page}
+
+
+async def _resolve_writable_project(
+    session: AsyncSession, ctx: SessionContext, *, project_id: uuid.UUID
+) -> tuple[Project, ProjectMember]:
+    project = await repo.get_project(
+        session, organization_id=ctx.organization.id, project_id=project_id
+    )
+    caller = await repo.get_project_member(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        user_id=ctx.user.id,
+    )
+    if project is None or caller is None:
+        raise ValueError("not_found")
+    if caller.role not in repo.WRITE_ROLES:
+        raise ValueError("forbidden")
+    return project, caller
+
+
+def _check_expected_version(project: Project, expected: int | None) -> None:
+    if expected is None:
+        return
+    if expected != project.aggregate_version:
+        raise ValueError("version_conflict")
+
+
+async def add_project_member(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    role: str,
+    expected_project_version: int | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    if role not in repo.PROJECT_ROLES:
+        raise ValueError("validation")
+
+    project, _caller = await _resolve_writable_project(session, ctx, project_id=project_id)
+
+    existing_idem = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type="project_member.add",
+        idempotency_key=idempotency_key,
+    )
+    if existing_idem is not None:
+        if existing_idem.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        ref = existing_idem.response_ref or {}
+        return dict(ref)
+
+    try:
+        _check_expected_version(project, expected_project_version)
+
+        target_user = await repo.get_org_user(
+            session, organization_id=ctx.organization.id, user_id=user_id
+        )
+        if target_user is None or target_user.is_disabled:
+            raise ValueError("validation")
+
+        existing = await repo.get_project_member(
+            session,
+            organization_id=ctx.organization.id,
+            project_id=project_id,
+            user_id=user_id,
+        )
+        if existing is not None:
+            raise ValueError("validation")
+
+        member = await repo.create_project_member(
+            session,
+            organization_id=ctx.organization.id,
+            project_id=project_id,
+            user_id=user_id,
+            role=role,
+            created_by=ctx.user.id,
+        )
+        await repo.bump_project_version(session, project)
+        payload = build_project_member_payload(
+            project_id=project_id,
+            user_id=user_id,
+            role=member.role,
+            display_name=target_user.display_name,
+        )
+        await append_audit_event(
+            session,
+            AuditAppendInput(
+                organization_id=ctx.organization.id,
+                actor_user_id=ctx.user.id,
+                action="project_member.add",
+                resource_type="project_member",
+                resource_id=member.id,
+                project_id=project_id,
+                result="ok",
+                request_hash=request_hash,
+            ),
+        )
+        await repo.create_idempotency_record(
+            session,
+            organization_id=ctx.organization.id,
+            command_type="project_member.add",
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            response_ref=payload,
+            created_by=ctx.user.id,
+        )
+        return payload
+    except ValueError as exc:
+        code = str(exc)
+        if code in {"validation", "version_conflict", "state"}:
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=ctx.organization.id,
+                    actor_user_id=ctx.user.id,
+                    action="project_member.add",
+                    resource_type="project",
+                    resource_id=project_id,
+                    project_id=project_id,
+                    result="failed",
+                    request_hash=request_hash,
+                ),
+            )
+        raise
+
+
+async def patch_project_member_role(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    role: str,
+    expected_project_version: int | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    if role not in repo.PROJECT_ROLES:
+        raise ValueError("validation")
+
+    project, _caller = await _resolve_writable_project(session, ctx, project_id=project_id)
+
+    existing_idem = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type="project_member.patch_role",
+        idempotency_key=idempotency_key,
+    )
+    if existing_idem is not None:
+        if existing_idem.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return dict(existing_idem.response_ref or {})
+
+    try:
+        _check_expected_version(project, expected_project_version)
+
+        member = await repo.get_project_member(
+            session,
+            organization_id=ctx.organization.id,
+            project_id=project_id,
+            user_id=user_id,
+        )
+        if member is None:
+            raise ValueError("not_found")
+
+        owner_count = await repo.count_owners(
+            session, organization_id=ctx.organization.id, project_id=project_id
+        )
+        if is_last_owner_violation(
+            current_role=member.role, target_role=role, owner_count=owner_count
+        ):
+            raise ValueError("state")
+
+        target_user = await repo.get_org_user(
+            session, organization_id=ctx.organization.id, user_id=user_id
+        )
+        await repo.update_project_member_role(session, member, role=role)
+        await repo.bump_project_version(session, project)
+        payload = build_project_member_payload(
+            project_id=project_id,
+            user_id=user_id,
+            role=role,
+            display_name=target_user.display_name if target_user else None,
+        )
+        await append_audit_event(
+            session,
+            AuditAppendInput(
+                organization_id=ctx.organization.id,
+                actor_user_id=ctx.user.id,
+                action="project_member.patch_role",
+                resource_type="project_member",
+                resource_id=member.id,
+                project_id=project_id,
+                result="ok",
+                request_hash=request_hash,
+            ),
+        )
+        await repo.create_idempotency_record(
+            session,
+            organization_id=ctx.organization.id,
+            command_type="project_member.patch_role",
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            response_ref=payload,
+            created_by=ctx.user.id,
+        )
+        return payload
+    except ValueError as exc:
+        code = str(exc)
+        if code in {"validation", "version_conflict", "state"}:
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=ctx.organization.id,
+                    actor_user_id=ctx.user.id,
+                    action="project_member.patch_role",
+                    resource_type="project",
+                    resource_id=project_id,
+                    project_id=project_id,
+                    result="failed",
+                    request_hash=request_hash,
+                ),
+            )
+        raise
+
+
+async def remove_project_member(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expected_project_version: int | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> None:
+    project, _caller = await _resolve_writable_project(session, ctx, project_id=project_id)
+
+    existing_idem = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type="project_member.remove",
+        idempotency_key=idempotency_key,
+    )
+    if existing_idem is not None:
+        if existing_idem.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return
+
+    try:
+        _check_expected_version(project, expected_project_version)
+
+        member = await repo.get_project_member(
+            session,
+            organization_id=ctx.organization.id,
+            project_id=project_id,
+            user_id=user_id,
+        )
+        if member is None:
+            raise ValueError("not_found")
+
+        owner_count = await repo.count_owners(
+            session, organization_id=ctx.organization.id, project_id=project_id
+        )
+        if is_last_owner_violation(
+            current_role=member.role, target_role=None, owner_count=owner_count
+        ):
+            raise ValueError("state")
+
+        member_id = member.id
+        await repo.delete_project_member(session, member)
+        await repo.bump_project_version(session, project)
+        await append_audit_event(
+            session,
+            AuditAppendInput(
+                organization_id=ctx.organization.id,
+                actor_user_id=ctx.user.id,
+                action="project_member.remove",
+                resource_type="project_member",
+                resource_id=member_id,
+                project_id=project_id,
+                result="ok",
+                request_hash=request_hash,
+            ),
+        )
+        await repo.create_idempotency_record(
+            session,
+            organization_id=ctx.organization.id,
+            command_type="project_member.remove",
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            response_ref={"removed": True},
+            created_by=ctx.user.id,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code in {"validation", "version_conflict", "state"}:
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=ctx.organization.id,
+                    actor_user_id=ctx.user.id,
+                    action="project_member.remove",
+                    resource_type="project",
+                    resource_id=project_id,
+                    project_id=project_id,
+                    result="failed",
+                    request_hash=request_hash,
+                ),
+            )
+        raise
