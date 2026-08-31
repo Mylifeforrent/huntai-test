@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     session_cookie_name: str
     session_cookie_samesite: SameSitePolicy
+    session_cookie_secure: bool
     session_ttl_seconds: int
     oidc_login_draft_ttl_seconds: int
     reauth_window_seconds: int
@@ -47,6 +48,17 @@ class Settings(BaseSettings):
                 return SameSitePolicy.LAX
             if normalized.lower() == "strict":
                 return SameSitePolicy.STRICT
+        return value
+
+    @field_validator("session_cookie_secure", mode="before")
+    @classmethod
+    def validate_secure(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes"}:
+                return True
+            if normalized in {"false", "0", "no"}:
+                return False
         return value
 
 

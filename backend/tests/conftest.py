@@ -10,6 +10,7 @@ TEST_ENV: dict[str, str] = {
     ),
     "SESSION_COOKIE_NAME": "huntai_session",
     "SESSION_COOKIE_SAMESITE": "Lax",
+    "SESSION_COOKIE_SECURE": "true",
     "SESSION_TTL_SECONDS": "3600",
     "OIDC_LOGIN_DRAFT_TTL_SECONDS": "600",
     "REAUTH_WINDOW_SECONDS": "900",

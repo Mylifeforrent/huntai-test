@@ -92,7 +92,7 @@ async def api_002_oidc_callback(
         key=settings.session_cookie_name,
         value=str(auth_session.id),
         httponly=True,
-        secure=True,
+        secure=settings.session_cookie_secure,
         samesite=settings.session_cookie_samesite.value.lower(),  # type: ignore[arg-type]
         path="/",
     )
@@ -131,7 +131,7 @@ async def api_003_logout(
             key=settings.session_cookie_name,
             path="/",
             httponly=True,
-            secure=True,
+            secure=settings.session_cookie_secure,
             samesite=settings.session_cookie_samesite.value.lower(),  # type: ignore[arg-type]
         )
     return response
