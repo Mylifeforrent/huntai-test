@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { SessionGate } from "@/components/layout/SessionGate";
 import { ApiError } from "@/api/errors";
 import { WorkbenchPage } from "@/pages/WorkbenchPage";
 import { ProjectOverviewPage } from "@/pages/ProjectOverviewPage";
@@ -50,7 +51,8 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route element={<AppLayout />}>
+          <Route element={<SessionGate />}>
+            <Route element={<AppLayout />}>
             <Route index element={<WorkbenchPage />} />
             <Route path="projects" element={<ProjectOverviewPage />} />
             <Route path="projects/:projectId" element={<Navigate to="overview" replace />} />
@@ -83,6 +85,7 @@ export default function App() {
             <Route path="admin/audit" element={<AuditSearchPage />} />
             <Route path="admin/integrations" element={<AdminIntegrationPage />} />
             <Route path="*" element={<NotFoundPage />} />
+            </Route>
           </Route>
         </Routes>
       </BrowserRouter>

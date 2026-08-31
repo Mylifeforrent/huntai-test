@@ -36,7 +36,7 @@ export function ApprovalCenterPage() {
   });
 
   const items = query.data?.data.items ?? [];
-  const currentUserId = me.data?.data.user_id;
+  const currentUserId = me.data?.data.user.id;
   const selected = useMemo(() => {
     const match = items.find((item) => String(item.id) === selectedId);
     return match ?? items[0];

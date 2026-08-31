@@ -120,15 +120,48 @@ export interface CommandReceipt {
   error?: ApiErrorBody;
 }
 
-export interface MeProjection {
-  user_id: string;
+export interface MeUser {
+  id: string;
   display_name: string;
-  organization_id: string;
-  projects: Array<{
-    project_id: string;
-    name: string;
-    role: ProjectRole;
-  }>;
+  email?: string;
+  is_disabled: boolean;
+}
+
+export interface MeOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  version: number;
+  is_active: boolean;
+  capability_controls: Record<string, unknown>;
+}
+
+export interface MeMembership {
+  project_id: string;
+  project_name?: string | null;
+  role: ProjectRole;
+}
+
+/** API-005 `GET /api/v1/me` data payload. */
+export interface MeProjection {
+  user: MeUser;
+  organization: MeOrganization;
+  memberships: MeMembership[];
+  reauth_required: boolean;
+}
+
+export interface OidcStartResponse {
+  authorization_url: string;
+}
+
+export interface ReauthResponse {
+  reauth_satisfied: boolean;
+  authorization_url?: string;
+}
+
+export interface SessionMetadata {
+  expires_at: string;
+  reauth_required: boolean;
 }
 
 export interface WorkbenchProjection {

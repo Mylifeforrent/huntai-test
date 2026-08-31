@@ -41,8 +41,8 @@ export function ProjectSettingsPage() {
   });
 
   const role =
-    me.data?.data.projects.find((item) => item.project_id === projectId)?.role ??
-    me.data?.data.projects[0]?.role;
+    me.data?.data.memberships.find((item) => item.project_id === projectId)?.role ??
+    me.data?.data.memberships[0]?.role;
   const viewer = role === "viewer";
   const memberItems = members.data?.data.items ?? [];
   const quotaView = asRecord(quota.data?.data.view);

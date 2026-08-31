@@ -1,14 +1,8 @@
 import { toApiError } from "./errors";
+import { handleAuthApiError } from "./authFlow";
+import { apiBaseUrl, newIdempotencyKey } from "./apiConfig";
 
-const DEFAULT_BASE = "/api/v1";
-
-export function apiBaseUrl(): string {
-  return import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || DEFAULT_BASE;
-}
-
-export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
+export { apiBaseUrl, newIdempotencyKey } from "./apiConfig";
 
 interface RequestOptions {
   apiId: string;
@@ -18,6 +12,7 @@ interface RequestOptions {
   body?: unknown;
   idempotencyKey?: string;
   signal?: AbortSignal;
+  skipAuthIntercept?: boolean;
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
@@ -33,7 +28,7 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 }
 
 export async function apiRequest<T>(options: RequestOptions): Promise<T> {
-  const { apiId, path, method = "GET", query, body, idempotencyKey, signal } = options;
+  const { apiId, path, method = "GET", query, body, idempotencyKey, signal, skipAuthIntercept } = options;
   const url = buildUrl(path, query);
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -69,12 +64,16 @@ export async function apiRequest<T>(options: RequestOptions): Promise<T> {
   }
 
   if (!response.ok) {
-    throw toApiError({
+    const apiError = toApiError({
       apiId,
       path: `${method} ${path}`,
       httpStatus: response.status,
       payload,
     });
+    if (!skipAuthIntercept && response.status === 401 && apiError.body) {
+      handleAuthApiError(apiError);
+    }
+    throw apiError;
   }
 
   if (payload === null && response.status !== 204) {
@@ -89,15 +88,62 @@ export async function apiRequest<T>(options: RequestOptions): Promise<T> {
   return payload as T;
 }
 
+type ApiCallOptions = Pick<RequestOptions, "skipAuthIntercept" | "signal">;
+
 export const api = {
-  get: <T>(apiId: string, path: string, query?: RequestOptions["query"]) =>
-    apiRequest<T>({ apiId, path, method: "GET", query }),
-  post: <T>(apiId: string, path: string, body?: unknown, idempotencyKey?: string) =>
-    apiRequest<T>({ apiId, path, method: "POST", body, idempotencyKey: idempotencyKey ?? newIdempotencyKey() }),
-  patch: <T>(apiId: string, path: string, body?: unknown, idempotencyKey?: string) =>
-    apiRequest<T>({ apiId, path, method: "PATCH", body, idempotencyKey: idempotencyKey ?? newIdempotencyKey() }),
-  put: <T>(apiId: string, path: string, body?: unknown, idempotencyKey?: string) =>
-    apiRequest<T>({ apiId, path, method: "PUT", body, idempotencyKey: idempotencyKey ?? newIdempotencyKey() }),
-  delete: <T>(apiId: string, path: string, idempotencyKey?: string) =>
-    apiRequest<T>({ apiId, path, method: "DELETE", idempotencyKey: idempotencyKey ?? newIdempotencyKey() }),
+  get: <T>(apiId: string, path: string, query?: RequestOptions["query"], options?: ApiCallOptions) =>
+    apiRequest<T>({ apiId, path, method: "GET", query, ...options }),
+  post: <T>(
+    apiId: string,
+    path: string,
+    body?: unknown,
+    idempotencyKey?: string,
+    options?: ApiCallOptions,
+  ) =>
+    apiRequest<T>({
+      apiId,
+      path,
+      method: "POST",
+      body,
+      idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
+      ...options,
+    }),
+  patch: <T>(
+    apiId: string,
+    path: string,
+    body?: unknown,
+    idempotencyKey?: string,
+    options?: ApiCallOptions,
+  ) =>
+    apiRequest<T>({
+      apiId,
+      path,
+      method: "PATCH",
+      body,
+      idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
+      ...options,
+    }),
+  put: <T>(
+    apiId: string,
+    path: string,
+    body?: unknown,
+    idempotencyKey?: string,
+    options?: ApiCallOptions,
+  ) =>
+    apiRequest<T>({
+      apiId,
+      path,
+      method: "PUT",
+      body,
+      idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
+      ...options,
+    }),
+  delete: <T>(apiId: string, path: string, idempotencyKey?: string, options?: ApiCallOptions) =>
+    apiRequest<T>({
+      apiId,
+      path,
+      method: "DELETE",
+      idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
+      ...options,
+    }),
 };
