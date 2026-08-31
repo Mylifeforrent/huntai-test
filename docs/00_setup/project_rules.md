@@ -2,7 +2,7 @@
 
 - **适用范围**：huntai-test 全仓库（`frontend/`、`backend/`、`docs/`）
 - **产出阶段**：Stage 0（项目初始化与规范搭建）
-- **生效方式**：仓库根 `AGENTS.md` 摘要引用本文件并随会话自动加载；本文件与 AGENTS.md 冲突时，以本文件为准
+- **生效方式**：仓库根 `AGENTS.md`（完善版）为跨工具 Agent 指令；`CLAUDE.md` 指向 `AGENTS.md`，不得另写规则。本文件管工程过程（命名 / Git / 验证 / 红线 R1–R4）；与 `AGENTS.md` 在这些主题上冲突时，以本文件为准。领域模型、API、页面、技术栈冲突按 `AGENTS.md` §8 分层权威处理，禁止用本文件覆盖设计文档事实源
 - **修订方式**：任何修订必须先在 `docs/13_changes/change_log.md` 登记，再以 `docs(setup):` 类型的 commit 合入
 - **约束等级用语**：**必须**（违反即阻断合入）／ **禁止**（违反即触犯红线，处置见 §6）／ **默认**（不声明变更即按此执行）
 
@@ -46,11 +46,11 @@
 
 ## 2. 目录组织规范
 
-1. 仓库顶层只允许三类业务目录：`frontend/`、`backend/`、`docs/`；其余只能是仓库级配置文件（`README.md`、`AGENTS.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.cursor/`、`.mcp.json`）。
+1. 仓库顶层只允许三类业务目录：`frontend/`、`backend/`、`docs/`；其余只能是仓库级配置文件（`README.md`、`AGENTS.md`、`CLAUDE.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.cursor/`、`.mcp.json`）。
 2. 设计资产与过程文档只存放于 `docs/`；`frontend/`、`backend/` 内禁止出现设计文档（代码目录内的 `README.md` 不算设计文档，但内容只限「如何构建 / 运行」）。
 3. 可执行代码只存放于 `frontend/`、`backend/`；`docs/` 内禁止出现代码文件（`.md` 内嵌的代码示例片段不算）。
 4. 阶段产物只进对应 `docs/NN_*` 目录；跨阶段引用使用相对路径链接。
-5. `backend/`、`frontend/` 的内部结构由 Stage 6/7 设计文档定稿；定稿前不得预建子目录（Stage 0 的占位 `README.md` 除外）。
+5. `backend/`、`frontend/` 的内部结构按 Stage 6/7 已定稿/已冻结设计落地（见 `docs/06_architecture_design/tech_stack_decision-v1.0.md` 与 `docs/06_architecture_design/frontend_design_spec-v1.0.md`）；禁止预建设计未规定的模块目录（Stage 0 占位 `README.md` 除外）。
 
 **判定标准**：出现上述约定之外的顶层条目、或文件类型与所在目录不符，即不合规，当次提交必须移正后重新提交。
 
@@ -129,7 +129,7 @@ AI 生成（或 AI 辅助）的代码合入前逐项核对；**任何一项为�
 
 ### R2 禁止 AI 静默修改已冻结的设计资产
 
-- 已冻结资产 = `docs/` 中带「已冻结」标记的文档（标记规范由 Stage 14 落地）；Stage 14 之前，凡已用于指导后续阶段的设计产出（如 PRD、API 规范）一律按冻结资产对待。
+- 已冻结资产判定见根 `AGENTS.md` §8：文首 Status 为「已冻结」或「已定稿」；ADR Accepted；已被后续阶段消费的设计产出（即使 Status=Draft）；以及 `project_rules.md`、`AGENTS.md`、`CLAUDE.md`、`.env.example`、MCP 三份清单。
 - 修改冻结资产的前置条件：① 先在 `docs/13_changes/change_log.md` 登记变更记录；② 获用户显式批准；③ 修改后在回复中展示变更 diff。三者缺一即视为静默修改。
 - **执行判定**：冻结文档的任意 git 变更必须能对应到 change_log 记录；对应不到的，视为静默修改，必须 revert。
 
