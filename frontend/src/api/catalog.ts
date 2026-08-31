@@ -22,6 +22,21 @@ export const PAGE_APIS = {
     { id: "API-018", method: "GET", path: "/api/v1/projects/{project_id}/quota-view", summary: "项目配额" },
     { id: "API-019", method: "GET", path: "/api/v1/projects/{project_id}/notification-subscriptions", summary: "通知订阅" },
   ],
+  P04_members: [
+    { id: "API-013", method: "GET", path: "/api/v1/projects/{project_id}/members", summary: "成员列表" },
+    { id: "API-014", method: "POST", path: "/api/v1/projects/{project_id}/members", summary: "添加成员" },
+    { id: "API-015", method: "PATCH", path: "/api/v1/projects/{project_id}/members/{user_id}", summary: "变更角色" },
+    { id: "API-016", method: "DELETE", path: "/api/v1/projects/{project_id}/members/{user_id}", summary: "移除成员" },
+  ],
+  P04_quota: [{ id: "API-018", method: "GET", path: "/api/v1/projects/{project_id}/quota-view", summary: "项目配额" }],
+  P04_notify: [
+    {
+      id: "API-019",
+      method: "GET",
+      path: "/api/v1/projects/{project_id}/notification-subscriptions",
+      summary: "通知订阅",
+    },
+  ],
   P05: [
     { id: "API-030", method: "GET", path: "/api/v1/test-cases", summary: "用例列表" },
     { id: "API-200", method: "POST", path: "/api/v1/test-cases/imports", summary: "Excel 导入" },

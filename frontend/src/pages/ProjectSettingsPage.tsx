@@ -1,18 +1,47 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope, MeProjection, ResourceEnvelope } from "@/api/types";
+import type {
+  ListEnvelope,
+  MeProjection,
+  ProjectMember,
+  ProjectMemberItem,
+  ProjectRole,
+  ResourceEnvelope,
+} from "@/api/types";
+import { PROJECT_ROLES } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import {
+  CommandFeedback,
+  PageHeader,
+  QueryGate,
+  EmptyState,
+} from "@/components/domain/PageState";
+import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 
 export function ProjectSettingsPage() {
   const { projectId = "" } = useParams();
+  const queryClient = useQueryClient();
+  const [commandError, setCommandError] = useState<unknown>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [addUserId, setAddUserId] = useState("");
+  const [addRole, setAddRole] = useState<ProjectRole>("viewer");
 
   const me = useQuery({
     queryKey: queryKeys.me,
@@ -21,34 +50,81 @@ export function ProjectSettingsPage() {
   const members = useQuery({
     queryKey: queryKeys.members(projectId || "none"),
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-013", `/api/v1/projects/${projectId}/members`),
-    enabled: Boolean(projectId),
-  });
-  const quota = useQuery({
-    queryKey: ["projects", projectId, "quota-view"],
-    queryFn: () =>
-      api.get<ResourceEnvelope<Record<string, unknown>>>("API-018", `/api/v1/projects/${projectId}/quota-view`),
-    enabled: Boolean(projectId),
-  });
-  const notify = useQuery({
-    queryKey: ["projects", projectId, "notification-subscriptions"],
-    queryFn: () =>
-      api.get<ResourceEnvelope<Record<string, unknown>>>(
-        "API-019",
-        `/api/v1/projects/${projectId}/notification-subscriptions`,
-      ),
+      api.get<ListEnvelope<ProjectMemberItem>>("API-013", `/api/v1/projects/${projectId}/members`),
     enabled: Boolean(projectId),
   });
 
-  const role =
-    me.data?.data.memberships.find((item) => item.project_id === projectId)?.role ??
-    me.data?.data.memberships[0]?.role;
-  const viewer = role === "viewer";
+  const myRole =
+    me.data?.data.memberships.find((item) => item.project_id === projectId)?.role ?? null;
+  const viewer = myRole === "viewer";
+  const canWrite = myRole === "owner" || myRole === "admin";
   const memberItems = members.data?.data.items ?? [];
-  const quotaView = asRecord(quota.data?.data.view);
-  const channels = Array.isArray(notify.data?.data.channels) ? notify.data.data.channels : [];
-  const categories = Array.isArray(notify.data?.data.categories) ? notify.data.data.categories : [];
-  const pageError = members.error ?? quota.error ?? notify.error;
+
+  const invalidateMembers = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.members(projectId) });
+  };
+
+  const addMember = useMutation({
+    mutationFn: () =>
+      api.post<ResourceEnvelope<ProjectMember>>(
+        "API-014",
+        `/api/v1/projects/${projectId}/members`,
+        { user_id: addUserId.trim(), role: addRole },
+      ),
+    onMutate: () => {
+      setCommandError(null);
+      setPendingAction("添加成员");
+    },
+    onSuccess: () => {
+      setAddUserId("");
+      setPendingAction(null);
+      invalidateMembers();
+    },
+    onError: (error) => {
+      setPendingAction(null);
+      setCommandError(error);
+    },
+  });
+
+  const patchRole = useMutation({
+    mutationFn: (input: { userId: string; role: ProjectRole }) =>
+      api.patch<ResourceEnvelope<ProjectMember>>(
+        "API-015",
+        `/api/v1/projects/${projectId}/members/${input.userId}`,
+        { role: input.role },
+      ),
+    onMutate: () => {
+      setCommandError(null);
+      setPendingAction("变更角色");
+    },
+    onSuccess: () => {
+      setPendingAction(null);
+      invalidateMembers();
+    },
+    onError: (error) => {
+      setPendingAction(null);
+      setCommandError(error);
+    },
+  });
+
+  const removeMember = useMutation({
+    mutationFn: (userId: string) =>
+      api.delete("API-016", `/api/v1/projects/${projectId}/members/${userId}`),
+    onMutate: () => {
+      setCommandError(null);
+      setPendingAction("移除成员");
+    },
+    onSuccess: () => {
+      setPendingAction(null);
+      invalidateMembers();
+    },
+    onError: (error) => {
+      setPendingAction(null);
+      setCommandError(error);
+    },
+  });
+
+  const writeBusy = addMember.isPending || patchRole.isPending || removeMember.isPending;
 
   return (
     <>
@@ -68,14 +144,68 @@ export function ProjectSettingsPage() {
               <AlertDescription>当前角色为 viewer，本页仅呈现，不提供发起或变更入口。</AlertDescription>
             </Alert>
           ) : null}
-          <QueryGate isPending={members.isPending || quota.isPending || notify.isPending} error={pageError} apis={PAGE_APIS.P04}>
-            <Tabs defaultValue="members">
-              <TabsList>
-                <TabsTrigger value="members">成员与角色</TabsTrigger>
-                <TabsTrigger value="quota">配额</TabsTrigger>
-                <TabsTrigger value="notify">通知订阅</TabsTrigger>
-              </TabsList>
-              <TabsContent value="members">
+          <Tabs defaultValue="members">
+            <TabsList>
+              <TabsTrigger value="members">成员与角色</TabsTrigger>
+              <TabsTrigger value="quota">配额</TabsTrigger>
+              <TabsTrigger value="notify">通知订阅</TabsTrigger>
+            </TabsList>
+            <TabsContent value="members">
+              <QueryGate
+                isPending={members.isPending || me.isPending}
+                error={members.error ?? me.error}
+                apis={PAGE_APIS.P04_members}
+              >
+                {pendingAction ? (
+                  <p className="mb-3 text-sm text-muted-foreground" data-testid="members-pending">
+                    {pendingAction}受理中…
+                  </p>
+                ) : null}
+                <CommandFeedback error={commandError} apis={PAGE_APIS.P04_members} action="成员变更" />
+                {canWrite ? (
+                  <form
+                    className="mb-4 flex flex-wrap items-end gap-3 rounded-md border p-3"
+                    data-testid="add-member-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!addUserId.trim()) return;
+                      addMember.mutate();
+                    }}
+                  >
+                    <div className="flex min-w-56 flex-1 flex-col gap-1">
+                      <Label htmlFor="add-user-id">用户 ID</Label>
+                      <Input
+                        id="add-user-id"
+                        value={addUserId}
+                        onChange={(event) => setAddUserId(event.target.value)}
+                        placeholder="user UUID"
+                        disabled={writeBusy}
+                      />
+                    </div>
+                    <div className="flex w-40 flex-col gap-1">
+                      <Label>角色</Label>
+                      <Select
+                        value={addRole}
+                        onValueChange={(value) => setAddRole(value as ProjectRole)}
+                        disabled={writeBusy}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PROJECT_ROLES.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {role}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button type="submit" disabled={writeBusy || !addUserId.trim()}>
+                      添加成员
+                    </Button>
+                  </form>
+                ) : null}
                 {memberItems.length === 0 ? (
                   <EmptyState title="无成员" />
                 ) : (
@@ -85,89 +215,70 @@ export function ProjectSettingsPage() {
                         <TableHead>姓名</TableHead>
                         <TableHead>邮箱</TableHead>
                         <TableHead>角色</TableHead>
+                        {canWrite ? <TableHead>操作</TableHead> : null}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {memberItems.map((item, index) => (
-                        <TableRow key={String(item.user_id ?? index)}>
-                          <TableCell>{String(item.display_name ?? item.user_id ?? "")}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{String(item.email ?? "—")}</TableCell>
-                          <TableCell>
-                            <StatusBadge status={String(item.role ?? "")} />
+                      {memberItems.map((item) => (
+                        <TableRow key={item.user_id} data-testid="member-row">
+                          <TableCell>{item.display_name ?? item.user_id}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {"email" in item && item.email ? item.email : "—"}
                           </TableCell>
+                          <TableCell>
+                            {canWrite ? (
+                              <Select
+                                value={item.role}
+                                onValueChange={(value) =>
+                                  patchRole.mutate({ userId: item.user_id, role: value as ProjectRole })
+                                }
+                                disabled={writeBusy}
+                              >
+                                <SelectTrigger className="w-32" data-testid="member-role-select">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PROJECT_ROLES.map((role) => (
+                                    <SelectItem key={role} value={role}>
+                                      {role}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <StatusBadge status={item.role} />
+                            )}
+                          </TableCell>
+                          {canWrite ? (
+                            <TableCell>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={writeBusy}
+                                data-testid="remove-member"
+                                onClick={() => removeMember.mutate(item.user_id)}
+                              >
+                                移除
+                              </Button>
+                            </TableCell>
+                          ) : null}
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 )}
-              </TabsContent>
-              <TabsContent value="quota">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>项目级配额视图</CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <QuotaStat label="本项目 Token 消耗" value={quotaView.token_consumed_in_project} />
-                    <QuotaStat label="执行并发 slot" value={quotaView.executor_slots_in_use_in_project} />
-                    <QuotaStat label="压测并发" value={quotaView.perf_concurrency_in_use_in_project} />
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="notify">
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>渠道</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-2">
-                      {channels.length === 0 ? <p className="text-sm text-muted-foreground">无渠道投影</p> : null}
-                      {channels.map((item, index) => {
-                        const row = asRecord(item);
-                        return (
-                          <div key={String(row.channel_id ?? index)} className="flex items-center justify-between rounded-md border p-2">
-                            <span className="text-sm">{String(row.channel_id ?? "")}</span>
-                            <StatusBadge status={row.enabled === true ? "ACTIVE" : "DISABLED"} />
-                          </div>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>通知类别</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-2">
-                      {categories.length === 0 ? <p className="text-sm text-muted-foreground">无类别投影</p> : null}
-                      {categories.map((item, index) => {
-                        const row = asRecord(item);
-                        return (
-                          <div key={String(row.category ?? index)} className="flex items-center justify-between rounded-md border p-2">
-                            <span className="text-sm">{String(row.category ?? "")}</span>
-                            <StatusBadge status={row.enabled === true ? "ACTIVE" : "DISABLED"} />
-                          </div>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </QueryGate>
+              </QueryGate>
+            </TabsContent>
+            <TabsContent value="quota">
+              <UndevelopedCallout apis={PAGE_APIS.P04_quota} action="项目配额" />
+            </TabsContent>
+            <TabsContent value="notify">
+              <UndevelopedCallout apis={PAGE_APIS.P04_notify} action="通知订阅" />
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </>
   );
-}
-
-function QuotaStat({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-mono text-xl font-bold">{value == null ? "—" : String(value)}</p>
-    </div>
-  );
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }

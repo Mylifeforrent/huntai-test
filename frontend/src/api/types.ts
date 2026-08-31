@@ -71,6 +71,60 @@ export type ExecutionSource = (typeof EXECUTION_SOURCES)[number];
 export const PROJECT_ROLES = ["owner", "admin", "tester", "viewer"] as const;
 export type ProjectRole = (typeof PROJECT_ROLES)[number];
 
+export interface ProjectListItem {
+  id: string;
+  name: string;
+  version: number;
+  my_role: ProjectRole;
+  jira_project_key?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProjectActivityItem {
+  occurred_at: string;
+  summary: string;
+  resource_type?: string | null;
+  resource_id?: string | null;
+  audit_event_id?: string | null;
+}
+
+export interface ProjectOverview {
+  id: string;
+  name: string;
+  version: number;
+  my_role: ProjectRole;
+  jira: { project_key: string | null };
+  connector_health: Array<{
+    connector_id: string;
+    type: string;
+    healthy: boolean;
+    name?: string;
+    last_checked_at?: string | null;
+    latency_ms?: number | null;
+  }>;
+  recent_activity: ProjectActivityItem[];
+  bind_env_ids?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProjectMemberItem {
+  user_id: string;
+  role: ProjectRole;
+  display_name?: string;
+  email?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProjectMember {
+  project_id: string;
+  user_id: string;
+  role: ProjectRole;
+  display_name?: string;
+}
+
 export const RISK_LEVELS = ["L0", "L1", "L2", "L3", "L4"] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 
