@@ -1,4 +1,53 @@
-# backend — 后端源码
+# backend — HuntAI Test API
 
-存放后端源码与后端工程配置。Stage 0 仅创建目录占位，本目录当前不含任何代码。
-已锁定约定：Python + uv 管理依赖与环境、`.env` 管理配置（见根 `AGENTS.md`）。内部目录结构由 Stage 6/7 产出定稿；代码于 Stage 11 初始化。
+后端源码与工程配置。配置从**仓库根目录** `.env` 加载（非 `backend/.env`）。
+
+## 前置条件
+
+- Python 3.14（`uv python install 3.14`）
+- PostgreSQL（本地测试使用 14；`DATABASE_URL` 指向目标库）
+- 仓库根 `.env` 已按 `.env.example` 填写全部必填键
+
+## 安装依赖
+
+```bash
+cd backend
+uv sync
+```
+
+## 数据库迁移
+
+```bash
+cd backend
+uv run alembic upgrade head
+```
+
+回滚一步：
+
+```bash
+uv run alembic downgrade -1
+```
+
+## 启动服务
+
+```bash
+cd backend
+uv run uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-8000} --reload
+```
+
+`APP_PORT` 取自仓库根 `.env` 的 `APP_PORT`。
+
+## 测试
+
+```bash
+cd backend
+uv run pytest
+```
+
+## 静态检查
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy app
+```
