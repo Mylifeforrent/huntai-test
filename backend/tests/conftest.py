@@ -14,6 +14,7 @@ TEST_ENV: dict[str, str] = {
     "SESSION_TTL_SECONDS": "3600",
     "OIDC_LOGIN_DRAFT_TTL_SECONDS": "600",
     "REAUTH_WINDOW_SECONDS": "900",
+    "APPROVAL_TTL_SECONDS": "86400",
     "OIDC_ISSUER": "https://idp.example.com",
     "OIDC_CLIENT_ID": "test-client",
     "OIDC_CLIENT_SECRET": "test-secret",
@@ -77,6 +78,8 @@ async def _truncate_tables() -> AsyncGenerator[None]:
     engine = get_engine()
     tables = [
         "results_evidence.audit_events",
+        "approval_policy.command_idempotency_records",
+        "approval_policy.approval_requests",
         "identity_tenancy.oidc_login_drafts",
         "identity_tenancy.auth_sessions",
         "identity_tenancy.command_idempotency_records",

@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     session_ttl_seconds: int
     oidc_login_draft_ttl_seconds: int
     reauth_window_seconds: int
+    approval_ttl_seconds: int
 
     oidc_issuer: str
     oidc_client_id: str

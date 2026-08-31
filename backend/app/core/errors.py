@@ -73,6 +73,39 @@ def oidc_auth_failed(trace_id: str) -> AppError:
     )
 
 
+def require_reauth(trace_id: str, message: str = "Step-up authentication required") -> AppError:
+    return AppError(
+        status_code=401,
+        code="HT-AUTH-002",
+        error_class="permission",
+        subclass="require_reauth",
+        message=message,
+        retryable=False,
+    )
+
+
+def policy_deny(trace_id: str, message: str = "Policy denied") -> AppError:
+    return AppError(
+        status_code=403,
+        code="HT-POL-001",
+        error_class="business",
+        subclass="policy_deny",
+        message=message,
+        retryable=False,
+    )
+
+
+def policy_undeclared(trace_id: str, message: str = "Undeclared side effect level") -> AppError:
+    return AppError(
+        status_code=403,
+        code="HT-POL-002",
+        error_class="business",
+        subclass="policy_deny",
+        message=message,
+        retryable=False,
+    )
+
+
 def forbidden(trace_id: str, message: str = "Forbidden") -> AppError:
     return AppError(
         status_code=403,

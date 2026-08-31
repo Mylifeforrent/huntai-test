@@ -1,0 +1,95 @@
+"""Cross-module read-only queries for identity_tenancy (no ORM export to consumers)."""
+
+import uuid
+
+from sqlalchemy import and_, distinct, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.identity_tenancy.models import Project, ProjectMember, User
+
+
+async def project_exists_in_org(
+    session: AsyncSession, *, organization_id: uuid.UUID, project_id: uuid.UUID
+) -> bool:
+    result = await session.execute(
+        select(Project.id).where(
+            Project.organization_id == organization_id,
+            Project.id == project_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def get_project_membership_role(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> str | None:
+    result = await session.execute(
+        select(ProjectMember.role).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        )
+    )
+    role = result.scalar_one_or_none()
+    return str(role) if role is not None else None
+
+
+async def list_project_owner_admin_user_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    exclude_user_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    result = await session.execute(
+        select(ProjectMember.user_id).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.project_id == project_id,
+            ProjectMember.role.in_(("owner", "admin")),
+            ProjectMember.user_id != exclude_user_id,
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def list_org_owner_admin_user_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    exclude_user_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    result = await session.execute(
+        select(distinct(ProjectMember.user_id))
+        .select_from(ProjectMember)
+        .join(
+            User,
+            and_(
+                User.id == ProjectMember.user_id,
+                User.organization_id == ProjectMember.organization_id,
+            ),
+        )
+        .where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.role.in_(("owner", "admin")),
+            ProjectMember.user_id != exclude_user_id,
+            User.is_disabled.is_(False),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def caller_has_non_viewer_role(
+    session: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    result = await session.execute(
+        select(ProjectMember.role).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.user_id == user_id,
+            ProjectMember.role.in_(("owner", "admin", "tester")),
+        )
+    )
+    return result.first() is not None
