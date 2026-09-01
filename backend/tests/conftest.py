@@ -97,6 +97,9 @@ async def _truncate_tables() -> AsyncGenerator[None]:
     engine = get_engine()
     tables = [
         "results_evidence.audit_events",
+        "execution_registry.command_idempotency_records",
+        "execution_registry.job_contracts",
+        "execution_registry.execution_environments",
         "quota_governance.org_quotas",
         "ai_governance.command_idempotency_records",
         "ai_governance.ai_invocation_logs",
