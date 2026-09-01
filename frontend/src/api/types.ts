@@ -352,3 +352,48 @@ export interface ApprovalResubmissionResult {
   origin_final_status: "EXPIRED" | "REJECTED" | "EXECUTED";
   new_approval_request: ApprovalRequestListItem;
 }
+
+export interface OrgQuotaCurrent {
+  version: number;
+  token_budget: number;
+  token_reserved: number;
+  token_consumed: number;
+  token_remaining: number;
+  executor_slot_quota: number;
+  executor_slots_in_use?: number;
+  perf_concurrency_quota: number;
+  perf_concurrency_in_use?: number;
+  updated_at?: string;
+}
+
+export interface ProjectQuotaView {
+  project_id: string;
+  org_quota_version: number;
+  view: {
+    token_consumed_in_project?: number;
+    org_remaining: OrgQuotaCurrent;
+  };
+}
+
+export interface AiCostDashboardTotals {
+  token_usage: Record<string, number>;
+  cost: number;
+  invocation_count: number;
+  adoption_rate?: number;
+  degrade_rate?: number;
+  cost_per_workflow?: Record<string, number>;
+}
+
+export interface AiCostDashboard {
+  window: { from: string; to: string };
+  totals: AiCostDashboardTotals;
+  series?: Array<Record<string, unknown>>;
+}
+
+export interface OrganizationCapabilityControls {
+  version: number;
+  tightened: boolean;
+  effective_scope: Record<string, unknown>;
+  banner: Record<string, unknown>;
+  capability_controls?: Record<string, unknown>;
+}

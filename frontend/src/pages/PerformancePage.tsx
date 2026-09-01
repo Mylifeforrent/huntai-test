@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
+import { queryKeys } from "@/api/queryKeys";
 import type { ListEnvelope } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -18,16 +19,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
-import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 import { useUrlState } from "@/hooks/useUrlState";
 
 export function PerformancePage() {
+  const queryClient = useQueryClient();
   const { get, set } = useUrlState();
   const projectId = get("projectId");
   const [killOpen, setKillOpen] = useState(false);
-  const [killTried, setKillTried] = useState(false);
+  const [commandError, setCommandError] = useState<unknown>(null);
+
+  const org = useQuery({
+    queryKey: queryKeys.organization,
+    queryFn: () => api.get("API-010", "/api/v1/organizations/current"),
+  });
 
   const query = useQuery({
     queryKey: ["perf-baselines", projectId],
@@ -38,16 +44,26 @@ export function PerformancePage() {
     enabled: Boolean(projectId),
   });
   const items = query.data?.data.items ?? [];
+  const orgVersion = (org.data as { data?: { version?: number } } | undefined)?.data?.version;
 
-  function tighten() {
-    setKillTried(true);
-    void api
-      .post("API-199", "/api/v1/organizations/current/capability-controls/tighten", {
-        expected_version: 1,
+  const tightenMutation = useMutation({
+    mutationFn: () =>
+      api.post("API-199", "/api/v1/organizations/current/capability-controls/tighten", {
+        expected_version: orgVersion,
         target: { level: "module", module: "perf" },
         reason: "performance kill switch",
-      })
-      .catch(() => undefined);
+      }),
+    onMutate: () => setCommandError(null),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.organization });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
+    },
+    onError: (error) => setCommandError(error),
+  });
+
+  function tighten() {
+    setKillOpen(false);
+    tightenMutation.mutate();
   }
 
   return (
@@ -62,6 +78,7 @@ export function PerformancePage() {
           压测任务失败或 kill switch 关停导致 STOPPING 后，严禁自动重试。护栏仅允许白名单环境。
         </AlertDescription>
       </Alert>
+      <CommandFeedback error={commandError} apis={PAGE_APIS.P16} action="压测 kill switch" />
       <div className="flex flex-wrap gap-2">
         <Input
           placeholder="projectId（API-056 必填）"
@@ -69,7 +86,7 @@ export function PerformancePage() {
           onChange={(event) => set({ projectId: event.target.value })}
           className="max-w-72"
         />
-        <Button variant="destructive" onClick={() => setKillOpen(true)}>
+        <Button variant="destructive" onClick={() => setKillOpen(true)} disabled={orgVersion === undefined}>
           Kill switch 关停压测模块
         </Button>
       </div>
@@ -114,13 +131,12 @@ export function PerformancePage() {
           )}
         </QueryGate>
       )}
-      {killTried ? <UndevelopedCallout apis={PAGE_APIS.P16} action="压测 kill switch API-199" /> : null}
       <AlertDialog open={killOpen} onOpenChange={setKillOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>立即关停压测模块？</AlertDialogTitle>
             <AlertDialogDescription>
-              关停走 API-199（L1 即时）。在途压测可能进入 STOPPING。关停后不得自动重试。恢复须走 kill_switch_restore，不能用 tighten 放开。
+              关停走 API-199（L1 即时）。恢复须走 kill_switch_restore，不能用 tighten 放开。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

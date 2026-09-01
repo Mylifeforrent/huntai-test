@@ -9,6 +9,7 @@ import type {
   MeProjection,
   ProjectMember,
   ProjectMemberItem,
+  ProjectQuotaView,
   ProjectRole,
   ResourceEnvelope,
 } from "@/api/types";
@@ -34,6 +35,7 @@ import {
 } from "@/components/domain/PageState";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 import { StatusBadge } from "@/components/domain/StatusBadge";
+import { tokenRemainingProjection } from "@/lib/utils";
 
 export function ProjectSettingsPage() {
   const { projectId = "" } = useParams();
@@ -51,6 +53,12 @@ export function ProjectSettingsPage() {
     queryKey: queryKeys.members(projectId || "none"),
     queryFn: () =>
       api.get<ListEnvelope<ProjectMemberItem>>("API-013", `/api/v1/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
+  const quotaView = useQuery({
+    queryKey: ["projects", projectId, "quota-view"],
+    queryFn: () =>
+      api.get<ResourceEnvelope<ProjectQuotaView>>("API-018", `/api/v1/projects/${projectId}/quota-view`),
     enabled: Boolean(projectId),
   });
 
@@ -271,7 +279,12 @@ export function ProjectSettingsPage() {
               </QueryGate>
             </TabsContent>
             <TabsContent value="quota">
-              <UndevelopedCallout apis={PAGE_APIS.P04_quota} action="项目配额" />
+              <QueryGate isPending={quotaView.isPending} error={quotaView.error} apis={PAGE_APIS.P04_quota}>
+                <p className="text-sm text-muted-foreground">组织 Token 余量（服务端投影，禁止本地相减）</p>
+                <p className="font-mono text-2xl font-bold tabular-nums">
+                  {tokenRemainingProjection(quotaView.data?.data.view.org_remaining) ?? "—"}
+                </p>
+              </QueryGate>
             </TabsContent>
             <TabsContent value="notify">
               <UndevelopedCallout apis={PAGE_APIS.P04_notify} action="通知订阅" />
