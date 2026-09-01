@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope, ResourceEnvelope } from "@/api/types";
+import type { ListEnvelope, ResourceEnvelope, TestRunCancelResult, TestRunDetail } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,7 +35,7 @@ export function TestRunDetailPage() {
 
   const detail = useQuery({
     queryKey: queryKeys.testRun(runId),
-    queryFn: () => api.get<ResourceEnvelope<Record<string, unknown>>>("API-061", `/api/v1/test-runs/${runId}`),
+    queryFn: () => api.get<ResourceEnvelope<TestRunDetail>>("API-061", `/api/v1/test-runs/${runId}`),
     enabled: Boolean(runId),
   });
   const clusters = useQuery({
@@ -51,17 +51,15 @@ export function TestRunDetailPage() {
     enabled: Boolean(runId),
   });
 
-  const run = detail.data?.data ?? {};
-  const status = String(run.status ?? "");
-  const source = typeof run.execution_source === "string" ? run.execution_source : undefined;
-  const version = typeof run.version === "number" ? run.version : undefined;
+  const run = detail.data?.data;
+  const status = run?.status ?? "";
+  const source = run?.execution_source;
+  const version = run?.version;
   const clusterItems = clusters.data?.data.items ?? [];
   const resultItems = results.data?.data.items ?? [];
-  const unclustered = Array.isArray(run.unclustered_refs)
-    ? run.unclustered_refs
-    : Array.isArray(asRecord(clusters.data?.data).unclustered_refs)
-      ? (asRecord(clusters.data?.data).unclustered_refs as unknown[])
-      : [];
+  const unclustered = Array.isArray(asRecord(clusters.data?.data).unclustered_refs)
+    ? (asRecord(clusters.data?.data).unclustered_refs as unknown[])
+    : [];
   const firstResult = asRecord(resultItems[0]);
   const evidence = asRecord(firstResult.evidence);
 
@@ -70,11 +68,20 @@ export function TestRunDetailPage() {
       if (typeof version !== "number") {
         throw new Error("缺少 expected_version，无法提交终止");
       }
-      return api.post("API-063", `/api/v1/test-runs/${runId}/cancel`, { expected_version: version });
+      return api.post<ResourceEnvelope<TestRunCancelResult>>(
+        "API-063",
+        `/api/v1/test-runs/${runId}/cancel`,
+        { expected_version: version },
+      );
     },
     onMutate: () => setCancelError(null),
-    onSuccess: () => {
-      setSignalSent(true);
+    onSuccess: (payload) => {
+      const cancelledRun = payload.data.test_run;
+      if (cancelledRun.status === "CANCELLED") {
+        setSignalSent(true);
+      } else if (cancelledRun.status === "STOPPING" || cancelledRun.stop_signal_at) {
+        setSignalSent(true);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.testRun(runId) });
     },
     onError: (error) => setCancelError(error),
@@ -115,9 +122,18 @@ export function TestRunDetailPage() {
               </Button>
             ) : null}
             {signalSent ? (
-              <p className="text-sm text-success">终止信号已持久化送达。STOPPING → CANCELLED 由服务端推进。</p>
+              <p className="text-sm text-success">
+                终止信号已持久化送达。
+                {status === "STOPPING" ? " STOPPING → CANCELLED 由服务端推进。" : ""}
+                {status === "CANCELLED" ? "" : " 当前状态不等于 CANCELLED。"}
+              </p>
             ) : null}
-            <AiDegradeBanner active={Boolean(run.ai_degraded)} />
+            {run?.stop_signal_at && status !== "CANCELLED" ? (
+              <p className="text-xs text-muted-foreground">
+                stop_signal_at 已设置（{run.stop_signal_at}），不等于 CANCELLED。
+              </p>
+            ) : null}
+            <AiDegradeBanner active={false} />
           </CardContent>
         </Card>
         <Card>
@@ -160,7 +176,7 @@ export function TestRunDetailPage() {
               ) : unclustered.length === 0 ? (
                 <p>服务端未返回无法判断项。</p>
               ) : (
-                unclustered.map((item, index) => {
+                unclustered.map((item: unknown, index: number) => {
                   const row = asRecord(item);
                   const id = String(row.id ?? row.case_result_id ?? index);
                   return (

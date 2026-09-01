@@ -6,10 +6,14 @@ import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
 import { isUndeveloped } from "@/api/errors";
-import type { ListEnvelope, ResourceEnvelope } from "@/api/types";
+import type {
+  ExecutionEnvironmentListItem,
+  ListEnvelope,
+  ResourceEnvelope,
+  TestRunStartResult,
+} from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,8 +34,18 @@ import { cn } from "@/lib/utils";
 type Mode = "script" | "agent";
 
 const PROJECT_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-011");
-const OPTIONS_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-069");
+const ENV_APIS = PAGE_APIS.P15.filter((item) => item.id === "API-100");
 const LAUNCH_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-062");
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseCaseIds(raw: string): string[] {
+  return raw
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter((item) => UUID_RE.test(item));
+}
 
 export function ExecutionLaunchPage() {
   const { get, set } = useUrlState();
@@ -40,7 +54,7 @@ export function ExecutionLaunchPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("script");
   const [envId, setEnvId] = useState("");
-  const [caseIds, setCaseIds] = useState<string[]>(urlCaseId ? [urlCaseId] : []);
+  const [caseIdsInput, setCaseIdsInput] = useState(urlCaseId ?? "");
   const [targetEnv, setTargetEnv] = useState("");
   const [localError, setLocalError] = useState("");
   const [launchError, setLaunchError] = useState<unknown>(null);
@@ -49,13 +63,12 @@ export function ExecutionLaunchPage() {
     queryKey: queryKeys.projects,
     queryFn: () => api.get<ListEnvelope<Record<string, unknown>>>("API-011", "/api/v1/projects"),
   });
-  const options = useQuery({
-    queryKey: queryKeys.executionOptions(projectId || "none"),
+  const environments = useQuery({
+    queryKey: queryKeys.environments({ projectId: projectId || "" }),
     queryFn: () =>
-      api.get<ResourceEnvelope<Record<string, unknown>>>(
-        "API-069",
-        `/api/v1/projects/${projectId}/execution-options`,
-      ),
+      api.get<ListEnvelope<ExecutionEnvironmentListItem>>("API-100", "/api/v1/execution-environments", {
+        project_id: projectId || undefined,
+      }),
     enabled: Boolean(projectId),
   });
 
@@ -63,45 +76,35 @@ export function ExecutionLaunchPage() {
   const projectsFailed = Boolean(projects.error) && !projects.isPending;
   const projectsUndeveloped = isUndeveloped(projects.error);
 
-  const optionData = options.data?.data;
-  const environments = Array.isArray(optionData?.environments) ? optionData.environments : [];
-  const cases = Array.isArray(optionData?.cases) ? optionData.cases : [];
-  const selected = environments
-    .map((item) => asRecord(item))
-    .find((item) => String(item.id) === envId);
-  const envStatus = String(selected?.status ?? "");
-  const envType = String(selected?.env_type ?? "");
-  const envSelectable = selected?.selectable === true && envStatus === "ACTIVE";
+  const envItems = environments.data?.data.items ?? [];
+  const selected = envItems.find((item) => item.id === envId);
+  const envStatus = selected?.status ?? "";
+  const envType = selected?.env_type ?? "";
+  const envSelectable = envStatus === "ACTIVE";
   const agentBlocked = envType === "external_ci";
-  const optionsFailed = Boolean(projectId) && Boolean(options.error) && !options.isPending;
-  const optionsUndeveloped = isUndeveloped(options.error);
+  const envsFailed = Boolean(projectId) && Boolean(environments.error) && !environments.isPending;
+  const envsUndeveloped = isUndeveloped(environments.error);
 
-  const selectableCaseIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const item of cases) {
-      const row = asRecord(item);
-      if (row.selectable === true && typeof row.id === "string") {
-        ids.add(row.id);
-      }
-    }
-    return ids;
-  }, [cases]);
-
-  const chosenCaseIds = caseIds.filter((id) => selectableCaseIds.has(id));
+  const caseIds = useMemo(() => parseCaseIds(caseIdsInput), [caseIdsInput]);
 
   const launch = useMutation({
-    mutationFn: () =>
-      api.post("API-062", "/api/v1/test-runs", {
+    mutationFn: () => {
+      if (!selected) {
+        throw new Error("未选择环境");
+      }
+      return api.post<ResourceEnvelope<TestRunStartResult>>("API-062", "/api/v1/test-runs", {
         project_id: projectId,
         env_id: envId,
         execution_source: mode === "agent" ? "agent" : "script",
         trigger_type: "manual",
-        case_ids: chosenCaseIds,
-        params: { TARGET_ENV: targetEnv },
-      }),
+        case_ids: caseIds,
+        expected_env_version: selected.version,
+        params: targetEnv.trim() ? { TARGET_ENV: targetEnv.trim() } : undefined,
+      });
+    },
     onMutate: () => setLaunchError(null),
     onSuccess: (payload) => {
-      const id = extractResourceId(payload);
+      const id = extractResourceId(payload) ?? payload.data.id;
       if (id) {
         navigate(`/test-center/runs/${id}`);
         return;
@@ -117,16 +120,16 @@ export function ExecutionLaunchPage() {
       setLocalError("请选择项目（API-011）或通过 ?projectId= 进入");
       return;
     }
-    if (!envSelectable) {
-      setLocalError("仅 ACTIVE 且 selectable 的环境可选");
+    if (!envSelectable || !selected) {
+      setLocalError("仅 ACTIVE 环境可选");
       return;
     }
     if (mode === "agent" && agentBlocked) {
       setLocalError("外部 CI 一期不支持 Agent");
       return;
     }
-    if (chosenCaseIds.length === 0) {
-      setLocalError("至少选择一条服务端下发且 selectable 的用例（case_ids）");
+    if (caseIds.length === 0) {
+      setLocalError("至少输入一个有效 case_id（UUID，逗号或空格分隔）");
       return;
     }
     if (!targetEnv.trim()) {
@@ -135,15 +138,6 @@ export function ExecutionLaunchPage() {
     }
     setLocalError("");
     launch.mutate();
-  }
-
-  function toggleCase(id: string, checked: boolean) {
-    setCaseIds((current) => {
-      if (checked) {
-        return current.includes(id) ? current : [...current, id];
-      }
-      return current.filter((item) => item !== id);
-    });
   }
 
   return (
@@ -186,16 +180,16 @@ export function ExecutionLaunchPage() {
           ) : null}
           {!projectId ? (
             <Alert>
-              <AlertDescription>执行选项（API-069）依赖 project_id。可从项目用例页带 ?projectId= 进入。</AlertDescription>
+              <AlertDescription>环境列表（API-100）依赖 project_id。可从项目用例页带 ?projectId= 进入。</AlertDescription>
             </Alert>
           ) : null}
         </CardContent>
       </Card>
 
-      {optionsFailed && optionsUndeveloped ? (
-        <UndevelopedCallout apis={OPTIONS_APIS} error={options.error} action="执行选项" />
+      {envsFailed && envsUndeveloped ? (
+        <UndevelopedCallout apis={ENV_APIS} error={environments.error} action="执行环境" />
       ) : null}
-      {optionsFailed && !optionsUndeveloped ? <ErrorState error={options.error} /> : null}
+      {envsFailed && !envsUndeveloped ? <ErrorState error={environments.error} /> : null}
 
       <Layer step="1" title="执行模式" hint="Script 进门禁；Agent 不进门禁、无自动重试">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -229,23 +223,20 @@ export function ExecutionLaunchPage() {
 
       <Layer step="2" title="环境选择" hint="仅 ACTIVE 可选；DEGRADED / DISABLED / PENDING_APPROVAL 置灰">
         {!projectId ? (
-          <EmptyState compact title="先选择项目" hint="环境列表来自 API-069，不发明环境。" />
-        ) : options.isPending ? (
+          <EmptyState compact title="先选择项目" hint="环境列表来自 API-100，不发明环境。" />
+        ) : environments.isPending ? (
           <LoadingState rows={3} />
-        ) : optionsFailed ? (
-          <p className="text-xs text-muted-foreground">执行选项请求失败，不把失败当成空环境列表。</p>
-        ) : environments.length === 0 ? (
+        ) : envsFailed ? (
+          <p className="text-xs text-muted-foreground">环境列表请求失败，不把失败当成空环境列表。</p>
+        ) : envItems.length === 0 ? (
           <EmptyState compact title="无可用环境" hint="空集是服务端下发，不是前端占位。" />
         ) : (
           <div className="flex flex-col gap-2">
-            {environments.map((item, index) => {
-              const row = asRecord(item);
-              const id = String(row.id ?? index);
-              const status = String(row.status ?? "");
-              const disabled = row.selectable !== true || status !== "ACTIVE";
+            {envItems.map((row) => {
+              const id = row.id;
+              const status = row.status;
+              const disabled = status !== "ACTIVE";
               const selectedEnv = envId === id;
-              const health = asRecord(row.health_status);
-              const capacity = asRecord(row.capacity);
               return (
                 <button
                   key={id}
@@ -268,18 +259,13 @@ export function ExecutionLaunchPage() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">{String(row.name ?? id)}</span>
+                      <span className="text-sm font-medium">{row.name ?? id}</span>
                       <StatusBadge status={status} />
                       {row.env_type ? (
-                        <span className="font-mono text-[10px] text-muted-foreground">{String(row.env_type)}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{row.env_type}</span>
                       ) : null}
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      health_status / 容量由服务端下发。
-                      {typeof health.latency_ms === "number" ? ` · ${health.latency_ms}ms` : ""}
-                      {typeof row.unavailable_reason === "string" ? ` · ${row.unavailable_reason}` : ""}
-                      {Object.keys(capacity).length > 0 ? ` · capacity ${JSON.stringify(capacity)}` : ""}
-                    </p>
+                    <p className="text-xs text-muted-foreground">环境状态由服务端下发；仅 ACTIVE 可选。</p>
                   </div>
                 </button>
               );
@@ -296,46 +282,18 @@ export function ExecutionLaunchPage() {
         ) : null}
       </Layer>
 
-      <Layer step="3" title="参数表单" hint="TARGET_ENV 本地即时校验；用例来自 API-069 cases，提交走 API-062">
+      <Layer step="3" title="参数表单" hint="TARGET_ENV 本地即时校验；case_ids 手动输入 UUID，提交走 API-062">
         <div className="flex flex-col gap-2">
-          <Label>用例（case_ids，仅 selectable）</Label>
-          {!projectId || options.isPending || optionsFailed ? (
-            <p className="text-xs text-muted-foreground">用例可选性随执行选项下发；查询失败不展示空成功列表。</p>
-          ) : cases.length === 0 ? (
-            <EmptyState compact title="无用例选项" hint="空集是服务端下发。" />
-          ) : (
-            cases.map((item, index) => {
-              const row = asRecord(item);
-              const id = typeof row.id === "string" ? row.id : "";
-              if (!id) {
-                return null;
-              }
-              const disabled = row.selectable !== true;
-              const checked = chosenCaseIds.includes(id);
-              return (
-                <label
-                  key={id}
-                  className={cn(
-                    "flex items-start gap-2 rounded-md border p-2 text-sm",
-                    disabled ? "opacity-50" : "",
-                  )}
-                >
-                  <Checkbox
-                    checked={checked}
-                    disabled={disabled}
-                    onCheckedChange={(value) => toggleCase(id, value === true)}
-                  />
-                  <span>
-                    {String(row.title ?? id)}
-                    {typeof row.unavailable_reason === "string" ? (
-                      <span className="ml-2 text-xs text-muted-foreground">{row.unavailable_reason}</span>
-                    ) : null}
-                  </span>
-                  <span className="sr-only">{index}</span>
-                </label>
-              );
-            })
-          )}
+          <Label htmlFor="case-ids">用例 ID（case_ids，UUID）</Label>
+          <Input
+            id="case-ids"
+            value={caseIdsInput}
+            onChange={(event) => setCaseIdsInput(event.target.value)}
+            placeholder="uuid1, uuid2 或 ?caseId= 预填"
+          />
+          <p className="text-xs text-muted-foreground">
+            已解析 {caseIds.length} 个有效 UUID。TestCase 列表 API 未实现，不发明用例。
+          </p>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="target-env">TARGET_ENV（必填，本地即时校验）</Label>

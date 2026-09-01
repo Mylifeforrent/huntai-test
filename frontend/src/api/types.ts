@@ -511,3 +511,48 @@ export interface ExecutionEnvironmentRegisterResult {
   credential_present?: boolean;
   approval_request_id?: string;
 }
+
+/** API-060 TestRunListItem. */
+export interface TestRunListItem {
+  id: string;
+  project_id: string;
+  env_id: string;
+  execution_source: ExecutionSource;
+  trigger_type: string;
+  status: TestRunStatus;
+  version: number;
+  plan_id?: string | null;
+  gate_evaluation_id?: string | null;
+  dwell_seconds?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** API-061 TestRunDetail. */
+export interface TestRunDetail extends TestRunListItem {
+  snapshot_summary: {
+    case_ids: string[];
+    case_version_ids?: string[];
+    env_id: string;
+    env_config_version: number;
+    params_redacted: Record<string, unknown>;
+  };
+  last_heartbeat_at?: string | null;
+  stop_signal_at?: string | null;
+  result_summary?: Record<string, unknown> | null;
+  execution_source_badge?: {
+    skips_quality_gate?: boolean;
+    normalized_from_external_ci?: boolean;
+  };
+}
+
+/** API-062 start response (subset). */
+export interface TestRunStartResult extends TestRunDetail {
+  receipt?: CommandReceipt;
+}
+
+/** API-063 cancel response. */
+export interface TestRunCancelResult {
+  receipt: CommandReceipt;
+  test_run: TestRunDetail;
+}
