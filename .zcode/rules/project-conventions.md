@@ -1,17 +1,13 @@
----
-description: huntai-test 仓库级工程约定；完整规范见 AGENTS.md 与 project_rules.md
-alwaysApply: true
----
-
 # huntai-test 工程约定
 
 本仓库以根目录 `AGENTS.md` 为跨工具 Agent 指令源（Claude Code 读根 `CLAUDE.md`，指向 `AGENTS.md`）。完整工程规范见 `docs/00_setup/project_rules.md`。工程过程冲突以 `project_rules.md` 为准；设计事实冲突按 `AGENTS.md` §8。
 
-## Cursor 配置
+## ZCode 配置
 
-- 项目 MCP：`.cursor/mcp.json`（LangChain 文档 / 参考）。
+- 项目 MCP：`.zcode/config.json`（LangChain 文档 / 参考）。
 - 同步清单：`.zcode/config.json`、`.mcp.json`、`.cursor/mcp.json` 的服务器条目必须一致；禁止只改其中一份。
 - 保留 `.zcode/`，不要删除或合并进 `.cursor/`。
+- 本目录只允许短指针，正文以 `AGENTS.md` 为准；`.cursor/rules/` 必须与本文件同步。
 
 ## 目录与阶段
 
@@ -28,4 +24,4 @@ alwaysApply: true
 
 ## 切片进度同步
 
-每个 `S-M*` 切片在验证通过、准备提交前，必须回写 `docs/10_ai_context/ai_context.md` 状态列与 `docs/10_ai_context/context/mN.md`。权威正文见根 `AGENTS.md` §9 与 `docs/00_setup/project_rules.md` §3.3 / §4。`.zcode/rules/` 必须与本文件同步；禁止只改一处，禁止在工具目录另写业务规则。进度只写 Stage 10，禁止为此改冻结契约（`prd.md` / `api_spec.md` / `data_model.md`）。
+每个 `S-M*` 切片在验证通过、准备提交前，必须回写 `docs/10_ai_context/ai_context.md` 状态列与 `docs/10_ai_context/context/mN.md`。权威正文见根 `AGENTS.md` §9 与 `docs/00_setup/project_rules.md` §3.3 / §4。`.cursor/rules/` 必须与本文件同步；禁止只改一处，禁止在工具目录另写业务规则。进度只写 Stage 10，禁止为此改冻结契约（`prd.md` / `api_spec.md` / `data_model.md`）。

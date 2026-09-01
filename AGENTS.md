@@ -1,6 +1,6 @@
 # AGENTS.md — huntai-test 仓库级指令（完善版）
 
-> Cursor / ZCode / Claude Code 均须遵守本文件。Claude Code 入口为根 `CLAUDE.md`（指向本文）。Cursor 另读 `.cursor/rules/`。
+> Cursor / ZCode / Claude Code 均须遵守本文件。Claude Code 入口为根 `CLAUDE.md`（指向本文）。Cursor 另读 `.cursor/rules/`；ZCode 另读 `.zcode/rules/`。二者只允许短指针，禁止另写一套业务规则。
 > 工程细则见 `docs/00_setup/project_rules.md`。MCP 三份清单必须一致：`.zcode/config.json`、`.cursor/mcp.json`、`.mcp.json`。
 > 业务细节不在本文展开：只引用已有设计文档路径。禁止发明设计文档中没有的规则。
 
@@ -18,6 +18,7 @@
 | API 路径 / 鉴权 / 错误码 | `docs/07_backend_design/api_spec.md` |
 | 表 / 分级 / 秘密 | `docs/07_backend_design/data_model.md` |
 | 命名 / Git / 测试命令 / 红线 | `docs/00_setup/project_rules.md` |
+| 切片进度 / 下一张领什么 | `docs/10_ai_context/ai_context.md` §4 状态列与 `context/mN.md` |
 | 改已有结论 | 先写 `docs/13_changes/change_log.md` |
 
 ## 1. 项目目标与目录结构
@@ -149,6 +150,7 @@ docs/        全部设计资产的唯一存放地。禁止放可执行代码（M
 - 构建产物是容器镜像；前端打静态资源，禁止单独跑 Node 运行时。日志写 stdout。进程无本地业务状态（M0/M1 制品卷除外）。compose → K8s 只换编排层，禁止为此改应用代码形态。
 - 部署方案产出为 `docs/12_deployment/deployment.md`（Stage 12）。无法本地验证的变更必须在阶段文档记录验证方式与验证人。
 - AI 生成代码合入前逐项核对 `project_rules.md` §4；任一项为否禁止合入。
+- 切片代码合入前必须回写 Stage 10 进度（见 §9）；未回写视为切片未完成。
 
 ## 7. 禁止行为
 
@@ -173,6 +175,7 @@ docs/        全部设计资产的唯一存放地。禁止放可执行代码（M
 17. 禁止未认证响应伪装 404；禁止跨租户用 403 泄露资源存在性；禁止无租户上下文时回退默认租户。
 18. 禁止只改 MCP 三份清单中的一份；禁止删除 `.zcode/` 或将其合并进 `.cursor/`。
 19. 禁止改 `docs/` 阶段目录序号或名称；禁止跳过阶段约定输出文件进入下一阶段。
+20. 禁止切片代码合入后 `docs/10_ai_context/ai_context.md` 状态列仍标「未做」或与 `context/mN.md` 不一致；禁止只改 `.cursor/rules/` 或 `.zcode/rules/` 中的一份。
 
 ## 8. 规范冲突处理规则
 
@@ -215,3 +218,5 @@ docs/        全部设计资产的唯一存放地。禁止放可执行代码（M
 - 代码变更走 `feat|fix/<slug>`，squash 回 `main` 后删分支；文档与规范可直接提交 `main`。
 - Commit：`<type>(<scope>): <subject>`，type/scope/正则见 `project_rules.md` §3；subject 中文祈使句，≤72 字符，不加句号。
 - 公开 Python 函数必须完整类型注解。pre-commit（含 gitleaks）必须通过。
+
+**切片进度同步（必须）**：每个 `S-M*` 切片在验证通过、准备提交前，必须回写 `docs/10_ai_context/ai_context.md` 对应里程碑表的「状态」列，以及 `docs/10_ai_context/context/mN.md` 该切片要点。状态取值仅用 `未做` / `部分完成` / `完成`；部分完成必须写残留与 M0 边界，禁止把占位实现标成无残留的完成。代码 commit 与 `docs(docs):` 进度 commit 可拆开，但必须在同一会话合入前完成；未回写视为切片未完成。进度只写 Stage 10，禁止为此改 `prd.md` / `api_spec.md` / `data_model.md` 的 US/FR/API/对象编号或已批结论。Cursor（`.cursor/rules/`）与 ZCode（`.zcode/rules/`）只允许指向本文的短指针，改指针时两处同改。

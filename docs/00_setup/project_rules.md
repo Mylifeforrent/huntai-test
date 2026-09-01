@@ -77,6 +77,7 @@
 
 - pre-commit（含 gitleaks 秘密扫描）必须通过；禁止 `git commit --no-verify`。
 - 代码类 commit 合入前必须通过 §5 的验证命令。
+- 每个 `S-M*` 切片合入前必须回写 `docs/10_ai_context/ai_context.md` 状态列与对应 `docs/10_ai_context/context/mN.md`；未回写视为切片未完成。细则见根 `AGENTS.md` §9。
 
 ## 4. AI 生成代码 Review Checklist
 
@@ -92,6 +93,7 @@ AI 生成（或 AI 辅助）的代码合入前逐项核对；**任何一项为�
 - [ ] **无敏感信息**：无硬编码密钥、真实用户数据、生产数据。
 - [ ] **边界处理**：空输入与失败路径（网络错误、上游 5xx、超时）有显式处理。
 - [ ] **与设计一致**：实现与 `docs/` 已冻结设计资产（数据模型、API 契约、交互链路）无冲突。
+- [ ] **切片进度已回写**：`docs/10_ai_context/ai_context.md` 状态列与 `context/mN.md` 与本次代码一致；取值仅用未做 / 部分完成 / 完成。
 - [ ] **安全基线**：无 SQL 字符串拼接、无未转义的用户输入渲染（如 `dangerouslySetInnerHTML`）、无未鉴权的敏感端点。
 
 ## 5. 测试与验证要求
