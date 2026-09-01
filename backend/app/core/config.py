@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     oidc_redirect_uri: str
     oidc_claim_subject: str
 
+    github_webhook_secret: str
+
     @field_validator("session_cookie_samesite", mode="before")
     @classmethod
     def validate_samesite(cls, value: object) -> object:

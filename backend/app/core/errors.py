@@ -73,6 +73,17 @@ def oidc_auth_failed(trace_id: str) -> AppError:
     )
 
 
+def hmac_failed(trace_id: str, message: str = "Webhook signature verification failed") -> AppError:
+    return AppError(
+        status_code=401,
+        code="HT-AUTH-004",
+        error_class="permission",
+        subclass="unauthenticated",
+        message=message,
+        retryable=False,
+    )
+
+
 def require_reauth(trace_id: str, message: str = "Step-up authentication required") -> AppError:
     return AppError(
         status_code=401,

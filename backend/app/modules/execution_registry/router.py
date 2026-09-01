@@ -80,13 +80,6 @@ class ExecutionEnvironmentDisable(BaseModel):
     reason: str | None = None
 
 
-class CredentialRefBind(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    credential_ref: str
-    expected_version: int | None = Field(default=None, ge=1)
-
-
 def _map_read_error(trace_id: str, exc: ValueError) -> NoReturn:
     code = str(exc)
     if code == "not_found":
@@ -283,23 +276,3 @@ async def api_070_get_params_schema(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": payload}
-
-
-@router.post("/connectors/{connector_id}/credential-refs")
-async def api_106_bind_credential_ref(
-    request: Request,
-    connector_id: uuid.UUID,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-    ctx: Annotated[SessionContext, Depends(require_session)],
-) -> dict[str, Any]:
-    _ = connector_id
-    _ = db
-    _ = ctx
-    trace_id = get_trace_id(request)
-    raw = await request.body()
-    if raw:
-        try:
-            CredentialRefBind.model_validate_json(raw)
-        except ValidationError as exc:
-            raise validation_failed(trace_id) from exc
-    raise not_found(trace_id)

@@ -23,6 +23,7 @@ TEST_ENV: dict[str, str] = {
     "OIDC_CLIENT_SECRET": "test-secret",
     "OIDC_REDIRECT_URI": "http://localhost:8000/api/v1/auth/oidc/callback",
     "OIDC_CLAIM_SUBJECT": "sub",
+    "GITHUB_WEBHOOK_SECRET": "test-github-webhook-secret",
 }
 
 for _key, _value in TEST_ENV.items():
@@ -96,6 +97,10 @@ def _run_migrations() -> Generator[None]:
 async def _truncate_tables() -> AsyncGenerator[None]:
     engine = get_engine()
     tables = [
+        "integration_hub.command_idempotency_records",
+        "integration_hub.inbox_events",
+        "integration_hub.external_observations",
+        "integration_hub.connectors",
         "run_orchestration.command_idempotency_records",
         "run_orchestration.test_runs",
         "results_evidence.audit_events",
