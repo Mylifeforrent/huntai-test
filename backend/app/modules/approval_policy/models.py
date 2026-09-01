@@ -50,6 +50,23 @@ class ApprovalRequest(Base):
     )
     snapshot_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     side_effect_level: Mapped[str] = mapped_column(Text, nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    expected_target_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ActionPreviewRecord(Base):
+    __tablename__ = "action_previews"
+    __table_args__ = (
+        Index("ix_action_previews_org_expires", "organization_id", "expires_at"),
+        {"schema": "approval_policy"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    preview_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
 class CommandIdempotencyRecord(Base):

@@ -117,6 +117,61 @@ def forbidden(trace_id: str, message: str = "Forbidden") -> AppError:
     )
 
 
+def four_eyes_violation(trace_id: str, message: str = "Four-eyes approval required") -> AppError:
+    return AppError(
+        status_code=403,
+        code="HT-IAM-002",
+        error_class="permission",
+        subclass="four_eyes",
+        message=message,
+        retryable=False,
+    )
+
+
+def token_cannot_approve(trace_id: str, message: str = "Token cannot approve") -> AppError:
+    return AppError(
+        status_code=403,
+        code="HT-IAM-003",
+        error_class="permission",
+        subclass="forbidden",
+        message=message,
+        retryable=False,
+    )
+
+
+def state_consumed(trace_id: str, message: str = "Request already consumed") -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-STATE-002",
+        error_class="business",
+        subclass="state",
+        message=message,
+        retryable=False,
+    )
+
+
+def param_hash_invalidated(trace_id: str, message: str = "Parameter hash invalidated") -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-APPR-001",
+        error_class="business",
+        subclass="approval",
+        message=message,
+        retryable=False,
+    )
+
+
+def approval_expired(trace_id: str, message: str = "Approval expired or invalid") -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-APPR-002",
+        error_class="business",
+        subclass="approval",
+        message=message,
+        retryable=False,
+    )
+
+
 def not_found(trace_id: str, message: str = "Resource not found") -> AppError:
     return AppError(
         status_code=404,

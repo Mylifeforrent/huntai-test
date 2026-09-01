@@ -93,3 +93,51 @@ async def caller_has_non_viewer_role(
         )
     )
     return result.first() is not None
+
+
+async def list_user_project_memberships(
+    session: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID
+) -> list[tuple[uuid.UUID, str]]:
+    result = await session.execute(
+        select(ProjectMember.project_id, ProjectMember.role).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.user_id == user_id,
+        )
+    )
+    return [(row[0], str(row[1])) for row in result.all()]
+
+
+async def users_share_project(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id_a: uuid.UUID,
+    user_id_b: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        select(ProjectMember.project_id)
+        .where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.user_id == user_id_a,
+        )
+        .intersect(
+            select(ProjectMember.project_id).where(
+                ProjectMember.organization_id == organization_id,
+                ProjectMember.user_id == user_id_b,
+            )
+        )
+    )
+    return result.first() is not None
+
+
+async def caller_is_owner_or_admin(
+    session: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    result = await session.execute(
+        select(ProjectMember.role).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.user_id == user_id,
+            ProjectMember.role.in_(("owner", "admin")),
+        )
+    )
+    return result.first() is not None
