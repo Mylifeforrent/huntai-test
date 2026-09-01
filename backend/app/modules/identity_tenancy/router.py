@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Annotated, Any, Literal, NoReturn
 
@@ -41,6 +42,7 @@ from app.modules.identity_tenancy.service import (
     remove_project_member,
     require_idempotency_key,
     start_oidc_flow,
+    tighten_capability_controls,
     validate_return_path,
 )
 
@@ -74,6 +76,26 @@ class ProjectMemberRemove(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_project_version: int | None = Field(default=None, ge=1)
+
+
+class CapabilityTightenTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    level: Literal["ability", "module", "connector", "global"]
+    capability_id: str | None = None
+    module: str | None = None
+    connector_id: str | None = None
+
+
+class CapabilityTightenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    target: CapabilityTightenTarget
+    reason: str | None = None
+
+
+FORBIDDEN_TIGHTEN_BODY_KEYS = frozenset({"direction", "restore", "loosen", "enabled"})
 
 
 def _map_project_error(trace_id: str, exc: ValueError) -> NoReturn:
@@ -401,3 +423,48 @@ async def api_016_remove_member(
         _map_project_error(trace_id, exc)
     await db.commit()
     return Response(status_code=204)
+
+
+@router.post("/organizations/current/capability-controls/tighten")
+async def api_199_capability_tighten(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session_with_membership)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    request_hash = repo.hash_request_body(raw)
+    try:
+        parsed = json.loads(raw if raw.strip() else b"{}")
+    except json.JSONDecodeError as exc:
+        raise validation_failed(trace_id) from exc
+    if not isinstance(parsed, dict):
+        raise validation_failed(trace_id)
+    for key in FORBIDDEN_TIGHTEN_BODY_KEYS:
+        if key in parsed:
+            raise validation_failed(trace_id)
+    if parsed.get("enabled") is True:
+        raise validation_failed(trace_id)
+    try:
+        body = CapabilityTightenRequest.model_validate(parsed)
+    except ValidationError as exc:
+        raise validation_failed(trace_id) from exc
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    try:
+        payload = await tighten_capability_controls(
+            db,
+            ctx,
+            expected_version=body.expected_version,
+            target=body.target.model_dump(exclude_none=True),
+            reason=body.reason,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_project_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}

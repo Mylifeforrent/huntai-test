@@ -423,3 +423,60 @@ async def get_invocation_log_for_caller(
     if row is None:
         raise ValueError("not_found")
     return serialize_invocation_log(row)
+
+
+def _usage_totals(rows: list[Any]) -> dict[str, int]:
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    for row in rows:
+        usage = row.usage if isinstance(row.usage, dict) else {}
+        prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+        completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+        total_tokens += int(usage.get("total_tokens", 0) or 0)
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+async def get_cost_dashboard_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    created_from: datetime,
+    created_to: datetime,
+    project_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    await _require_owner_admin(session, ctx)
+    if created_from > created_to:
+        raise ValueError("validation")
+    _ = project_id
+
+    rows = await repo.list_invocation_logs_in_window(
+        session,
+        organization_id=ctx.organization.id,
+        created_from=created_from,
+        created_to=created_to,
+    )
+    total = len(rows)
+    ok_count = sum(1 for row in rows if row.result == "ok")
+    degraded_count = sum(1 for row in rows if row.result == "degraded")
+    cost_total = float(sum((row.cost for row in rows), Decimal("0")))
+
+    adoption_rate = ok_count / total if total > 0 else 0.0
+    degrade_rate = degraded_count / total if total > 0 else 0.0
+
+    return {
+        "window": {"from": _iso(created_from), "to": _iso(created_to)},
+        "totals": {
+            "token_usage": _usage_totals(rows),
+            "cost": cost_total,
+            "invocation_count": total,
+            "adoption_rate": adoption_rate,
+            "degrade_rate": degrade_rate,
+            "cost_per_workflow": {},
+        },
+        "series": [],
+    }

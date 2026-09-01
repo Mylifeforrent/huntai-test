@@ -19,6 +19,7 @@ DEFAULT_CAPABILITY_CONTROLS: dict[str, Any] = {
     "ai_global_tightened": False,
     "tightened_capabilities": [],
     "tightened_modules": [],
+    "tightened_connectors": [],
 }
 
 

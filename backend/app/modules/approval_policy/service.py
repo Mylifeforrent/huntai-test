@@ -17,6 +17,7 @@ from app.modules.approval_policy.policy_gate import (
     PolicyGate,
     evaluate_policy_gate,
 )
+from app.modules.identity_tenancy import command_port as identity_command
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext, compute_reauth_required
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
@@ -832,6 +833,35 @@ async def submit_approval_decision(
     approval.updated_at = now
     approval.aggregate_version += 1
     await session.flush()
+
+    if decision == "approve" and approval.action_type == "kill_switch_restore":
+        target = approval.action_payload.get("target")
+        if isinstance(target, dict):
+            try:
+                await identity_command.apply_kill_switch_restore(
+                    session,
+                    organization_id=org_id,
+                    target=target,
+                )
+                approval.status = "EXECUTED"
+                approval.execution_result = "ok"
+                approval.updated_at = datetime.now(UTC)
+                approval.aggregate_version += 1
+                await session.flush()
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=org_id,
+                        actor_user_id=caller_id,
+                        action="kill_switch_restore",
+                        resource_type="organization",
+                        resource_id=approval.target_object_id,
+                        request_hash=request_hash,
+                        result="ok",
+                    ),
+                )
+            except ValueError:
+                pass
 
     response = _serialize_approval_item(approval, caller_id=caller_id)
     await append_audit_event(

@@ -21,6 +21,7 @@ from app.modules.identity_tenancy.models import (
     ProjectMember,
     User,
 )
+from app.modules.quota_governance.service import seed_default_org_quota
 
 ORG_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 USER_ID = uuid.UUID("00000000-0000-4000-8000-000000000002")
@@ -127,6 +128,7 @@ async def seed() -> None:
             user2.is_disabled = False
 
         await seed_default_model_routes(session, organization_id=org.id, created_by=USER_ID)
+        await seed_default_org_quota(session, organization_id=org.id, created_by=USER_ID)
 
         await session.commit()
     await dispose_engine()

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.modules.identity_tenancy import repository as repo
 from app.modules.identity_tenancy.models import (
+    DEFAULT_CAPABILITY_CONTROLS,
     AuthSession,
     Organization,
     Project,
@@ -888,3 +889,152 @@ async def remove_project_member(
                 ),
             )
         raise
+
+
+COMMAND_TYPE_CAPABILITY_TIGHTEN = "organization.capability_tighten"
+VALID_TIGHTEN_LEVELS = frozenset({"global", "ability", "module", "connector"})
+
+
+def _build_tighten_response(
+    org: Organization, *, level: str, identifier: str | None
+) -> dict[str, Any]:
+    controls = org.capability_controls
+    effective_scope: dict[str, Any] = {"level": level}
+    if identifier is not None:
+        effective_scope["id"] = identifier
+    banner_scope = controls.get("banner_scope")
+    banner: dict[str, Any] = {"scope": banner_scope} if banner_scope is not None else {}
+    return {
+        "version": org.aggregate_version,
+        "tightened": True,
+        "effective_scope": effective_scope,
+        "banner": banner,
+        "capability_controls": controls,
+    }
+
+
+def _tighten_controls(
+    controls: dict[str, Any], *, level: str, identifier: str | None
+) -> dict[str, Any]:
+    from copy import deepcopy
+
+    updated = deepcopy(controls)
+    for key, default in DEFAULT_CAPABILITY_CONTROLS.items():
+        updated.setdefault(key, deepcopy(default) if isinstance(default, list) else default)
+
+    if level == "global":
+        updated["ai_global_tightened"] = True
+        updated["banner_scope"] = "global"
+    elif level == "ability" and identifier is not None:
+        caps = [str(item) for item in updated.get("tightened_capabilities", [])]
+        if identifier not in caps:
+            caps.append(identifier)
+        updated["tightened_capabilities"] = caps
+        updated["banner_scope"] = identifier
+    elif level == "module" and identifier is not None:
+        mods = [str(item) for item in updated.get("tightened_modules", [])]
+        if identifier not in mods:
+            mods.append(identifier)
+        updated["tightened_modules"] = mods
+        updated["banner_scope"] = identifier
+    elif level == "connector" and identifier is not None:
+        conns = [str(item) for item in updated.get("tightened_connectors", [])]
+        if identifier not in conns:
+            conns.append(identifier)
+        updated["tightened_connectors"] = conns
+        updated["banner_scope"] = identifier
+
+    return updated
+
+
+def _parse_tighten_target(target: dict[str, Any]) -> tuple[str, str | None]:
+    level = str(target.get("level", ""))
+    if level not in VALID_TIGHTEN_LEVELS:
+        raise ValueError("validation")
+    identifier: str | None = None
+    if level == "ability":
+        raw = target.get("capability_id")
+        if raw is None:
+            raise ValueError("validation")
+        identifier = str(raw)
+    elif level == "module":
+        raw = target.get("module")
+        if raw is None:
+            raise ValueError("validation")
+        identifier = str(raw)
+    elif level == "connector":
+        raw = target.get("connector_id")
+        if raw is None:
+            raise ValueError("validation")
+        identifier = str(raw)
+    return level, identifier
+
+
+async def tighten_capability_controls(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    expected_version: int,
+    target: dict[str, Any],
+    reason: str | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    from app.modules.identity_tenancy import query_port as identity_query
+
+    allowed = await identity_query.caller_is_owner_or_admin(
+        session, organization_id=ctx.organization.id, user_id=ctx.user.id
+    )
+    if not allowed:
+        raise ValueError("forbidden")
+
+    org_id = ctx.organization.id
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CAPABILITY_TIGHTEN,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return existing.response_ref
+
+    level, identifier = _parse_tighten_target(target)
+    org = ctx.organization
+    if org.aggregate_version != expected_version:
+        raise ValueError("version_conflict")
+
+    now = datetime.now(UTC)
+    org.capability_controls = _tighten_controls(
+        org.capability_controls, level=level, identifier=identifier
+    )
+    org.updated_at = now
+    org.aggregate_version += 1
+    await session.flush()
+
+    response = _build_tighten_response(org, level=level, identifier=identifier)
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="organization.capability_tighten",
+            resource_type="organization",
+            resource_id=org.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CAPABILITY_TIGHTEN,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+    )
+    _ = reason
+    return response

@@ -284,3 +284,20 @@ async def list_invocation_logs(
         query = query.limit(limit + 1)
     result = await session.execute(query)
     return list(result.scalars().all())
+
+
+async def list_invocation_logs_in_window(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_from: datetime,
+    created_to: datetime,
+) -> list[AIInvocationLog]:
+    result = await session.execute(
+        select(AIInvocationLog).where(
+            AIInvocationLog.organization_id == organization_id,
+            AIInvocationLog.created_at >= created_from,
+            AIInvocationLog.created_at <= created_to,
+        )
+    )
+    return list(result.scalars().all())

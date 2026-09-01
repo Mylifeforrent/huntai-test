@@ -23,6 +23,7 @@ from app.modules.ai_governance import repository as repo
 from app.modules.ai_governance.service import (
     ModelRoutePutInput,
     connection_test_for_caller,
+    get_cost_dashboard_for_caller,
     get_invocation_log_for_caller,
     list_invocation_logs_for_caller,
     list_model_routes_for_caller,
@@ -247,6 +248,38 @@ async def api_185_get_invocation_log(
     trace_id = get_trace_id(request)
     try:
         payload = await get_invocation_log_for_caller(db, ctx, log_id=log_id)
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.get("/ai/cost-dashboard")
+async def api_183_cost_dashboard(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: Annotated[str | None, Query()] = None,
+    project_id: Annotated[uuid.UUID | None, Query()] = None,
+    dimension: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    if from_ is None or to is None:
+        raise validation_failed(trace_id)
+    created_from = _parse_datetime(from_)
+    created_to = _parse_datetime(to)
+    if created_from is None or created_to is None:
+        raise validation_failed(trace_id)
+    _ = dimension
+    try:
+        payload = await get_cost_dashboard_for_caller(
+            db,
+            ctx,
+            created_from=created_from,
+            created_to=created_to,
+            project_id=project_id,
+        )
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     await db.commit()

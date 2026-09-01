@@ -205,6 +205,17 @@ def precondition_failed(trace_id: str, message: str = "Precondition failed") -> 
     )
 
 
+def quota_exceeded(trace_id: str, message: str = "Org quota exceeded") -> AppError:
+    return AppError(
+        status_code=429,
+        code="HT-QUOTA-001",
+        error_class="business",
+        subclass="quota",
+        message=message,
+        retryable=True,
+    )
+
+
 def version_conflict(trace_id: str, message: str = "Version conflict") -> AppError:
     return AppError(
         status_code=409,

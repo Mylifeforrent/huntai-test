@@ -49,6 +49,7 @@ from app.modules.identity_tenancy.models import (
     ProjectMember,
     User,
 )
+from app.modules.quota_governance.service import seed_default_org_quota
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -95,6 +96,7 @@ async def _truncate_tables() -> AsyncGenerator[None]:
     engine = get_engine()
     tables = [
         "results_evidence.audit_events",
+        "quota_governance.org_quotas",
         "ai_governance.command_idempotency_records",
         "ai_governance.ai_invocation_logs",
         "ai_governance.model_routes",
@@ -187,6 +189,8 @@ async def seeded_identity(db_session: AsyncSession) -> dict[str, Any]:
     db_session.add(project)
     await db_session.flush()
     db_session.add(member)
+    await db_session.flush()
+    await seed_default_org_quota(db_session, organization_id=org_id, created_by=user_id)
     await db_session.commit()
     return {
         "org_id": org_id,

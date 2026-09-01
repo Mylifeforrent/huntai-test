@@ -1,11 +1,31 @@
 """Cross-module read-only queries for identity_tenancy (no ORM export to consumers)."""
 
 import uuid
+from copy import deepcopy
+from typing import Any
 
 from sqlalchemy import and_, distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.identity_tenancy.models import Project, ProjectMember, User
+from app.modules.identity_tenancy import repository as repo
+from app.modules.identity_tenancy.models import (
+    DEFAULT_CAPABILITY_CONTROLS,
+    Project,
+    ProjectMember,
+    User,
+)
+
+
+async def get_capability_controls(
+    session: AsyncSession, *, organization_id: uuid.UUID
+) -> dict[str, Any]:
+    org = await repo.get_organization_by_id(session, organization_id)
+    if org is None:
+        return deepcopy(DEFAULT_CAPABILITY_CONTROLS)
+    controls = deepcopy(org.capability_controls)
+    for key, default in DEFAULT_CAPABILITY_CONTROLS.items():
+        controls.setdefault(key, deepcopy(default) if isinstance(default, list) else default)
+    return controls
 
 
 async def project_exists_in_org(

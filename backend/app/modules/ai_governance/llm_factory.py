@@ -12,6 +12,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ai_governance import repository as repo
+from app.modules.identity_tenancy import query_port as identity_query
+from app.modules.quota_governance import query_port as quota_query
 
 VALID_RESULTS = frozenset({"ok", "degraded", "refused"})
 DEFAULT_CLASSIFICATION = "Confidential"
@@ -27,6 +29,8 @@ class InvokeInput:
     data_classification: str | None = None
     copilot_session_id: uuid.UUID | None = None
     skill_version_id: uuid.UUID | None = None
+    capability_id: str | None = None
+    module: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,7 @@ class InvokeOutput:
     cost: Decimal
     latency_ms: int
     data_classification: str
+    refusal_class: str | None = None
 
 
 def _resolve_model_name(route: Any | None) -> str:
@@ -47,6 +52,67 @@ def _resolve_model_name(route: Any | None) -> str:
     if allowlist:
         return str(allowlist[0])
     return "unrouted"
+
+
+async def _is_kill_switch_active(session: AsyncSession, request: InvokeInput) -> bool:
+    controls = await identity_query.get_capability_controls(
+        session, organization_id=request.organization_id
+    )
+    if controls.get("ai_global_tightened") is True:
+        return True
+    if request.capability_id is not None:
+        tightened = [str(item) for item in controls.get("tightened_capabilities", [])]
+        if request.capability_id in tightened:
+            return True
+    if request.module is not None:
+        tightened = [str(item) for item in controls.get("tightened_modules", [])]
+        if request.module in tightened:
+            return True
+    return False
+
+
+async def _log_refused(
+    session: AsyncSession,
+    *,
+    request: InvokeInput,
+    started: float,
+    log_id: uuid.UUID,
+    now: datetime,
+    classification: str,
+    route: Any | None,
+    refusal_class: str,
+) -> InvokeOutput:
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    model_name = _resolve_model_name(route)
+    await repo.insert_invocation_log(
+        session,
+        log_id=log_id,
+        organization_id=request.organization_id,
+        created_at=now,
+        created_by=request.user_id,
+        user_id=request.user_id,
+        model=model_name,
+        prompt_version=request.prompt_version,
+        usage=dict(ZERO_USAGE),
+        cost=Decimal("0"),
+        latency_ms=latency_ms,
+        data_classification=classification,
+        result="refused",
+        model_route_id=route.id if route is not None else None,
+        copilot_session_id=request.copilot_session_id,
+        skill_version_id=request.skill_version_id,
+        input_ref=f"redacted://invocation/{log_id}",
+    )
+    return InvokeOutput(
+        log_id=log_id,
+        result="refused",
+        model=model_name,
+        usage=dict(ZERO_USAGE),
+        cost=Decimal("0"),
+        latency_ms=latency_ms,
+        data_classification=classification,
+        refusal_class=refusal_class,
+    )
 
 
 async def invoke(session: AsyncSession, request: InvokeInput) -> InvokeOutput:
@@ -63,65 +129,52 @@ async def invoke(session: AsyncSession, request: InvokeInput) -> InvokeOutput:
         data_classification=classification,
     )
 
-    if classification == "Restricted":
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        await repo.insert_invocation_log(
+    if await _is_kill_switch_active(session, request):
+        return await _log_refused(
             session,
+            request=request,
+            started=started,
             log_id=log_id,
-            organization_id=request.organization_id,
-            created_at=now,
-            created_by=request.user_id,
-            user_id=request.user_id,
-            model=_resolve_model_name(route),
-            prompt_version=request.prompt_version,
-            usage=dict(ZERO_USAGE),
-            cost=Decimal("0"),
-            latency_ms=latency_ms,
-            data_classification=classification,
-            result="refused",
-            model_route_id=route.id if route is not None else None,
-            copilot_session_id=request.copilot_session_id,
-            skill_version_id=request.skill_version_id,
-            input_ref=f"redacted://invocation/{log_id}",
+            now=now,
+            classification=classification,
+            route=route,
+            refusal_class="kill_switch",
         )
-        return InvokeOutput(
+
+    if await quota_query.token_budget_exhausted(session, organization_id=request.organization_id):
+        return await _log_refused(
+            session,
+            request=request,
+            started=started,
             log_id=log_id,
-            result="refused",
-            model=_resolve_model_name(route),
-            usage=dict(ZERO_USAGE),
-            cost=Decimal("0"),
-            latency_ms=latency_ms,
-            data_classification=classification,
+            now=now,
+            classification=classification,
+            route=route,
+            refusal_class="quota",
+        )
+
+    if classification == "Restricted":
+        return await _log_refused(
+            session,
+            request=request,
+            started=started,
+            log_id=log_id,
+            now=now,
+            classification=classification,
+            route=route,
+            refusal_class="restricted",
         )
 
     if route is None:
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        await repo.insert_invocation_log(
+        return await _log_refused(
             session,
+            request=request,
+            started=started,
             log_id=log_id,
-            organization_id=request.organization_id,
-            created_at=now,
-            created_by=request.user_id,
-            user_id=request.user_id,
-            model="unrouted",
-            prompt_version=request.prompt_version,
-            usage=dict(ZERO_USAGE),
-            cost=Decimal("0"),
-            latency_ms=latency_ms,
-            data_classification=classification,
-            result="refused",
-            copilot_session_id=request.copilot_session_id,
-            skill_version_id=request.skill_version_id,
-            input_ref=f"redacted://invocation/{log_id}",
-        )
-        return InvokeOutput(
-            log_id=log_id,
-            result="refused",
-            model="unrouted",
-            usage=dict(ZERO_USAGE),
-            cost=Decimal("0"),
-            latency_ms=latency_ms,
-            data_classification=classification,
+            now=now,
+            classification=classification,
+            route=None,
+            refusal_class="unrouted",
         )
 
     # M0 stub: no vendor calls; degraded with zero usage.
