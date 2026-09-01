@@ -1,9 +1,18 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ConnectorListItem, ListEnvelope, WebhookDeliveryItem } from "@/api/types";
+import type {
+  ApiTokenIssued,
+  ApiTokenListItem,
+  ApiTokenScope,
+  ConnectorListItem,
+  ListEnvelope,
+  ResourceEnvelope,
+  WebhookDeliveryItem,
+} from "@/api/types";
+import { API_TOKEN_SCOPES } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,13 +24,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
-import { asRecord } from "@/lib/utils";
+import { useSession } from "@/hooks/useSession";
 
 export function AdminIntegrationPage() {
-  const [issueTried, setIssueTried] = useState(false);
-  const [revokeTried, setRevokeTried] = useState(false);
+  const queryClient = useQueryClient();
+  const session = useSession();
+  const memberships = session.me?.memberships ?? [];
+  const projectIds = memberships.map((m) => m.project_id);
+  const canIssue = projectIds.length > 0;
+
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
   const [tokenName, setTokenName] = useState("");
+  const [selectedScopes, setSelectedScopes] = useState<ApiTokenScope[]>(["read"]);
+  const [expiresAtLocal, setExpiresAtLocal] = useState("");
+  const [issueError, setIssueError] = useState<unknown>(null);
+  const [revokeError, setRevokeError] = useState<unknown>(null);
   const [selectedConnector, setSelectedConnector] = useState("");
 
   const connectors = useQuery({
@@ -30,7 +47,7 @@ export function AdminIntegrationPage() {
   });
   const tokens = useQuery({
     queryKey: queryKeys.apiTokens,
-    queryFn: () => api.get<ListEnvelope<Record<string, unknown>>>("API-170", "/api/v1/api-tokens"),
+    queryFn: () => api.get<ListEnvelope<ApiTokenListItem>>("API-170", "/api/v1/api-tokens"),
   });
   const connectorId = selectedConnector || String(connectors.data?.data.items[0]?.id ?? "");
   const deliveries = useQuery({
@@ -48,26 +65,53 @@ export function AdminIntegrationPage() {
   const deliveryItems = deliveries.data?.data.items ?? [];
   const pageError = connectors.error ?? tokens.error;
 
+  function toggleScope(scope: ApiTokenScope) {
+    setSelectedScopes((prev) => {
+      if (prev.includes(scope)) {
+        const next = prev.filter((item) => item !== scope);
+        return next.length > 0 ? next : prev;
+      }
+      return [...prev, scope];
+    });
+  }
+
   function issueToken() {
-    setIssueTried(true);
+    if (!canIssue || selectedScopes.length === 0 || !expiresAtLocal) {
+      return;
+    }
+    setIssueError(null);
     setIssuedToken(null);
+    const expiresAt = new Date(expiresAtLocal);
+    if (Number.isNaN(expiresAt.getTime())) {
+      return;
+    }
     void api
-      .post<Record<string, unknown>>("API-171", "/api/v1/api-tokens", {
-        name: tokenName,
-        scopes: ["read"],
-        project_ids: [],
+      .post<ResourceEnvelope<ApiTokenIssued>>("API-171", "/api/v1/api-tokens", {
+        name: tokenName || undefined,
+        scopes: selectedScopes,
+        project_ids: projectIds,
+        expires_at: expiresAt.toISOString(),
       })
       .then((body) => {
-        const data = asRecord(body.data);
-        const token = typeof data.token === "string" ? data.token : typeof body.token === "string" ? body.token : null;
+        const token = body.data?.token;
         if (token) setIssuedToken(token);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens });
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        setIssueError(error);
+      });
   }
 
   function revoke(id: string) {
-    setRevokeTried(true);
-    void api.post("API-172", `/api/v1/api-tokens/${id}/revocations`, {}).catch(() => undefined);
+    setRevokeError(null);
+    void api
+      .post("API-172", `/api/v1/api-tokens/${id}/revocations`, {})
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens });
+      })
+      .catch((error: unknown) => {
+        setRevokeError(error);
+      });
   }
 
   return (
@@ -86,7 +130,7 @@ export function AdminIntegrationPage() {
             <TabsTrigger value="connectors">连接器</TabsTrigger>
             <TabsTrigger value="webhooks">Webhook 投递</TabsTrigger>
             <TabsTrigger value="outbound">出站渠道</TabsTrigger>
-            <TabsTrigger value="tokens">ApiToken</TabsTrigger>
+            <TabsTrigger value="tokens" data-testid="integration-tab-tokens">ApiToken</TabsTrigger>
           </TabsList>
           <TabsContent value="connectors">
             {connectorItems.length === 0 ? (
@@ -169,23 +213,57 @@ export function AdminIntegrationPage() {
               </CardContent>
             </Card>
           </TabsContent>
-          <TabsContent value="tokens">
+          <TabsContent value="tokens" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>签发 ApiToken</CardTitle>
               </CardHeader>
               <CardContent className="flex max-w-lg flex-col gap-3">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="token-name">名称</Label>
+                  <Label htmlFor="token-name">名称（可选，服务端可忽略）</Label>
                   <Input id="token-name" value={tokenName} onChange={(e) => setTokenName(e.target.value)} />
                 </div>
-                <Button onClick={issueToken}>签发（API-171）</Button>
+                <div className="flex flex-col gap-1.5">
+                  <Label>scopes（至少 read）</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {API_TOKEN_SCOPES.map((scope) => (
+                      <label key={scope} className="flex items-center gap-1 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selectedScopes.includes(scope)}
+                          onChange={() => toggleScope(scope)}
+                        />
+                        {scope}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="token-expires">到期时间（必填）</Label>
+                  <Input
+                    id="token-expires"
+                    type="datetime-local"
+                    value={expiresAtLocal}
+                    onChange={(e) => setExpiresAtLocal(e.target.value)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  项目白名单：{projectIds.join(", ") || "无项目成员资格，无法签发"}
+                </p>
+                <Button
+                  data-testid="issue-api-token"
+                  onClick={issueToken}
+                  disabled={!canIssue || !expiresAtLocal}
+                >
+                  签发（API-171）
+                </Button>
                 {issuedToken ? (
                   <Alert variant="warning">
                     <AlertTitle>一次性明文</AlertTitle>
                     <AlertDescription className="font-mono text-xs">{issuedToken}</AlertDescription>
                   </Alert>
                 ) : null}
+                {issueError ? <UndevelopedCallout apis={PAGE_APIS.P25} error={issueError} action="签发 Token API-171" /> : null}
               </CardContent>
             </Card>
             {tokenItems.length === 0 ? (
@@ -202,15 +280,14 @@ export function AdminIntegrationPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tokenItems.map((item, index) => {
-                    const id = String(item.id ?? index);
-                    const scopes = Array.isArray(item.scopes) ? item.scopes.map(String) : [];
+                  {tokenItems.map((item) => {
+                    const id = item.id;
                     return (
                       <TableRow key={id}>
-                        <TableCell className="font-mono text-xs">{String(item.token_prefix ?? "")}</TableCell>
-                        <TableCell className="text-xs">{scopes.join(", ")}</TableCell>
-                        <TableCell className="text-xs">{String(item.expires_at ?? "")}</TableCell>
-                        <TableCell className="text-xs">{String(item.revoked_at ?? "—")}</TableCell>
+                        <TableCell className="font-mono text-xs">{item.token_prefix}</TableCell>
+                        <TableCell className="text-xs">{item.scopes.join(", ")}</TableCell>
+                        <TableCell className="text-xs">{item.expires_at}</TableCell>
+                        <TableCell className="text-xs">{item.revoked_at ?? "—"}</TableCell>
                         <TableCell>
                           {item.revoked_at ? null : (
                             <Button size="sm" variant="destructive" onClick={() => revoke(id)}>
@@ -224,11 +301,10 @@ export function AdminIntegrationPage() {
                 </TableBody>
               </Table>
             )}
+            {revokeError ? <UndevelopedCallout apis={PAGE_APIS.P25} error={revokeError} action="吊销 API-172" /> : null}
           </TabsContent>
         </Tabs>
       </QueryGate>
-      {issueTried ? <UndevelopedCallout apis={PAGE_APIS.P25} action="签发 Token API-171（明文仅成功响应一次）" /> : null}
-      {revokeTried ? <UndevelopedCallout apis={PAGE_APIS.P25} action="吊销 API-172" /> : null}
     </>
   );
 }

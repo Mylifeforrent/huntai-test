@@ -8,11 +8,12 @@ import type { ConnectorListItem, ListEnvelope, WebhookDeliveryItem } from "@/api
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiGet = vi.fn();
+const apiPost = vi.fn();
 
 vi.mock("@/api/client", () => ({
   api: {
     get: (...args: unknown[]) => apiGet(...args),
-    post: vi.fn(),
+    post: (...args: unknown[]) => apiPost(...args),
     put: vi.fn(),
     patch: vi.fn(),
     delete: vi.fn(),
@@ -101,6 +102,8 @@ async function flush() {
 
 beforeEach(() => {
   apiGet.mockReset();
+  apiPost.mockReset();
+  apiPost.mockResolvedValue({ data: { token: "ht_live_test" } });
   apiGet.mockImplementation((apiId: string, path: string) => {
     if (apiId === "API-160") {
       return Promise.resolve({
@@ -148,5 +151,76 @@ describe("AdminIntegrationPage", () => {
     const deliveryCall = apiGet.mock.calls.find((call) => call[0] === "API-164");
     expect(deliveryCall).toBeDefined();
     expect(deliveryCall?.[1]).toBe("/api/v1/connectors/conn-1/webhook-deliveries");
+  });
+
+  it("issue payload never has empty project_ids", async () => {
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const tokensTab = container.querySelector("[data-testid='integration-tab-tokens']");
+    act(() => {
+      (tokensTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const issueButton = container.querySelector("[data-testid='issue-api-token']");
+    expect(issueButton).toBeDefined();
+    const expiresInput = document.querySelector("#token-expires") as HTMLInputElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    act(() => {
+      valueSetter?.call(expiresInput, "2030-01-01T12:00");
+      expiresInput.dispatchEvent(new Event("input", { bubbles: true }));
+      expiresInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    act(() => {
+      (issueButton as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const issueCall = apiPost.mock.calls.find((call) => call[0] === "API-171");
+    expect(issueCall).toBeDefined();
+    const body = issueCall?.[2] as { project_ids?: string[] };
+    expect(body.project_ids).toEqual(["proj-1"]);
+    expect(body.project_ids?.length).toBeGreaterThan(0);
+  });
+
+  it("list does not show token_hash", async () => {
+    apiGet.mockImplementation((apiId: string, path: string) => {
+      if (apiId === "API-160") {
+        return Promise.resolve({
+          data: { items: [connectorItem] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<ConnectorListItem>);
+      }
+      if (apiId === "API-170") {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "token-1",
+                token_prefix: "ht_live_abc",
+                scopes: ["read"],
+                project_ids: ["proj-1"],
+                expires_at: "2030-01-01T00:00:00.000Z",
+              },
+            ],
+          },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      if (apiId === "API-164") {
+        return Promise.resolve({
+          data: { items: [deliveryItem] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<WebhookDeliveryItem>);
+      }
+      return Promise.reject(new Error(`unexpected ${apiId} ${path}`));
+    });
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const tokensTab = container.querySelector("[data-testid='integration-tab-tokens']");
+    act(() => {
+      (tokensTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    expect(container.textContent).toContain("ht_live_abc");
+    expect(container.textContent).not.toContain("token_hash");
   });
 });

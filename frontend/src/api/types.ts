@@ -219,11 +219,33 @@ export interface SessionMetadata {
   reauth_required: boolean;
 }
 
+export interface WorkbenchPendingApproval {
+  id: string;
+  action_type: PreviewActionType | string;
+  status: string;
+  expires_at: string;
+  initiator_id: string;
+  escalate_to?: string;
+  target_object_type: string;
+  target_object_id: string;
+  version: number;
+}
+
+export interface WorkbenchActiveRun {
+  id: string;
+  project_id: string;
+  status: TestRunStatus | string;
+  version: number;
+  execution_source?: ExecutionSource;
+  dwell_seconds?: number;
+  last_heartbeat_at?: string | null;
+}
+
 export interface WorkbenchProjection {
-  pending_approvals: unknown[];
-  active_runs: unknown[];
-  gate_anomalies: unknown[];
-  quota: unknown;
+  pending_approvals: WorkbenchPendingApproval[];
+  active_runs: WorkbenchActiveRun[];
+  gate_anomalies: JsonObject[];
+  quota: OrgQuotaCurrent;
 }
 
 export type JsonObject = Record<string, unknown>;
@@ -559,6 +581,26 @@ export interface TestRunCancelResult {
 
 export const CONNECTOR_TYPES = ["jira", "github", "ci", "release"] as const;
 export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
+
+/** API-170 ApiTokenListItem. */
+export const API_TOKEN_SCOPES = ["read", "write", "execute", "delete"] as const;
+export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
+
+export interface ApiTokenListItem {
+  id: string;
+  issued_to_user_id?: string;
+  token_prefix: string;
+  scopes: ApiTokenScope[];
+  project_ids: string[];
+  expires_at: string;
+  revoked_at?: string | null;
+  last_used_at?: string | null;
+  created_at?: string;
+}
+
+export interface ApiTokenIssued extends ApiTokenListItem {
+  token: string;
+}
 
 /** API-160 ConnectorListItem. */
 export interface ConnectorListItem {
