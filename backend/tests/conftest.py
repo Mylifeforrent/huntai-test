@@ -96,6 +96,8 @@ def _run_migrations() -> Generator[None]:
 async def _truncate_tables() -> AsyncGenerator[None]:
     engine = get_engine()
     tables = [
+        "run_orchestration.command_idempotency_records",
+        "run_orchestration.test_runs",
         "results_evidence.audit_events",
         "execution_registry.command_idempotency_records",
         "execution_registry.job_contracts",
