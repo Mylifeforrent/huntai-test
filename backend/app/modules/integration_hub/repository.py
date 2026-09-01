@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.integration_hub.models import (
+    ApiToken,
     CommandIdempotencyRecord,
     Connector,
     ExternalObservation,
@@ -16,6 +17,7 @@ from app.modules.integration_hub.models import (
 )
 
 VALID_CONNECTOR_TYPES = frozenset({"jira", "github", "ci", "release"})
+VALID_API_TOKEN_SCOPES = frozenset({"read", "write", "execute", "delete"})
 INBOUND_WEBHOOK_CONSUMER = "inbound_webhook"
 
 
@@ -303,3 +305,97 @@ async def create_idempotency_record(
     session.add(record)
     await session.flush()
     return record
+
+
+async def create_api_token(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    issued_to_user_id: uuid.UUID,
+    token_hash: str,
+    token_prefix: str,
+    scopes: list[str],
+    project_ids: list[uuid.UUID],
+    expires_at: datetime,
+) -> ApiToken:
+    token = ApiToken(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        created_at=created_at,
+        updated_at=created_at,
+        created_by=created_by,
+        issued_to_user_id=issued_to_user_id,
+        token_hash=token_hash,
+        token_prefix=token_prefix,
+        scopes=scopes,
+        project_ids=project_ids,
+        expires_at=expires_at,
+        revoked_at=None,
+        last_used_at=None,
+    )
+    session.add(token)
+    await session.flush()
+    return token
+
+
+async def get_api_token(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    api_token_id: uuid.UUID,
+    for_update: bool = False,
+) -> ApiToken | None:
+    query = select(ApiToken).where(
+        ApiToken.organization_id == organization_id,
+        ApiToken.id == api_token_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def list_api_tokens_by_prefix(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    token_prefix: str,
+) -> list[ApiToken]:
+    result = await session.execute(
+        select(ApiToken).where(
+            ApiToken.organization_id == organization_id,
+            ApiToken.token_prefix == token_prefix,
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def list_api_tokens(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    issued_to_user_id: uuid.UUID | None,
+    cursor_created_at: datetime | None,
+    cursor_id: uuid.UUID | None,
+    limit: int | None,
+) -> list[ApiToken]:
+    query = select(ApiToken).where(ApiToken.organization_id == organization_id)
+    if issued_to_user_id is not None:
+        query = query.where(ApiToken.issued_to_user_id == issued_to_user_id)
+    if cursor_created_at is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                ApiToken.created_at < cursor_created_at,
+                and_(
+                    ApiToken.created_at == cursor_created_at,
+                    ApiToken.id < cursor_id,
+                ),
+            )
+        )
+    query = query.order_by(ApiToken.created_at.desc(), ApiToken.id.desc())
+    if limit is not None:
+        query = query.limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())

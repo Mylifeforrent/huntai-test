@@ -247,6 +247,37 @@ async def list_approval_requests(
     return list(result.scalars().all())
 
 
-async def count_approval_requests(session: AsyncSession) -> int:
-    result = await session.execute(select(ApprovalRequest.id))
-    return len(list(result.scalars().all()))
+async def list_workbench_pending_approvals(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_ids: list[uuid.UUID],
+    now: datetime,
+    limit: int,
+) -> list[ApprovalRequest]:
+    if not project_ids:
+        return []
+    project_condition = or_(
+        ApprovalRequest.project_id.in_(project_ids),
+        ApprovalRequest.project_id.is_(None),
+    )
+    conditions = [
+        ApprovalRequest.organization_id == organization_id,
+        ApprovalRequest.status.in_(("CREATED", "PENDING")),
+        project_condition,
+        or_(
+            ApprovalRequest.status == "CREATED",
+            and_(
+                ApprovalRequest.status == "PENDING",
+                ApprovalRequest.expires_at >= now,
+            ),
+        ),
+    ]
+    stmt = (
+        select(ApprovalRequest)
+        .where(*conditions)
+        .order_by(ApprovalRequest.created_at.desc(), ApprovalRequest.id.desc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())

@@ -36,6 +36,7 @@ from app.modules.identity_tenancy.service import (
     build_session_payload,
     complete_oidc_callback,
     get_project_overview,
+    get_workbench_for_caller,
     list_members,
     list_projects,
     logout_session,
@@ -284,6 +285,26 @@ async def api_005_me(
         db, organization_id=ctx.organization.id, user_id=ctx.user.id
     )
     return {"data": build_me_payload(ctx, memberships)}
+
+
+@router.get("/workbench")
+async def api_020_workbench(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    project_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_workbench_for_caller(db, ctx, project_id=project_id)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "forbidden":
+            raise forbidden(trace_id) from exc
+        if code == "not_found":
+            raise not_found(trace_id) from exc
+        raise validation_failed(trace_id) from exc
+    return {"data": payload}
 
 
 @router.get("/auth/session")

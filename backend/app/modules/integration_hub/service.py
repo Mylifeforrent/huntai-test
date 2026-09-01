@@ -1,20 +1,28 @@
 import hashlib
 import hmac
 import re
+import secrets
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
 from app.modules.integration_hub import repository as repo
-from app.modules.integration_hub.models import Connector, ExternalObservation
+from app.modules.integration_hub.models import ApiToken, Connector, ExternalObservation
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 
 COMMAND_TYPE_BIND_CREDENTIAL = "connector.bind_credential_ref"
+COMMAND_TYPE_ISSUE_TOKEN = "api_token.issue"
+COMMAND_TYPE_REVOKE_TOKEN = "api_token.revoke"
+TOKEN_PREFIX_LITERAL = "ht_live_"
+TOKEN_PREFIX_DISPLAY_LEN = 16
+PASSWORD_HASHER = PasswordHasher()
 ALLOWED_ENV_REF_KEYS = frozenset({"GITHUB_WEBHOOK_SECRET"})
 SECRET_PATTERN = re.compile(
     r"(password|secret|token|credential)",
@@ -483,3 +491,298 @@ async def process_inbound_webhook(
         },
         202,
     )
+
+
+def _generate_api_token_plaintext() -> tuple[str, str]:
+    secret = secrets.token_urlsafe(32)
+    plaintext = f"{TOKEN_PREFIX_LITERAL}{secret}"
+    prefix = plaintext[:TOKEN_PREFIX_DISPLAY_LEN]
+    return plaintext, prefix
+
+
+def _hash_api_token(plaintext: str) -> str:
+    return PASSWORD_HASHER.hash(plaintext)
+
+
+def serialize_api_token_list_item(token: ApiToken) -> dict[str, Any]:
+    return {
+        "id": str(token.id),
+        "issued_to_user_id": str(token.issued_to_user_id),
+        "token_prefix": token.token_prefix,
+        "scopes": list(token.scopes),
+        "project_ids": [str(pid) for pid in token.project_ids],
+        "expires_at": _iso(token.expires_at),
+        "revoked_at": _iso(token.revoked_at) if token.revoked_at else None,
+        "last_used_at": _iso(token.last_used_at) if token.last_used_at else None,
+        "created_at": _iso(token.created_at),
+    }
+
+
+def _issue_metadata_response(token: ApiToken) -> dict[str, Any]:
+    return {
+        "id": str(token.id),
+        "token_prefix": token.token_prefix,
+        "scopes": list(token.scopes),
+        "project_ids": [str(pid) for pid in token.project_ids],
+        "expires_at": _iso(token.expires_at),
+        "revoked_at": _iso(token.revoked_at) if token.revoked_at else None,
+    }
+
+
+def _issue_response_with_token(token: ApiToken, plaintext: str) -> dict[str, Any]:
+    payload = _issue_metadata_response(token)
+    payload["token"] = plaintext
+    return payload
+
+
+def _validate_scopes(scopes: list[str]) -> None:
+    if not scopes:
+        raise ValueError("validation")
+    if not all(scope in repo.VALID_API_TOKEN_SCOPES for scope in scopes):
+        raise ValueError("validation")
+
+
+def _validate_expires_at(expires_at: datetime, *, now: datetime) -> None:
+    if expires_at.tzinfo is None:
+        raise ValueError("validation")
+    if expires_at <= now:
+        raise ValueError("validation")
+
+
+async def _validate_project_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    project_ids: list[uuid.UUID],
+) -> None:
+    if not project_ids:
+        raise ValueError("validation")
+    for project_id in project_ids:
+        role = await identity_query.get_project_membership_role(
+            session,
+            organization_id=organization_id,
+            project_id=project_id,
+            user_id=user_id,
+        )
+        if role is None:
+            raise ValueError("not_found")
+
+
+async def list_api_tokens_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    cursor: str | None,
+    limit: int | None,
+    issued_to_user_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    if limit is not None and limit < 1:
+        raise ValueError("validation")
+
+    effective_limit = DEFAULT_LIST_LIMIT if limit is None else min(limit, MAX_LIST_LIMIT)
+    cursor_created_at: datetime | None = None
+    cursor_id: uuid.UUID | None = None
+    if cursor is not None:
+        cursor_created_at, cursor_id = repo.decode_created_id_cursor(cursor)
+
+    rows = await repo.list_api_tokens(
+        session,
+        organization_id=ctx.organization.id,
+        issued_to_user_id=issued_to_user_id,
+        cursor_created_at=cursor_created_at,
+        cursor_id=cursor_id,
+        limit=effective_limit + 1,
+    )
+    has_more = len(rows) > effective_limit
+    page_rows = rows[:effective_limit]
+    next_cursor = None
+    if has_more and page_rows:
+        last = page_rows[-1]
+        next_cursor = repo.encode_created_id_cursor(
+            created_at=last.created_at,
+            item_id=last.id,
+        )
+    return {
+        "items": [serialize_api_token_list_item(row) for row in page_rows],
+        "page": {"next_cursor": next_cursor, "has_more": has_more},
+    }
+
+
+async def issue_api_token_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    scopes: list[str],
+    project_ids: list[uuid.UUID],
+    expires_at: datetime,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    org_id = ctx.organization.id
+    now = datetime.now(UTC)
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_ISSUE_TOKEN,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return dict(existing.response_ref)
+
+    _validate_scopes(scopes)
+    _validate_expires_at(expires_at, now=now)
+    await _validate_project_ids(
+        session,
+        organization_id=org_id,
+        user_id=ctx.user.id,
+        project_ids=project_ids,
+    )
+
+    plaintext, prefix = _generate_api_token_plaintext()
+    token_hash = _hash_api_token(plaintext)
+
+    token = await repo.create_api_token(
+        session,
+        organization_id=org_id,
+        created_at=now,
+        created_by=ctx.user.id,
+        issued_to_user_id=ctx.user.id,
+        token_hash=token_hash,
+        token_prefix=prefix,
+        scopes=scopes,
+        project_ids=project_ids,
+        expires_at=expires_at,
+    )
+
+    response_with_token = _issue_response_with_token(token, plaintext)
+    stored_ref = _issue_metadata_response(token)
+
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="api_token.issued",
+            resource_type="api_token",
+            resource_id=token.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_ISSUE_TOKEN,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=stored_ref,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return response_with_token
+
+
+async def revoke_api_token_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    api_token_id: uuid.UUID,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    org_id = ctx.organization.id
+    now = datetime.now(UTC)
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_REVOKE_TOKEN,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return existing.response_ref
+
+    token = await repo.get_api_token(
+        session,
+        organization_id=org_id,
+        api_token_id=api_token_id,
+        for_update=True,
+    )
+    if token is None:
+        raise ValueError("not_found")
+
+    if token.revoked_at is None:
+        token.revoked_at = now
+        token.updated_at = now
+
+    response = serialize_api_token_list_item(token)
+
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="api_token.revoked",
+            resource_type="api_token",
+            resource_id=token.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_REVOKE_TOKEN,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return response
+
+
+async def authenticate_api_token(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    raw_token: str,
+) -> ApiToken | None:
+    if not raw_token.startswith(TOKEN_PREFIX_LITERAL):
+        return None
+    if len(raw_token) < TOKEN_PREFIX_DISPLAY_LEN:
+        return None
+    prefix = raw_token[:TOKEN_PREFIX_DISPLAY_LEN]
+    now = datetime.now(UTC)
+    candidates = await repo.list_api_tokens_by_prefix(
+        session,
+        organization_id=organization_id,
+        token_prefix=prefix,
+    )
+    for token in candidates:
+        if token.revoked_at is not None:
+            continue
+        expires = token.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires <= now:
+            continue
+        try:
+            PASSWORD_HASHER.verify(token.token_hash, raw_token)
+            return token
+        except VerifyMismatchError:
+            continue
+    return None

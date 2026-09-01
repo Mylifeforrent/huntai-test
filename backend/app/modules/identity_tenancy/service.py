@@ -12,6 +12,8 @@ from authlib.jose import jwt as jose_jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.modules.approval_policy import query_port as approval_query
+from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy import repository as repo
 from app.modules.identity_tenancy.models import (
     DEFAULT_CAPABILITY_CONTROLS,
@@ -27,6 +29,9 @@ from app.modules.results_evidence.audit_port import (
     append_audit_event,
     list_recent_for_project,
 )
+from app.modules.run_orchestration import query_port as run_query
+
+WORKBENCH_LIST_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -1140,3 +1145,52 @@ async def put_siem_export_for_caller(
         created_by=ctx.user.id,
     )
     return response
+
+
+async def get_workbench_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    org_id = ctx.organization.id
+    caller_id = ctx.user.id
+    memberships = await identity_query.list_user_project_memberships(
+        session, organization_id=org_id, user_id=caller_id
+    )
+    if not memberships:
+        raise ValueError("forbidden")
+
+    visible_project_ids = [pid for pid, _ in memberships]
+    if project_id is not None:
+        if project_id not in visible_project_ids:
+            raise ValueError("not_found")
+        filter_project_ids = [project_id]
+    else:
+        filter_project_ids = visible_project_ids
+
+    pending = await approval_query.list_workbench_pending_approvals(
+        session,
+        organization_id=org_id,
+        caller_id=caller_id,
+        project_ids=filter_project_ids,
+        limit=WORKBENCH_LIST_LIMIT,
+    )
+    active_runs = await run_query.list_workbench_active_runs(
+        session,
+        organization_id=org_id,
+        project_ids=filter_project_ids,
+        limit=WORKBENCH_LIST_LIMIT,
+    )
+    from app.modules.quota_governance import query_port as quota_query
+
+    quota = await quota_query.get_current_quota(session, organization_id=org_id)
+    if quota is None:
+        raise ValueError("not_found")
+
+    return {
+        "pending_approvals": pending,
+        "active_runs": active_runs,
+        "gate_anomalies": [],
+        "quota": quota,
+    }

@@ -153,6 +153,32 @@ async def update_test_run_cancel(
     return run
 
 
+TERMINAL_STATUSES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT"})
+
+
+async def list_non_terminal_runs_for_projects(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_ids: list[uuid.UUID],
+    limit: int,
+) -> list[TestRun]:
+    if not project_ids:
+        return []
+    query = (
+        select(TestRun)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.project_id.in_(project_ids),
+            TestRun.status.notin_(tuple(TERMINAL_STATUSES)),
+        )
+        .order_by(TestRun.updated_at.desc(), TestRun.id.desc())
+        .limit(limit)
+    )
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
 async def list_test_runs(
     session: AsyncSession,
     *,

@@ -100,6 +100,7 @@ async def _truncate_tables() -> AsyncGenerator[None]:
         "integration_hub.command_idempotency_records",
         "integration_hub.inbox_events",
         "integration_hub.external_observations",
+        "integration_hub.api_tokens",
         "integration_hub.connectors",
         "run_orchestration.command_idempotency_records",
         "run_orchestration.test_runs",
