@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select
 
 from app.core.db import dispose_engine, get_session_factory
+from app.modules.ai_governance.service import seed_default_model_routes
 from app.modules.identity_tenancy.models import (
     DEFAULT_CAPABILITY_CONTROLS,
     Organization,
@@ -124,6 +125,8 @@ async def seed() -> None:
         else:
             user2.idp_subject = IDP_SUBJECT_2
             user2.is_disabled = False
+
+        await seed_default_model_routes(session, organization_id=org.id, created_by=USER_ID)
 
         await session.commit()
     await dispose_engine()
