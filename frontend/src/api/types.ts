@@ -188,6 +188,7 @@ export interface MeOrganization {
   version: number;
   is_active: boolean;
   capability_controls: Record<string, unknown>;
+  siem_export_enabled?: boolean;
 }
 
 export interface MeMembership {
@@ -396,4 +397,57 @@ export interface OrganizationCapabilityControls {
   effective_scope: Record<string, unknown>;
   banner: Record<string, unknown>;
   capability_controls?: Record<string, unknown>;
+}
+
+/** API-024/025 AuditEventListItem (no Prompt field). */
+export interface AuditEventListItem {
+  id: string;
+  created_at: string;
+  data_classification: string;
+  project_id?: string | null;
+  actor_user_id?: string | null;
+  delegated_agent?: string | null;
+  workflow?: string | null;
+  step?: string | null;
+  skill_id?: string | null;
+  skill_version_id?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  prompt_version?: string | null;
+  tool?: string | null;
+  action?: string | null;
+  resource_type?: string | null;
+  resource_id?: string | null;
+  request_hash?: string | null;
+  response_hash?: string | null;
+  approval_id?: string | null;
+  approval_decision?: string | null;
+  approval_bound_hash?: string | null;
+  external_request_id?: string | null;
+  result?: string | null;
+  evidence_refs?: string[] | null;
+  cost?: number | null;
+  latency_ms?: number | null;
+  payload_ref?: string | null;
+}
+
+/** API-010 organization projection fields used on P24. */
+export interface OrganizationCurrentProjection {
+  id: string;
+  name: string;
+  slug: string;
+  version: number;
+  is_active: boolean;
+  capability_controls: Record<string, unknown>;
+  siem_export_enabled?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** API-040 SiemExportConfig response. */
+export interface SiemExportConfig {
+  enabled: boolean;
+  version: number;
+  destination_connector_id?: string | null;
+  credential_present: boolean;
 }

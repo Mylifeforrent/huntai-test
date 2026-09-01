@@ -114,6 +114,7 @@ export const PAGE_APIS = {
   ],
   P24: [
     { id: "API-024", method: "GET", path: "/api/v1/audit-events", summary: "审计检索" },
+    { id: "API-025", method: "GET", path: "/api/v1/audit-events/{audit_event_id}", summary: "审计详情" },
     { id: "API-040", method: "PUT", path: "/api/v1/organizations/current/siem-export", summary: "SIEM 外发" },
   ],
   P25: [
