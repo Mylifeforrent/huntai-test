@@ -82,7 +82,12 @@ export function validateReturnPath(returnPath: string): boolean {
 }
 
 export function currentReturnPath(): string {
-  return `${window.location.pathname}${window.location.search}`;
+  const path = `${window.location.pathname}${window.location.search}`;
+  const pathname = window.location.pathname;
+  if (pathname === "/api" || pathname.startsWith("/api/")) {
+    return "/";
+  }
+  return path;
 }
 
 export async function startOidcLogin(returnPath?: string): Promise<void> {

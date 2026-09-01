@@ -123,4 +123,20 @@ describe("session helpers", () => {
   it("builds current return path from location", () => {
     expect(currentReturnPath()).toMatch(/^\//);
   });
+
+  it("does not reuse OIDC callback URL as return_path", () => {
+    const original = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        pathname: "/api/v1/auth/oidc/callback",
+        search: "?code=x&state=y",
+      },
+    });
+    expect(currentReturnPath()).toBe("/");
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  });
 });
