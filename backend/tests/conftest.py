@@ -1,4 +1,7 @@
+import asyncio
+import importlib.util
 import os
+from pathlib import Path
 
 TEST_ENV: dict[str, str] = {
     "APP_ENV": "test",
@@ -55,6 +58,20 @@ def _set_test_env() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+def pytest_sessionfinish(session: object, exitstatus: int) -> None:
+    """Re-seed mock IdP user so pytest TRUNCATE does not brick local login."""
+    _ = session
+    _ = exitstatus
+    seed_path = Path(__file__).resolve().parents[1] / "scripts" / "seed_local_identity.py"
+    spec = importlib.util.spec_from_file_location("seed_local_identity", seed_path)
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    get_settings.cache_clear()
+    asyncio.run(module.seed())
 
 
 @pytest.fixture(scope="session")

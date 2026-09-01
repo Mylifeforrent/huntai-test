@@ -43,6 +43,9 @@ def validate_return_path(return_path: str | None) -> str:
         raise ValueError("invalid_return_path")
     if "://" in return_path:
         raise ValueError("invalid_return_path")
+    path_only = return_path.split("?", 1)[0]
+    if path_only == "/api" or path_only.startswith("/api/"):
+        raise ValueError("invalid_return_path")
     return return_path
 
 

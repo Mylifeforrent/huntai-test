@@ -24,3 +24,13 @@ async def test_api_001_oidc_start_rejects_open_redirect(client: AsyncClient) -> 
     assert response.status_code == 400
     body = response.json()
     assert body["error"]["code"] == "HT-VAL-005"
+
+
+@pytest.mark.asyncio
+async def test_api_001_oidc_start_rejects_callback_return_path(client: AsyncClient) -> None:
+    response = await client.get(
+        "/api/v1/auth/oidc/start",
+        params={"return_path": "/api/v1/auth/oidc/callback?code=x&state=y"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "HT-VAL-005"
