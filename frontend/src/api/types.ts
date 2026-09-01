@@ -267,3 +267,44 @@ export interface ActionPreview {
     version?: number;
   };
 }
+
+export const APPROVAL_PERSPECTIVES = ["inbox", "initiated", "all"] as const;
+export type ApprovalPerspective = (typeof APPROVAL_PERSPECTIVES)[number];
+
+export interface ApprovalRequestListItem {
+  id: string;
+  action_type: PreviewActionType;
+  target_object_type: string;
+  target_object_id: string;
+  param_hash: string;
+  card_payload: JsonObject;
+  status: ApprovalStatus | string;
+  execution_result?: "ok" | "failed" | "unknown" | null;
+  initiator_id: string;
+  approver_id?: string;
+  expires_at: string;
+  escalate_to?: string;
+  expired_reason?: "ttl" | "withdrawn" | "invalidated" | null;
+  origin_request_id?: string;
+  side_effect_level: RiskLevel;
+  four_eyes_self?: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApprovalRequestDetail extends ApprovalRequestListItem {
+  action_payload_redacted?: JsonObject;
+  snapshot_ref?: string | null;
+  original_initiator_id?: string;
+  execution_reconciliation?: {
+    needed: boolean;
+    external_request_id?: string | null;
+  } | null;
+}
+
+export interface ApprovalResubmissionResult {
+  origin_request_id: string;
+  origin_final_status: "EXPIRED" | "REJECTED" | "EXECUTED";
+  new_approval_request: ApprovalRequestListItem;
+}
