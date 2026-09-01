@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope } from "@/api/types";
+import type { ConnectorListItem, ListEnvelope } from "@/api/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,11 +23,8 @@ export function IntegrationPage() {
   const [event, setEvent] = useState("push");
 
   const connectors = useQuery({
-    queryKey: queryKeys.connectors({ projectId }),
-    queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-160", "/api/v1/connectors", {
-        project_id: projectId || undefined,
-      }),
+    queryKey: queryKeys.connectors({ scope: "project", projectId }),
+    queryFn: () => api.get<ListEnvelope<ConnectorListItem>>("API-160", "/api/v1/connectors"),
     enabled: Boolean(projectId),
   });
   const items = connectors.data?.data.items ?? [];

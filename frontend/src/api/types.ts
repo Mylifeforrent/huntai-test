@@ -556,3 +556,44 @@ export interface TestRunCancelResult {
   receipt: CommandReceipt;
   test_run: TestRunDetail;
 }
+
+export const CONNECTOR_TYPES = ["jira", "github", "ci", "release"] as const;
+export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
+
+/** API-160 ConnectorListItem. */
+export interface ConnectorListItem {
+  id: string;
+  type: ConnectorType;
+  name: string;
+  auth_method?: string;
+  credential_present: boolean;
+  webhook_secret_present?: boolean;
+  outbound_write_enabled: boolean;
+  action_contract?: Record<string, unknown>;
+  config_version?: number;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** API-161 ConnectorDetail. */
+export interface ConnectorDetail extends ConnectorListItem {
+  health_status?: {
+    last_checked_at?: string;
+    ok?: boolean;
+    latency_ms?: number;
+  } | null;
+}
+
+/** API-164 WebhookDeliveryItem. */
+export interface WebhookDeliveryItem {
+  id: string;
+  connector_id: string;
+  source?: string;
+  observation_key?: string;
+  signature_ok: boolean;
+  observed_at: string;
+  data_classification?: string;
+  payload_ref?: string | null;
+  accepted?: boolean;
+}

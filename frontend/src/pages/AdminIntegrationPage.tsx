@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope } from "@/api/types";
+import type { ConnectorListItem, ListEnvelope, WebhookDeliveryItem } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
+import { asRecord } from "@/lib/utils";
 
 export function AdminIntegrationPage() {
   const [issueTried, setIssueTried] = useState(false);
@@ -25,7 +26,7 @@ export function AdminIntegrationPage() {
 
   const connectors = useQuery({
     queryKey: queryKeys.connectors({ scope: "org" }),
-    queryFn: () => api.get<ListEnvelope<Record<string, unknown>>>("API-160", "/api/v1/connectors"),
+    queryFn: () => api.get<ListEnvelope<ConnectorListItem>>("API-160", "/api/v1/connectors"),
   });
   const tokens = useQuery({
     queryKey: queryKeys.apiTokens,
@@ -35,7 +36,7 @@ export function AdminIntegrationPage() {
   const deliveries = useQuery({
     queryKey: ["connectors", connectorId, "webhook-deliveries"],
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>(
+      api.get<ListEnvelope<WebhookDeliveryItem>>(
         "API-164",
         `/api/v1/connectors/${connectorId}/webhook-deliveries`,
       ),
@@ -230,8 +231,4 @@ export function AdminIntegrationPage() {
       {revokeTried ? <UndevelopedCallout apis={PAGE_APIS.P25} action="吊销 API-172" /> : null}
     </>
   );
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
