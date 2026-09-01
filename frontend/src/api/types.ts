@@ -451,3 +451,63 @@ export interface SiemExportConfig {
   destination_connector_id?: string | null;
   credential_present: boolean;
 }
+
+/** API-100/101 ExecutionEnvironment list/detail (no credential_ref). */
+export interface ExecutionEnvironmentListItem {
+  id: string;
+  env_type: string;
+  name: string;
+  endpoint?: string | null;
+  status: EnvironmentStatus;
+  scope_level: string;
+  credential_present: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExecutionEnvironmentDetail extends ExecutionEnvironmentListItem {
+  health_status?: Record<string, unknown> | null;
+  capacity?: Record<string, unknown> | null;
+  config_version: number;
+}
+
+/** API-104 JobContractListItem. */
+export interface JobContractListItem {
+  job_id: string;
+  params_schema_ref?: string | null;
+  report_adapter?: string | null;
+  supports_cancel: boolean;
+  contract_version: number;
+  artifact_manifest?: Record<string, unknown> | null;
+}
+
+/** API-070 JobParamsSchema. */
+export interface JobParamsSchema {
+  environment_id: string;
+  job_id: string;
+  contract_version: number;
+  params_schema_ref?: string | null;
+  schema: Record<string, unknown>;
+  supports_cancel: boolean;
+}
+
+/** API-105 EnvironmentHealthProjection. */
+export interface EnvironmentHealthProjection {
+  environment_id: string;
+  status: EnvironmentStatus;
+  health_status?: Record<string, unknown> | null;
+  environment_version: number;
+}
+
+/** API-102 register response (subset). */
+export interface ExecutionEnvironmentRegisterResult {
+  id: string;
+  env_type: string;
+  name: string;
+  status: EnvironmentStatus;
+  version: number;
+  has_credential: boolean;
+  credential_present?: boolean;
+  approval_request_id?: string;
+}

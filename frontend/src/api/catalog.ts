@@ -82,7 +82,12 @@ export const PAGE_APIS = {
   ],
   P15: [
     { id: "API-100", method: "GET", path: "/api/v1/execution-environments", summary: "环境列表" },
+    { id: "API-101", method: "GET", path: "/api/v1/execution-environments/{environment_id}", summary: "环境详情" },
     { id: "API-102", method: "POST", path: "/api/v1/execution-environments", summary: "环境注册" },
+    { id: "API-103", method: "POST", path: "/api/v1/execution-environments/{environment_id}/disable", summary: "停用环境" },
+    { id: "API-104", method: "GET", path: "/api/v1/execution-environments/{environment_id}/jobs", summary: "Job Registry" },
+    { id: "API-105", method: "GET", path: "/api/v1/execution-environments/{environment_id}/health", summary: "健康投影" },
+    { id: "API-070", method: "GET", path: "/api/v1/execution-environments/{environment_id}/jobs/{job_id}/params-schema", summary: "Job 参数 Schema" },
     { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "Policy Gate Preview" },
   ],
   P16: [
