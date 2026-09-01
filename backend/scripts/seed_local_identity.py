@@ -16,6 +16,7 @@ from app.core.db import dispose_engine, get_session_factory
 from app.modules.ai_governance.service import seed_default_model_routes
 from app.modules.identity_tenancy.models import (
     DEFAULT_CAPABILITY_CONTROLS,
+    DEFAULT_SIEM_EXPORT,
     Organization,
     Project,
     ProjectMember,
@@ -48,6 +49,7 @@ async def seed() -> None:
                 name="Local Dev Org",
                 slug=ORG_SLUG,
                 capability_controls=dict(DEFAULT_CAPABILITY_CONTROLS),
+                siem_export=dict(DEFAULT_SIEM_EXPORT),
                 is_active=True,
             )
             session.add(org)

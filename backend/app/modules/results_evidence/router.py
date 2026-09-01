@@ -1,0 +1,112 @@
+import uuid
+from datetime import UTC, datetime
+from typing import Annotated, Any, NoReturn
+
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import require_session
+from app.core.db import get_db_session
+from app.core.errors import forbidden, not_found, validation_failed
+from app.core.logging import get_trace_id
+from app.modules.identity_tenancy.service import SessionContext
+from app.modules.results_evidence.service import (
+    get_audit_event_for_caller,
+    list_audit_events_for_caller,
+)
+
+router = APIRouter(prefix="/api/v1")
+
+
+def _map_read_error(trace_id: str, exc: ValueError) -> NoReturn:
+    code = str(exc)
+    if code == "forbidden":
+        raise forbidden(trace_id) from exc
+    if code == "not_found":
+        raise not_found(trace_id) from exc
+    if code in {"validation", "invalid_cursor"}:
+        raise validation_failed(trace_id) from exc
+    raise validation_failed(trace_id) from exc
+
+
+def _parse_uuid(value: str | None, trace_id: str) -> uuid.UUID | None:
+    if value is None:
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise validation_failed(trace_id) from exc
+
+
+def _parse_datetime(value: str | None, trace_id: str) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise validation_failed(trace_id) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+@router.get("/audit-events")
+async def api_024_list_audit_events(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+    actor_user_id: Annotated[str | None, Query()] = None,
+    request_hash: Annotated[str | None, Query()] = None,
+    approval_id: Annotated[str | None, Query()] = None,
+    approval_bound_hash: Annotated[str | None, Query()] = None,
+    resource_type: Annotated[str | None, Query()] = None,
+    resource_id: Annotated[str | None, Query()] = None,
+    project_id: Annotated[str | None, Query()] = None,
+    external_request_id: Annotated[str | None, Query()] = None,
+    created_from: Annotated[str | None, Query()] = None,
+    created_to: Annotated[str | None, Query()] = None,
+    sort: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_audit_events_for_caller(
+            db,
+            ctx,
+            cursor=cursor,
+            limit=limit,
+            sort=sort,
+            actor_user_id=_parse_uuid(actor_user_id, trace_id),
+            request_hash=request_hash,
+            approval_id=_parse_uuid(approval_id, trace_id),
+            approval_bound_hash=approval_bound_hash,
+            resource_type=resource_type,
+            resource_id=_parse_uuid(resource_id, trace_id),
+            project_id=_parse_uuid(project_id, trace_id),
+            external_request_id=external_request_id,
+            created_from=_parse_datetime(created_from, trace_id),
+            created_to=_parse_datetime(created_to, trace_id),
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/audit-events/{audit_event_id}")
+async def api_025_get_audit_event(
+    request: Request,
+    audit_event_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_audit_event_for_caller(
+            db,
+            ctx,
+            audit_event_id=audit_event_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}

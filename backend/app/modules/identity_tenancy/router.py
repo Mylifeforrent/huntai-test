@@ -21,6 +21,7 @@ from app.core.errors import (
     not_found,
     oidc_auth_failed,
     open_redirect,
+    policy_deny,
     precondition_failed,
     validation_failed,
     version_conflict,
@@ -39,6 +40,7 @@ from app.modules.identity_tenancy.service import (
     list_projects,
     logout_session,
     patch_project_member_role,
+    put_siem_export_for_caller,
     remove_project_member,
     require_idempotency_key,
     start_oidc_flow,
@@ -95,6 +97,22 @@ class CapabilityTightenRequest(BaseModel):
     reason: str | None = None
 
 
+class SiemExportFilter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_types: list[str] | None = None
+    include_denied_attempts: bool | None = None
+
+
+class SiemExportPutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    enabled: bool
+    destination_connector_id: uuid.UUID | None = None
+    filter: SiemExportFilter | None = None
+
+
 FORBIDDEN_TIGHTEN_BODY_KEYS = frozenset({"direction", "restore", "loosen", "enabled"})
 
 
@@ -112,6 +130,8 @@ def _map_project_error(trace_id: str, exc: ValueError) -> NoReturn:
         raise precondition_failed(trace_id) from exc
     if code == "idempotency_conflict":
         raise idempotency_conflict(trace_id) from exc
+    if code == "policy_deny":
+        raise policy_deny(trace_id) from exc
     raise validation_failed(trace_id) from exc
 
 
@@ -460,6 +480,39 @@ async def api_199_capability_tighten(
             expected_version=body.expected_version,
             target=body.target.model_dump(exclude_none=True),
             reason=body.reason,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_project_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.put("/organizations/current/siem-export")
+async def api_040_put_siem_export(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session_with_membership)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    request_hash = repo.hash_request_body(raw)
+    body = _parse_body(SiemExportPutRequest, raw, trace_id)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    filter_payload = body.filter.model_dump(exclude_none=True) if body.filter is not None else None
+    try:
+        payload = await put_siem_export_for_caller(
+            db,
+            ctx,
+            expected_version=body.expected_version,
+            enabled=body.enabled,
+            destination_connector_id=body.destination_connector_id,
+            filter_payload=filter_payload,
             idempotency_key=idempotency_key,
             request_hash=request_hash,
         )

@@ -15,6 +15,7 @@ from app.core.config import Settings, get_settings
 from app.modules.identity_tenancy import repository as repo
 from app.modules.identity_tenancy.models import (
     DEFAULT_CAPABILITY_CONTROLS,
+    DEFAULT_SIEM_EXPORT,
     AuthSession,
     Organization,
     Project,
@@ -319,6 +320,7 @@ def build_me_payload(ctx: SessionContext, memberships: list[repo.MembershipRow])
             "version": org.aggregate_version,
             "is_active": org.is_active,
             "capability_controls": org.capability_controls,
+            "siem_export_enabled": siem_export_enabled(org),
         },
         "memberships": [
             {
@@ -342,9 +344,15 @@ def build_organization_current(org: Organization) -> dict[str, Any]:
         "version": org.aggregate_version,
         "is_active": org.is_active,
         "capability_controls": org.capability_controls,
+        "siem_export_enabled": siem_export_enabled(org),
         "created_at": org.created_at.isoformat(),
         "updated_at": org.updated_at.isoformat(),
     }
+
+
+def siem_export_enabled(org: Organization) -> bool:
+    export = org.siem_export or DEFAULT_SIEM_EXPORT
+    return bool(export.get("enabled", False))
 
 
 def build_session_payload(ctx: SessionContext) -> dict[str, Any]:
@@ -892,6 +900,7 @@ async def remove_project_member(
 
 
 COMMAND_TYPE_CAPABILITY_TIGHTEN = "organization.capability_tighten"
+COMMAND_TYPE_SIEM_EXPORT_PUT = "organization.siem_export.put"
 VALID_TIGHTEN_LEVELS = frozenset({"global", "ability", "module", "connector"})
 
 
@@ -1037,4 +1046,97 @@ async def tighten_capability_controls(
         created_by=ctx.user.id,
     )
     _ = reason
+    return response
+
+
+def _connector_write_kill_active(controls: dict[str, Any]) -> bool:
+    if controls.get("ai_global_tightened") is True:
+        return True
+    connectors = controls.get("tightened_connectors")
+    return isinstance(connectors, list) and len(connectors) > 0
+
+
+async def put_siem_export_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    expected_version: int,
+    enabled: bool,
+    destination_connector_id: uuid.UUID | None,
+    filter_payload: dict[str, Any] | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    from app.modules.identity_tenancy import query_port as identity_query
+
+    allowed = await identity_query.caller_is_owner(
+        session, organization_id=ctx.organization.id, user_id=ctx.user.id
+    )
+    if not allowed:
+        raise ValueError("forbidden")
+
+    org_id = ctx.organization.id
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_SIEM_EXPORT_PUT,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return existing.response_ref
+
+    if enabled and destination_connector_id is None:
+        raise ValueError("validation")
+    if enabled and destination_connector_id is not None:
+        raise ValueError("not_found")
+
+    org = ctx.organization
+    if enabled and _connector_write_kill_active(org.capability_controls):
+        raise ValueError("policy_deny")
+    if org.aggregate_version != expected_version:
+        raise ValueError("version_conflict")
+
+    now = datetime.now(UTC)
+    export_payload: dict[str, Any] = {"enabled": enabled}
+    if destination_connector_id is not None:
+        export_payload["destination_connector_id"] = str(destination_connector_id)
+    if filter_payload is not None:
+        export_payload["filter"] = filter_payload
+    org.siem_export = export_payload
+    org.updated_at = now
+    org.aggregate_version += 1
+    await session.flush()
+
+    response = {
+        "enabled": enabled,
+        "version": org.aggregate_version,
+        "destination_connector_id": (
+            str(destination_connector_id) if destination_connector_id is not None else None
+        ),
+        "credential_present": False,
+    }
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="organization.siem_export.put",
+            resource_type="organization",
+            resource_id=org.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_SIEM_EXPORT_PUT,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+    )
     return response

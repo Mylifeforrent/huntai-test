@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,8 @@ DEFAULT_CAPABILITY_CONTROLS: dict[str, Any] = {
     "tightened_connectors": [],
 }
 
+DEFAULT_SIEM_EXPORT: dict[str, Any] = {"enabled": False}
+
 
 class Base(DeclarativeBase):
     pass
@@ -43,6 +46,9 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     capability_controls: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    siem_export: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=lambda: deepcopy(DEFAULT_SIEM_EXPORT)
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 

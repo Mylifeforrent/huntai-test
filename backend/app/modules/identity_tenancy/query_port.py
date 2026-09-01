@@ -161,3 +161,16 @@ async def caller_is_owner_or_admin(
         )
     )
     return result.first() is not None
+
+
+async def caller_is_owner(
+    session: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    result = await session.execute(
+        select(ProjectMember.role).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.user_id == user_id,
+            ProjectMember.role == "owner",
+        )
+    )
+    return result.first() is not None
