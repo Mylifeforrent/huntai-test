@@ -102,7 +102,10 @@ export const PAGE_APIS = {
   P21: [{ id: "API-183", method: "GET", path: "/api/v1/ai/cost-dashboard", summary: "AI 成本看板" }],
   P22: [
     { id: "API-196", method: "GET", path: "/api/v1/model-routes", summary: "模型路由" },
+    { id: "API-197", method: "PUT", path: "/api/v1/model-routes/{model_route_id}", summary: "更新路由" },
     { id: "API-198", method: "POST", path: "/api/v1/model-routes/{model_route_id}/connection-tests", summary: "测试连接" },
+    { id: "API-184", method: "GET", path: "/api/v1/ai-invocation-logs", summary: "AI 调用日志" },
+    { id: "API-185", method: "GET", path: "/api/v1/ai-invocation-logs/{log_id}", summary: "日志详情" },
   ],
   P23: [
     { id: "API-010", method: "GET", path: "/api/v1/organizations/current", summary: "降级/开关投影" },

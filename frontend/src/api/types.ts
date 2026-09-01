@@ -303,6 +303,50 @@ export interface ApprovalRequestDetail extends ApprovalRequestListItem {
   } | null;
 }
 
+export const DATA_CLASSIFICATIONS = ["Public", "Internal", "Confidential", "Restricted"] as const;
+export type DataClassification = (typeof DATA_CLASSIFICATIONS)[number];
+
+export const AI_INVOCATION_RESULTS = ["ok", "degraded", "refused"] as const;
+export type AiInvocationResult = (typeof AI_INVOCATION_RESULTS)[number];
+
+export interface ModelRouteListItem {
+  id: string;
+  task_type: string;
+  data_classification: DataClassification;
+  provider_allowlist: string[];
+  max_cost: number;
+  fallback?: Record<string, unknown> | null;
+  require_prompt_version: boolean;
+  require_structured_output: boolean;
+  credential_present: boolean;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ConnectionTestResult {
+  reachable: boolean;
+  latency_ms: number;
+  error_class?: string;
+}
+
+export interface AIInvocationLogListItem {
+  id: string;
+  created_at: string;
+  created_by: string;
+  user_id?: string;
+  model: string;
+  prompt_version: string;
+  usage: Record<string, unknown>;
+  cost: number;
+  latency_ms: number;
+  data_classification: DataClassification;
+  result: AiInvocationResult;
+  skill_version_id?: string;
+  model_route_id?: string;
+  copilot_session_id?: string;
+}
+
 export interface ApprovalResubmissionResult {
   origin_request_id: string;
   origin_final_status: "EXPIRED" | "REJECTED" | "EXECUTED";

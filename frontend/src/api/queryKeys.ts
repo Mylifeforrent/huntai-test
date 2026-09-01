@@ -24,6 +24,8 @@ export const queryKeys = {
   audit: (params: Record<string, string>) => ["audit-events", params] as const,
   cost: ["ai", "cost-dashboard"] as const,
   modelRoutes: ["model-routes"] as const,
+  aiInvocationLogs: (params: Record<string, string>) => ["ai-invocation-logs", params] as const,
+  aiInvocationLog: (id: string) => ["ai-invocation-logs", id] as const,
   connectors: (params: Record<string, string>) => ["connectors", params] as const,
   apiTokens: ["api-tokens"] as const,
   releaseTasks: (params: Record<string, string>) => ["release-tasks", params] as const,
