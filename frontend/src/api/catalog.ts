@@ -39,13 +39,19 @@ export const PAGE_APIS = {
   ],
   P05: [
     { id: "API-030", method: "GET", path: "/api/v1/test-cases", summary: "用例列表" },
+    { id: "API-032", method: "POST", path: "/api/v1/test-cases", summary: "创建草稿" },
+    { id: "API-034", method: "POST", path: "/api/v1/test-cases/{test_case_id}/submit-review", summary: "提交评审" },
+    { id: "API-035", method: "POST", path: "/api/v1/test-cases/{test_case_id}/review", summary: "评审决策" },
     { id: "API-200", method: "POST", path: "/api/v1/test-cases/imports", summary: "Excel 导入" },
     { id: "API-202", method: "POST", path: "/api/v1/test-cases/exports", summary: "Excel 导出" },
   ],
   P06: [{ id: "API-050", method: "GET", path: "/api/v1/test-plans", summary: "测试计划" }],
   P07: [
     { id: "API-180", method: "POST", path: "/api/v1/ai/generations", summary: "A1 生成受理" },
+    { id: "API-181", method: "GET", path: "/api/v1/ai/generations/{generation_id}", summary: "生成状态" },
     { id: "API-182", method: "GET", path: "/api/v1/ai/generations/{generation_id}/drafts", summary: "结构化草稿" },
+    { id: "API-211", method: "GET", path: "/api/v1/ai/generations/{generation_id}/events", summary: "SSE 进度" },
+    { id: "API-032", method: "POST", path: "/api/v1/test-cases", summary: "采纳草稿" },
   ],
   P08: [
     { id: "API-011", method: "GET", path: "/api/v1/projects", summary: "项目列表" },

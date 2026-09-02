@@ -8,6 +8,8 @@ export const queryKeys = {
   orgQuota: ["org-quotas", "current"] as const,
   testCases: (params: Record<string, string>) => ["test-cases", params] as const,
   testCase: (id: string) => ["test-cases", id] as const,
+  generation: (id: string) => ["ai", "generations", id] as const,
+  generationDrafts: (id: string) => ["ai", "generations", id, "drafts"] as const,
   testPlans: (params: Record<string, string>) => ["test-plans", params] as const,
   testRuns: (params: Record<string, string>) => ["test-runs", params] as const,
   testRun: (id: string) => ["test-runs", id] as const,
