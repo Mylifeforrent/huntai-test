@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope, ResourceEnvelope, TestRunCancelResult, TestRunDetail } from "@/api/types";
+import type { CaseResultListItem, ListEnvelope, ResourceEnvelope, TestRunCancelResult, TestRunDetail } from "@/api/types";
+import { TEST_RUN_TERMINALS } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -32,11 +33,45 @@ export function TestRunDetailPage() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [signalSent, setSignalSent] = useState(false);
   const [cancelError, setCancelError] = useState<unknown>(null);
+  const [sseHint, setSseHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!runId) {
+      return undefined;
+    }
+    const source = new EventSource(`/api/v1/test-runs/${runId}/events`, { withCredentials: true });
+    const onProgress = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { hint?: string };
+        setSseHint(payload.hint ?? "progress");
+      } catch {
+        setSseHint("progress");
+      }
+    };
+    const onChanged = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.testRun(runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.caseResults(runId) });
+    };
+    source.addEventListener("progress", onProgress);
+    source.addEventListener("resource_changed", onChanged);
+    return () => {
+      source.removeEventListener("progress", onProgress);
+      source.removeEventListener("resource_changed", onChanged);
+      source.close();
+    };
+  }, [queryClient, runId]);
 
   const detail = useQuery({
     queryKey: queryKeys.testRun(runId),
     queryFn: () => api.get<ResourceEnvelope<TestRunDetail>>("API-061", `/api/v1/test-runs/${runId}`),
     enabled: Boolean(runId),
+    refetchInterval: (query) => {
+      const current = query.state.data?.data.status;
+      if (current && (TEST_RUN_TERMINALS as readonly string[]).includes(current)) {
+        return false;
+      }
+      return 1000;
+    },
   });
   const clusters = useQuery({
     queryKey: queryKeys.clusters(runId),
@@ -47,7 +82,7 @@ export function TestRunDetailPage() {
   const results = useQuery({
     queryKey: queryKeys.caseResults(runId),
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-064", `/api/v1/test-runs/${runId}/case-results`),
+      api.get<ListEnvelope<CaseResultListItem>>("API-064", `/api/v1/test-runs/${runId}/case-results`),
     enabled: Boolean(runId),
   });
 
@@ -116,6 +151,9 @@ export function TestRunDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <RunProgressBar status={status} source={source} />
+            {sseHint ? (
+              <p className="text-xs text-muted-foreground">SSE 提示（非终态）：{sseHint}。权威状态以 GET API-061 为准。</p>
+            ) : null}
             {status === "WAITING_APPROVAL" ? (
               <Button variant="outline" asChild className="w-fit">
                 <Link to="/approvals">WAITING_APPROVAL · 前往审批中心</Link>
@@ -222,7 +260,7 @@ export function TestRunDetailPage() {
                       <TableRow key={String(row.id ?? index)}>
                         <TableCell className="font-mono text-xs">{String(row.test_case_id ?? row.id ?? "")}</TableCell>
                         <TableCell>
-                          <StatusBadge status={String(row.status ?? row.result ?? "")} />
+                          <StatusBadge status={String(row.outcome ?? "")} />
                         </TableCell>
                       </TableRow>
                     );

@@ -579,6 +579,49 @@ export interface TestRunCancelResult {
   test_run: TestRunDetail;
 }
 
+/** API-069 execution options. */
+export interface ExecutionOptionEnvironment {
+  id: string;
+  name: string;
+  env_type: string;
+  status: EnvironmentStatus;
+  selectable: boolean;
+  unavailable_reason?: string | null;
+  health_status?: Record<string, unknown> | null;
+  capacity?: Record<string, unknown> | null;
+  credential_present?: boolean;
+  version: number;
+}
+
+export interface ExecutionOptionCase {
+  id: string;
+  title: string;
+  lifecycle_status: TestCaseLifecycle;
+  validity: TestCaseValidity;
+  execution_mode: string;
+  selectable: boolean;
+  unavailable_reason?: string | null;
+}
+
+export interface ExecutionOptions {
+  project_id: string;
+  environments: ExecutionOptionEnvironment[];
+  cases: ExecutionOptionCase[];
+  combo_constraints: { agent_times_external_ci_allowed: boolean };
+}
+
+export interface CaseResultListItem {
+  id: string;
+  test_run_id: string;
+  test_case_id: string;
+  test_case_version_id?: string | null;
+  attempt_seq: number;
+  outcome: string;
+  is_late: boolean;
+  is_partial: boolean;
+  data_classification: string;
+}
+
 export const CONNECTOR_TYPES = ["jira", "github", "ci", "release"] as const;
 export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
 
