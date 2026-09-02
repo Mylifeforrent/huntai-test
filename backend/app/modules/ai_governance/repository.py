@@ -9,7 +9,12 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.ai_governance.models import AIInvocationLog, CommandIdempotencyRecord, ModelRoute
+from app.modules.ai_governance.models import (
+    A1Generation,
+    AIInvocationLog,
+    CommandIdempotencyRecord,
+    ModelRoute,
+)
 
 
 def hash_request_body(body: bytes) -> str:
@@ -301,3 +306,26 @@ async def list_invocation_logs_in_window(
         )
     )
     return list(result.scalars().all())
+
+
+async def get_a1_generation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    generation_id: uuid.UUID,
+    for_update: bool = False,
+) -> A1Generation | None:
+    query = select(A1Generation).where(
+        A1Generation.organization_id == organization_id,
+        A1Generation.id == generation_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def insert_a1_generation(session: AsyncSession, row: A1Generation) -> A1Generation:
+    session.add(row)
+    await session.flush()
+    return row

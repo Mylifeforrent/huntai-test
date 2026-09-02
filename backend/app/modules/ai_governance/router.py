@@ -4,22 +4,34 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal, NoReturn
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import require_session
 from app.core.db import get_db_session
 from app.core.errors import (
+    async_generation_failed,
+    file_validation_failed,
     forbidden,
     idempotency_conflict,
     not_found,
     policy_deny,
+    precondition_failed,
+    quota_exceeded,
     validation_failed,
     version_conflict,
 )
 from app.core.logging import get_trace_id
 from app.modules.ai_governance import repository as repo
+from app.modules.ai_governance.a1_service import (
+    GenerationCreateInput,
+    create_generation_for_caller,
+    get_generation_drafts_for_caller,
+    get_generation_for_caller,
+    run_generation_background,
+)
 from app.modules.ai_governance.service import (
     ModelRoutePutInput,
     connection_test_for_caller,
@@ -57,6 +69,19 @@ class ConnectionTestRequest(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+SourceTypeLiteral = Literal["openapi", "postman", "curl"]
+
+
+class GenerationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: uuid.UUID
+    source_type: SourceTypeLiteral
+    import_source_id: uuid.UUID | None = None
+    inline_content: str | None = None
+    case_type_policy: dict[str, Any] | None = None
+
+
 def _map_read_error(trace_id: str, exc: ValueError) -> NoReturn:
     code = str(exc)
     if code == "forbidden":
@@ -76,12 +101,20 @@ def _map_command_error(trace_id: str, exc: ValueError) -> NoReturn:
         raise not_found(trace_id) from exc
     if code == "validation":
         raise validation_failed(trace_id) from exc
+    if code == "file_validation":
+        raise file_validation_failed(trace_id) from exc
     if code == "version":
         raise version_conflict(trace_id) from exc
-    if code == "policy_deny":
+    if code == "policy_deny" or code == "policy":
         raise policy_deny(trace_id) from exc
     if code == "idempotency_conflict":
         raise idempotency_conflict(trace_id) from exc
+    if code == "quota":
+        raise quota_exceeded(trace_id) from exc
+    if code == "state":
+        raise precondition_failed(trace_id) from exc
+    if code == "async_failed":
+        raise async_generation_failed(trace_id) from exc
     raise validation_failed(trace_id) from exc
 
 
@@ -252,6 +285,193 @@ async def api_185_get_invocation_log(
         _map_read_error(trace_id, exc)
     await db.commit()
     return {"data": payload}
+
+
+@router.post("/ai/generations", status_code=202)
+async def api_180_create_generation(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_json_model(raw, trace_id, GenerationCreateRequest)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload, accepted_new = await create_generation_for_caller(
+            db,
+            ctx,
+            body=GenerationCreateInput(
+                project_id=body.project_id,
+                source_type=body.source_type,
+                import_source_id=body.import_source_id,
+                inline_content=body.inline_content,
+                case_type_policy=body.case_type_policy,
+            ),
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_command_error(trace_id, exc)
+    if accepted_new:
+        generation_id = uuid.UUID(str(payload["data"]["generation_id"]))
+        background_tasks.add_task(
+            run_generation_background,
+            organization_id=ctx.organization.id,
+            user_id=ctx.user.id,
+            generation_id=generation_id,
+            source_type=body.source_type,
+        )
+    await db.commit()
+    return payload
+
+
+@router.get("/ai/generations/{generation_id}")
+async def api_181_get_generation(
+    request: Request,
+    generation_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_generation_for_caller(db, ctx, generation_id=generation_id)
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.get("/ai/generations/{generation_id}/drafts")
+async def api_182_get_generation_drafts(
+    request: Request,
+    generation_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_generation_drafts_for_caller(db, ctx, generation_id=generation_id)
+    except ValueError as exc:
+        await db.commit()
+        _map_command_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+async def _generation_sse_events(
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    generation_id: uuid.UUID,
+) -> Any:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from app.core.db import get_session_factory
+    from app.modules.identity_tenancy import query_port as identity_query
+
+    factory = get_session_factory()
+    sent_terminal = False
+    for _ in range(40):
+        async with factory() as session:
+            row = await repo.get_a1_generation(
+                session,
+                organization_id=organization_id,
+                generation_id=generation_id,
+            )
+            if row is None:
+                break
+            role = await identity_query.get_project_membership_role(
+                session,
+                organization_id=organization_id,
+                project_id=row.project_id,
+                user_id=user_id,
+            )
+            if role is None:
+                break
+            now = datetime.now(UTC).isoformat()
+            if row.status in {"accepted", "running"}:
+                event_type = "progress"
+                data = {
+                    "id": str(uuid.uuid4()),
+                    "type": event_type,
+                    "occurred_at": now,
+                    "resource_type": "generation",
+                    "resource_id": str(generation_id),
+                    "progress_percent": 50 if row.status == "running" else 10,
+                    "hint": "processing",
+                }
+                yield {"event": event_type, "data": json.dumps(data)}
+                await asyncio.sleep(0.05)
+                continue
+            event_type = "degraded" if row.degraded else "progress"
+            data = {
+                "id": str(uuid.uuid4()),
+                "type": event_type,
+                "occurred_at": now,
+                "resource_type": "generation",
+                "resource_id": str(generation_id),
+                "progress_percent": 100,
+            }
+            yield {"event": event_type, "data": json.dumps(data)}
+            sent_terminal = True
+            break
+    if not sent_terminal:
+        now = datetime.now(UTC).isoformat()
+        yield {
+            "event": "heartbeat",
+            "data": json.dumps(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "heartbeat",
+                    "occurred_at": now,
+                    "resource_type": "generation",
+                    "resource_id": str(generation_id),
+                }
+            ),
+        }
+
+
+@router.get("/ai/generations/{generation_id}/events")
+async def api_211_generation_events(
+    request: Request,
+    generation_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> EventSourceResponse:
+    from app.modules.identity_tenancy import query_port as identity_query
+
+    trace_id = get_trace_id(request)
+    row = await repo.get_a1_generation(
+        db,
+        organization_id=ctx.organization.id,
+        generation_id=generation_id,
+    )
+    if row is None:
+        raise not_found(trace_id)
+    role = await identity_query.get_project_membership_role(
+        db,
+        organization_id=ctx.organization.id,
+        project_id=row.project_id,
+        user_id=ctx.user.id,
+    )
+    if role is None:
+        raise not_found(trace_id)
+    await db.commit()
+    return EventSourceResponse(
+        _generation_sse_events(
+            organization_id=ctx.organization.id,
+            user_id=ctx.user.id,
+            generation_id=generation_id,
+        )
+    )
 
 
 @router.get("/ai/cost-dashboard")

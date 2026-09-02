@@ -97,3 +97,28 @@ class CommandIdempotencyRecord(Base):
     response_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
+class A1Generation(Base):
+    __tablename__ = "a1_generations"
+    __table_args__ = (
+        Index("ix_a1_generations_org_project_status", "organization_id", "project_id", "status"),
+        {"schema": "ai_governance"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    import_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    inline_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    drafts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    failed_items: Mapped[list[dict[str, str]] | None] = mapped_column(JSONB, nullable=True)
+    degraded: Mapped[bool] = mapped_column(nullable=False, default=False)
+    invocation_log_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

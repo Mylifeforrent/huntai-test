@@ -133,7 +133,7 @@ async def seed_default_model_routes(
 ) -> list[ModelRoute]:
     now = datetime.now(UTC)
     routes: list[ModelRoute] = []
-    for classification in ("Internal", "Restricted"):
+    for classification in ("Internal", "Confidential", "Restricted"):
         existing = await repo.get_model_route_by_task(
             session,
             organization_id=organization_id,

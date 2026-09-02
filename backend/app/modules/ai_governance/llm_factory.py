@@ -31,6 +31,7 @@ class InvokeInput:
     skill_version_id: uuid.UUID | None = None
     capability_id: str | None = None
     module: str | None = None
+    usage_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,9 @@ async def invoke(session: AsyncSession, request: InvokeInput) -> InvokeOutput:
     # M0 stub: no vendor calls; degraded with zero usage.
     latency_ms = int((time.perf_counter() - started) * 1000)
     model_name = _resolve_model_name(route)
+    usage: dict[str, Any] = dict(ZERO_USAGE)
+    if request.usage_metadata:
+        usage.update(request.usage_metadata)
     await repo.insert_invocation_log(
         session,
         log_id=log_id,
@@ -189,7 +193,7 @@ async def invoke(session: AsyncSession, request: InvokeInput) -> InvokeOutput:
         user_id=request.user_id,
         model=model_name,
         prompt_version=request.prompt_version,
-        usage=dict(ZERO_USAGE),
+        usage=usage,
         cost=Decimal("0"),
         latency_ms=latency_ms,
         data_classification=classification,
@@ -203,7 +207,7 @@ async def invoke(session: AsyncSession, request: InvokeInput) -> InvokeOutput:
         log_id=log_id,
         result="degraded",
         model=model_name,
-        usage=dict(ZERO_USAGE),
+        usage=usage,
         cost=Decimal("0"),
         latency_ms=latency_ms,
         data_classification=classification,

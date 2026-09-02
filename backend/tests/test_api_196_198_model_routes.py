@@ -360,14 +360,14 @@ async def test_llm_factory_missing_classification_fail_close_confidential(
     )
     await db_session.commit()
     assert output.data_classification == "Confidential"
-    assert output.result == "refused"
+    assert output.result == "degraded"
 
     result = await db_session.execute(
         select(AIInvocationLog).where(AIInvocationLog.id == output.log_id)
     )
     row = result.scalar_one()
     assert row.data_classification == "Confidential"
-    assert row.result == "refused"
+    assert row.result == "degraded"
 
 
 @pytest.mark.asyncio

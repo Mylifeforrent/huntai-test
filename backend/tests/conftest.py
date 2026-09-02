@@ -97,6 +97,11 @@ def _run_migrations() -> Generator[None]:
 async def _truncate_tables() -> AsyncGenerator[None]:
     engine = get_engine()
     tables = [
+        "ai_governance.a1_generations",
+        "test_assets.test_case_versions",
+        "test_assets.test_cases",
+        "test_assets.import_sources",
+        "test_assets.command_idempotency_records",
         "integration_hub.command_idempotency_records",
         "integration_hub.inbox_events",
         "integration_hub.external_observations",

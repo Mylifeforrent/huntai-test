@@ -216,6 +216,39 @@ def validation_failed(trace_id: str, message: str = "Validation failed") -> AppE
     )
 
 
+def file_validation_failed(trace_id: str, message: str = "File validation failed") -> AppError:
+    return AppError(
+        status_code=400,
+        code="HT-VAL-003",
+        error_class="business",
+        subclass="validation",
+        message=message,
+        retryable=False,
+    )
+
+
+def schema_validation_failed(trace_id: str, message: str = "Schema validation failed") -> AppError:
+    return AppError(
+        status_code=400,
+        code="HT-VAL-004",
+        error_class="business",
+        subclass="validation",
+        message=message,
+        retryable=False,
+    )
+
+
+def async_generation_failed(trace_id: str, message: str = "Generation failed") -> AppError:
+    return AppError(
+        status_code=422,
+        code="HT-ASYNC-002",
+        error_class="business",
+        subclass="async_partial",
+        message=message,
+        retryable=False,
+    )
+
+
 def precondition_failed(trace_id: str, message: str = "Precondition failed") -> AppError:
     return AppError(
         status_code=409,
