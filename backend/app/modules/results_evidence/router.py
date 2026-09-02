@@ -5,11 +5,16 @@ from typing import Annotated, Any, NoReturn
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_session
+from app.api.deps import SessionOrToken, require_session, require_session_or_token_read
 from app.core.db import get_db_session
 from app.core.errors import forbidden, not_found, validation_failed
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext
+from app.modules.results_evidence.case_results_service import (
+    get_case_result_for_caller,
+    list_case_results_for_caller,
+    list_step_runs_for_caller,
+)
 from app.modules.results_evidence.service import (
     get_audit_event_for_caller,
     list_audit_events_for_caller,
@@ -110,3 +115,74 @@ async def api_025_get_audit_event(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": payload}
+
+
+@router.get("/test-runs/{test_run_id}/case-results")
+async def api_064_list_case_results(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    auth: Annotated[SessionOrToken, Depends(require_session_or_token_read)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+    outcome: Annotated[str | None, Query()] = None,
+    is_late: Annotated[bool | None, Query()] = None,
+    is_partial: Annotated[bool | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_case_results_for_caller(
+            db,
+            auth,
+            test_run_id=test_run_id,
+            outcome=outcome,
+            is_late=is_late,
+            is_partial=is_partial,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/case-results/{case_result_id}")
+async def api_065_get_case_result(
+    request: Request,
+    case_result_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    auth: Annotated[SessionOrToken, Depends(require_session_or_token_read)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_case_result_for_caller(
+            db,
+            auth,
+            case_result_id=case_result_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.get("/case-results/{case_result_id}/step-runs")
+async def api_066_list_step_runs(
+    request: Request,
+    case_result_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_step_runs_for_caller(
+            db,
+            ctx,
+            case_result_id=case_result_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}

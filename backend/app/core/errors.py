@@ -161,6 +161,17 @@ def token_revoked(trace_id: str, message: str = "ApiToken expired or revoked") -
     )
 
 
+def token_project_forbidden(trace_id: str, message: str = "Token project not allowed") -> AppError:
+    return AppError(
+        status_code=403,
+        code="HT-IAM-005",
+        error_class="permission",
+        subclass="forbidden",
+        message=message,
+        retryable=False,
+    )
+
+
 def state_consumed(trace_id: str, message: str = "Request already consumed") -> AppError:
     return AppError(
         status_code=409,

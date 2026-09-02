@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.run_orchestration.models import CommandIdempotencyRecord, TestRun
+from app.modules.run_orchestration.models import CommandIdempotencyRecord, CommandReceipt, TestRun
 
 WAITING_STATUSES = frozenset({"WAITING_APPROVAL", "WAITING_EXTERNAL"})
 ACTIVE_RECLAIM_STATUSES = frozenset({"RUNNING", "STOPPING"})
@@ -275,9 +275,87 @@ async def reclaim_stale_active_runs(
     result = await session.execute(query)
     rows = list(result.scalars().all())
     for run in rows:
-        run.status = "TIMEOUT"
-        run.updated_at = now
-        run.aggregate_version += 1
+        if run.stop_signal_at is not None and run.status == "RUNNING":
+            run.status = "STOPPING"
+            run.updated_at = now
+            run.aggregate_version += 1
+        elif run.status == "STOPPING":
+            run.status = "CANCELLED"
+            run.updated_at = now
+            run.aggregate_version += 1
+        else:
+            run.status = "TIMEOUT"
+            run.updated_at = now
+            run.aggregate_version += 1
     if rows:
         await session.flush()
     return len(rows)
+
+
+async def create_command_receipt(
+    session: AsyncSession,
+    *,
+    receipt_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    command_type: str,
+    status: str,
+    accepted_at: datetime,
+    resource_type: str,
+    resource_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> CommandReceipt:
+    row = CommandReceipt(
+        id=receipt_id,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        command_type=command_type,
+        status=status,
+        accepted_at=accepted_at,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        project_id=project_id,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_command_receipt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+) -> CommandReceipt | None:
+    result = await session.execute(
+        select(CommandReceipt).where(
+            CommandReceipt.organization_id == organization_id,
+            CommandReceipt.id == receipt_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def update_test_run_status(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    new_status: str,
+    updated_at: datetime,
+    result_summary: dict[str, Any] | None = None,
+    snapshot: dict[str, Any] | None = None,
+    heartbeat: bool = False,
+) -> TestRun:
+    run.status = new_status
+    run.updated_at = updated_at
+    run.aggregate_version += 1
+    if result_summary is not None:
+        run.result_summary = result_summary
+    if snapshot is not None:
+        run.snapshot = snapshot
+    if heartbeat:
+        run.last_heartbeat_at = updated_at
+    await session.flush()
+    return run

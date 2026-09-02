@@ -47,6 +47,25 @@ class TestRun(Base):
     result_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
+class CommandReceipt(Base):
+    __tablename__ = "command_receipts"
+    __table_args__ = (
+        Index("ix_command_receipts_org_resource", "organization_id", "resource_id"),
+        {"schema": "run_orchestration"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    command_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resource_type: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+
 class CommandIdempotencyRecord(Base):
     __tablename__ = "command_idempotency_records"
     __table_args__ = (

@@ -28,4 +28,45 @@ async def get_environment_for_start(
         "env_type": env.env_type,
         "scope_level": env.scope_level,
         "project_id": env.project_id,
+        "name": env.name,
+        "health_status": env.health_status,
+        "capacity": env.capacity,
+        "credential_present": bool(env.credential_ref and env.credential_ref.strip()),
     }
+
+
+async def list_environments_for_execution_options(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    rows = await repo.list_environments(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+        limit=200,
+    )
+    items: list[dict[str, Any]] = []
+    for env in rows:
+        selectable = env.status == "ACTIVE"
+        unavailable_reason: str | None = None
+        if env.status != "ACTIVE":
+            unavailable_reason = "not_active"
+        elif env.status == "DEGRADED":
+            unavailable_reason = "degraded"
+        items.append(
+            {
+                "id": env.id,
+                "name": env.name,
+                "env_type": env.env_type,
+                "status": env.status,
+                "selectable": selectable,
+                "unavailable_reason": unavailable_reason,
+                "health_status": env.health_status,
+                "capacity": env.capacity,
+                "credential_present": bool(env.credential_ref and env.credential_ref.strip()),
+                "version": env.aggregate_version,
+            }
+        )
+    return items

@@ -761,17 +761,47 @@ async def authenticate_api_token(
     organization_id: uuid.UUID,
     raw_token: str,
 ) -> ApiToken | None:
+    prefix = _token_prefix(raw_token)
+    if prefix is None:
+        return None
+    return await _verify_token_candidates(
+        await repo.list_api_tokens_by_prefix(
+            session,
+            organization_id=organization_id,
+            token_prefix=prefix,
+        ),
+        raw_token=raw_token,
+    )
+
+
+async def authenticate_api_token_by_prefix(
+    session: AsyncSession,
+    *,
+    raw_token: str,
+) -> ApiToken | None:
+    prefix = _token_prefix(raw_token)
+    if prefix is None:
+        return None
+    return await _verify_token_candidates(
+        await repo.list_api_tokens_by_prefix_global(session, token_prefix=prefix),
+        raw_token=raw_token,
+    )
+
+
+def _token_prefix(raw_token: str) -> str | None:
     if not raw_token.startswith(TOKEN_PREFIX_LITERAL):
         return None
     if len(raw_token) < TOKEN_PREFIX_DISPLAY_LEN:
         return None
-    prefix = raw_token[:TOKEN_PREFIX_DISPLAY_LEN]
+    return raw_token[:TOKEN_PREFIX_DISPLAY_LEN]
+
+
+async def _verify_token_candidates(
+    candidates: list[ApiToken],
+    *,
+    raw_token: str,
+) -> ApiToken | None:
     now = datetime.now(UTC)
-    candidates = await repo.list_api_tokens_by_prefix(
-        session,
-        organization_id=organization_id,
-        token_prefix=prefix,
-    )
     for token in candidates:
         if token.revoked_at is not None:
             continue

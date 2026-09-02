@@ -58,3 +58,93 @@ async def get_import_source_metadata(
         "data_classification": row.data_classification,
         "created_at": row.created_at,
     }
+
+
+async def get_cases_for_run_validation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    case_ids: list[uuid.UUID],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for case_id in case_ids:
+        case = await repo.get_test_case(
+            session,
+            organization_id=organization_id,
+            test_case_id=case_id,
+        )
+        if case is None or case.project_id != project_id:
+            continue
+        version = None
+        if case.current_version_id is not None:
+            version = await repo.get_test_case_version(
+                session,
+                organization_id=organization_id,
+                version_id=case.current_version_id,
+            )
+        snapshot = version.snapshot if version is not None else {}
+        rows.append(
+            {
+                "id": case.id,
+                "title": case.title,
+                "lifecycle_status": case.lifecycle_status,
+                "validity": case.validity,
+                "execution_mode": case.execution_mode,
+                "job_binding": case.job_binding,
+                "version_id": case.current_version_id,
+                "steps": snapshot.get("steps", []),
+                "assertions": snapshot.get("assertions", []),
+            }
+        )
+    return rows
+
+
+async def list_cases_for_execution_options(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    execution_source: str | None = None,
+) -> list[dict[str, Any]]:
+    cases = await repo.list_test_cases(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+        limit=500,
+    )
+    items: list[dict[str, Any]] = []
+    for case in cases:
+        selectable = (
+            case.lifecycle_status == "ACTIVE"
+            and case.validity == "valid"
+            and (
+                execution_source is None
+                or (execution_source == "agent" and case.execution_mode == "agent")
+                or (
+                    execution_source in {"script", "external_ci"}
+                    and case.execution_mode == "script"
+                )
+            )
+        )
+        unavailable_reason: str | None = None
+        if case.lifecycle_status != "ACTIVE":
+            unavailable_reason = "not_active"
+        elif case.validity != "valid":
+            unavailable_reason = "invalid"
+        elif (execution_source == "agent" and case.execution_mode != "agent") or (
+            execution_source in {"script", "external_ci"} and case.execution_mode != "script"
+        ):
+            unavailable_reason = "mode_mismatch"
+        items.append(
+            {
+                "id": case.id,
+                "title": case.title,
+                "lifecycle_status": case.lifecycle_status,
+                "validity": case.validity,
+                "execution_mode": case.execution_mode,
+                "selectable": selectable,
+                "unavailable_reason": unavailable_reason,
+            }
+        )
+    return items

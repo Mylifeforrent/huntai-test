@@ -42,6 +42,17 @@ class Settings(BaseSettings):
 
     github_webhook_secret: str
 
+    test_run_heartbeat_timeout_seconds: int | None = None
+
+    @field_validator("test_run_heartbeat_timeout_seconds", mode="before")
+    @classmethod
+    def validate_heartbeat_timeout(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
+
     @field_validator("session_cookie_samesite", mode="before")
     @classmethod
     def validate_samesite(cls, value: object) -> object:

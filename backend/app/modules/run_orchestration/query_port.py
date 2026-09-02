@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,12 @@ from app.modules.run_orchestration.models import TestRun
 
 WAITING_STATUSES = frozenset({"WAITING_APPROVAL", "WAITING_EXTERNAL"})
 DEFAULT_LIST_LIMIT = 50
+
+
+class RunScope(TypedDict):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str
 
 
 def _iso(dt: datetime) -> str:
@@ -44,6 +50,22 @@ def _serialize_workbench_run(run: TestRun, *, now: datetime) -> dict[str, Any]:
     if run.last_heartbeat_at is not None and run.status not in WAITING_STATUSES:
         payload["last_heartbeat_at"] = _iso(run.last_heartbeat_at)
     return payload
+
+
+async def get_run_scope(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> RunScope | None:
+    run = await repo.get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    if run is None:
+        return None
+    return {"id": run.id, "project_id": run.project_id, "status": run.status}
 
 
 async def list_workbench_active_runs(

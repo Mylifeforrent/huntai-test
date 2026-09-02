@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -198,16 +199,20 @@ async def test_api_062_happy_start_pending(
     assert isinstance(project_id, uuid.UUID)
     env = await _activate_environment(client, db_session, seeded_identity)
     case_id = str(uuid.uuid4())
-    response = await client.post(
-        "/api/v1/test-runs",
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-        json=_start_body(
-            project_id=project_id,
-            env_id=env["id"],
-            case_ids=[case_id],
-            expected_env_version=env["version"],
-        ),
-    )
+    with patch(
+        "app.modules.run_orchestration.router.run_test_run_background",
+        new_callable=AsyncMock,
+    ):
+        response = await client.post(
+            "/api/v1/test-runs",
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+            json=_start_body(
+                project_id=project_id,
+                env_id=env["id"],
+                case_ids=[case_id],
+                expected_env_version=env["version"],
+            ),
+        )
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["status"] == "PENDING"
@@ -263,11 +268,15 @@ async def test_api_063_cancel_pending_and_replay(
     project_id = seeded_identity["project_id"]
     assert isinstance(project_id, uuid.UUID)
     env = await _activate_environment(client, db_session, seeded_identity)
-    start = await client.post(
-        "/api/v1/test-runs",
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-        json=_start_body(project_id=project_id, env_id=env["id"]),
-    )
+    with patch(
+        "app.modules.run_orchestration.router.run_test_run_background",
+        new_callable=AsyncMock,
+    ):
+        start = await client.post(
+            "/api/v1/test-runs",
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+            json=_start_body(project_id=project_id, env_id=env["id"]),
+        )
     run_id = start.json()["data"]["id"]
     version = start.json()["data"]["version"]
     key = str(uuid.uuid4())

@@ -372,6 +372,15 @@ async def list_api_tokens_by_prefix(
     return list(result.scalars().all())
 
 
+async def list_api_tokens_by_prefix_global(
+    session: AsyncSession,
+    *,
+    token_prefix: str,
+) -> list[ApiToken]:
+    result = await session.execute(select(ApiToken).where(ApiToken.token_prefix == token_prefix))
+    return list(result.scalars().all())
+
+
 async def list_api_tokens(
     session: AsyncSession,
     *,

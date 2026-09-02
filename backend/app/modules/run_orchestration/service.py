@@ -4,12 +4,14 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import SessionOrToken
 from app.modules.execution_registry import query_port as execution_query
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.run_orchestration import repository as repo
 from app.modules.run_orchestration.models import TestRun
+from app.modules.test_assets import query_port as test_assets_query
 
 COMMAND_TYPE_START = "test_run.start_session"
 COMMAND_TYPE_CANCEL = "test_run.cancel"
@@ -105,17 +107,22 @@ def serialize_detail(run: TestRun, *, now: datetime | None = None) -> dict[str, 
     return payload
 
 
-def serialize_start_response(run: TestRun, *, now: datetime | None = None) -> dict[str, Any]:
+def serialize_start_response(
+    run: TestRun, *, receipt_id: uuid.UUID, now: datetime | None = None
+) -> dict[str, Any]:
     now = now or datetime.now(UTC)
     payload = serialize_detail(run, now=now)
-    receipt_id = str(uuid.uuid4())
     payload["receipt"] = {
-        "id": receipt_id,
+        "id": str(receipt_id),
         "command_type": COMMAND_TYPE_START,
         "status": "accepted",
         "accepted_at": _iso(now),
         "resource_type": "TestRun",
         "resource_id": str(run.id),
+    }
+    payload["poll"] = {
+        "path": f"/api/v1/command-receipts/{receipt_id}",
+        "sse_path": f"/api/v1/test-runs/{run.id}/events",
     }
     return payload
 
@@ -213,9 +220,9 @@ async def _get_visible_test_run(
     return run
 
 
-async def list_test_runs_for_caller(
+async def list_test_runs_for_auth(
     session: AsyncSession,
-    ctx: SessionContext,
+    auth: SessionOrToken,
     *,
     project_id: uuid.UUID | None,
     status: str | None,
@@ -230,7 +237,14 @@ async def list_test_runs_for_caller(
 ) -> dict[str, Any]:
     if project_id is None:
         raise ValueError("validation")
-    await _require_project_read(session, ctx, project_id=project_id)
+    if auth.token is not None:
+        if project_id not in list(auth.token.project_ids):
+            raise ValueError("token_project")
+        org_id = auth.organization_id
+    else:
+        assert auth.session is not None
+        await _require_project_read(session, auth.session, project_id=project_id)
+        org_id = auth.session.organization.id
 
     if status is not None and status not in VALID_STATUSES:
         raise ValueError("validation")
@@ -259,7 +273,7 @@ async def list_test_runs_for_caller(
     now = datetime.now(UTC)
     rows = await repo.list_test_runs(
         session,
-        organization_id=ctx.organization.id,
+        organization_id=org_id,
         project_id=project_id,
         status=status,
         execution_source=execution_source,
@@ -289,6 +303,68 @@ async def list_test_runs_for_caller(
     }
 
 
+async def list_test_runs_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID | None,
+    status: str | None,
+    execution_source: str | None,
+    trigger_type: str | None,
+    plan_id: uuid.UUID | None,
+    env_id: uuid.UUID | None,
+    include_waiting: bool,
+    sort: str | None,
+    cursor: str | None,
+    limit: int | None,
+) -> dict[str, Any]:
+    auth = SessionOrToken(session=ctx, token=None)
+    return await list_test_runs_for_auth(
+        session,
+        auth,
+        project_id=project_id,
+        status=status,
+        execution_source=execution_source,
+        trigger_type=trigger_type,
+        plan_id=plan_id,
+        env_id=env_id,
+        include_waiting=include_waiting,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+async def get_test_run_for_auth(
+    session: AsyncSession,
+    auth: SessionOrToken,
+    *,
+    test_run_id: uuid.UUID,
+) -> dict[str, Any]:
+    run = await repo.get_test_run(
+        session,
+        organization_id=auth.organization_id,
+        test_run_id=test_run_id,
+    )
+    if run is None:
+        raise ValueError("not_found")
+    if auth.token is not None:
+        allowed = list(auth.token.project_ids)
+        if run.project_id not in allowed:
+            raise ValueError("not_found")
+    else:
+        assert auth.session is not None
+        role = await identity_query.get_project_membership_role(
+            session,
+            organization_id=auth.organization_id,
+            project_id=run.project_id,
+            user_id=auth.session.user.id,
+        )
+        if role is None or role not in READ_ROLES:
+            raise ValueError("not_found")
+    return serialize_detail(run)
+
+
 async def get_test_run_for_caller(
     session: AsyncSession,
     ctx: SessionContext,
@@ -299,6 +375,34 @@ async def get_test_run_for_caller(
     return serialize_detail(run)
 
 
+async def start_test_run_api_token(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    token_project_ids: list[uuid.UUID],
+    body: dict[str, Any],
+    idempotency_key: str,
+    request_hash: str,
+) -> tuple[dict[str, Any], bool]:
+    project_id = uuid.UUID(str(body["project_id"]))
+    if project_id not in token_project_ids:
+        raise ValueError("token_project")
+    if body.get("trigger_type") not in (None, "api_token"):
+        raise ValueError("validation")
+    body_payload = dict(body)
+    body_payload["trigger_type"] = "api_token"
+    return await _start_test_run_core(
+        session,
+        organization_id=organization_id,
+        user_id=user_id,
+        body=body_payload,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        enforce_execute_role=False,
+    )
+
+
 async def start_test_run_session(
     session: AsyncSession,
     ctx: SessionContext,
@@ -306,8 +410,32 @@ async def start_test_run_session(
     body: dict[str, Any],
     idempotency_key: str,
     request_hash: str,
-) -> dict[str, Any]:
-    org_id = ctx.organization.id
+) -> tuple[dict[str, Any], bool]:
+    project_id = uuid.UUID(str(body["project_id"]))
+    await _require_project_execute(session, ctx, project_id=project_id)
+    return await _start_test_run_core(
+        session,
+        organization_id=ctx.organization.id,
+        user_id=ctx.user.id,
+        body=body,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        enforce_execute_role=True,
+    )
+
+
+async def _start_test_run_core(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    body: dict[str, Any],
+    idempotency_key: str,
+    request_hash: str,
+    enforce_execute_role: bool,
+) -> tuple[dict[str, Any], bool]:
+    _ = enforce_execute_role
+    org_id = organization_id
     now = datetime.now(UTC)
 
     existing = await repo.get_idempotency_record(
@@ -320,22 +448,25 @@ async def start_test_run_session(
         if existing.request_hash != request_hash:
             raise ValueError("idempotency_conflict")
         if existing.response_ref is not None:
-            return existing.response_ref
+            return existing.response_ref, False
 
     project_id = uuid.UUID(str(body["project_id"]))
     env_id = uuid.UUID(str(body["env_id"]))
     execution_source = str(body["execution_source"])
     case_ids_raw = body["case_ids"]
-    trigger_type = str(body.get("trigger_type", "manual"))
+    trigger_type_raw = body.get("trigger_type")
+    trigger_type = "manual" if trigger_type_raw is None else str(trigger_type_raw)
     plan_id_raw = body.get("plan_id")
     params = body.get("params")
     expected_env_version = body.get("expected_env_version")
 
-    await _require_project_execute(session, ctx, project_id=project_id)
-
     if execution_source not in VALID_EXECUTION_SOURCES:
         raise ValueError("validation")
-    if trigger_type not in VALID_START_TRIGGER_TYPES:
+    if trigger_type == "api_token":
+        valid_triggers = frozenset({"api_token"})
+    else:
+        valid_triggers = VALID_START_TRIGGER_TYPES
+    if trigger_type not in valid_triggers:
         raise ValueError("validation")
     if not isinstance(case_ids_raw, list) or len(case_ids_raw) == 0:
         raise ValueError("validation")
@@ -378,12 +509,21 @@ async def start_test_run_session(
     }
     if execution_source == "agent":
         snapshot["skips_quality_gate"] = True
+    cases = await test_assets_query.get_cases_for_run_validation(
+        session,
+        organization_id=org_id,
+        project_id=project_id,
+        case_ids=case_ids,
+    )
+    snapshot["case_version_ids"] = [
+        str(case["version_id"]) for case in cases if case.get("version_id") is not None
+    ]
 
     run = await repo.create_test_run(
         session,
         organization_id=org_id,
         created_at=now,
-        created_by=ctx.user.id,
+        created_by=user_id,
         project_id=project_id,
         plan_id=plan_id,
         env_id=env_id,
@@ -394,11 +534,13 @@ async def start_test_run_session(
         snapshot=snapshot,
     )
 
+    receipt_id = uuid.uuid4()
+
     await append_audit_event(
         session,
         AuditAppendInput(
             organization_id=org_id,
-            actor_user_id=ctx.user.id,
+            actor_user_id=user_id,
             action="test_run.start_session",
             resource_type="TestRun",
             resource_id=run.id,
@@ -408,7 +550,20 @@ async def start_test_run_session(
         ),
     )
 
-    response = serialize_start_response(run, now=now)
+    response = serialize_start_response(run, receipt_id=receipt_id, now=now)
+    await repo.create_command_receipt(
+        session,
+        receipt_id=receipt_id,
+        organization_id=org_id,
+        created_at=now,
+        created_by=user_id,
+        command_type=COMMAND_TYPE_START,
+        status="accepted",
+        accepted_at=now,
+        resource_type="TestRun",
+        resource_id=run.id,
+        project_id=project_id,
+    )
     await repo.create_idempotency_record(
         session,
         organization_id=org_id,
@@ -416,10 +571,10 @@ async def start_test_run_session(
         idempotency_key=idempotency_key,
         request_hash=request_hash,
         response_ref=response,
-        created_by=ctx.user.id,
+        created_by=user_id,
         created_at=now,
     )
-    return response
+    return response, True
 
 
 def _build_cancel_receipt(
@@ -519,6 +674,19 @@ async def cancel_test_run(
     )
 
     receipt = _build_cancel_receipt(receipt_id=receipt_id, run=run, accepted_at=now)
+    await repo.create_command_receipt(
+        session,
+        receipt_id=receipt_id,
+        organization_id=org_id,
+        created_at=now,
+        created_by=ctx.user.id,
+        command_type=COMMAND_TYPE_CANCEL,
+        status="accepted",
+        accepted_at=now,
+        resource_type="TestRun",
+        resource_id=run.id,
+        project_id=run.project_id,
+    )
     data = {
         "receipt": receipt,
         "test_run": serialize_detail(run, now=now),
@@ -544,9 +712,108 @@ async def reclaim_stale_active_runs(
     heartbeat_timeout_seconds: int,
     organization_id: uuid.UUID | None = None,
 ) -> int:
-    return await repo.reclaim_stale_active_runs(
+    from app.modules.run_orchestration.executor import complete_stopping_runs
+
+    stopped = await complete_stopping_runs(session, organization_id=organization_id, now=now)
+    reclaimed = await repo.reclaim_stale_active_runs(
         session,
         organization_id=organization_id,
         now=now,
         heartbeat_timeout_seconds=heartbeat_timeout_seconds,
     )
+    return stopped + reclaimed
+
+
+async def get_execution_options_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    execution_source: str | None,
+    plan_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    _ = plan_id
+    await _require_project_read(session, ctx, project_id=project_id)
+    if execution_source is not None and execution_source not in VALID_EXECUTION_SOURCES:
+        raise ValueError("validation")
+    environments = await execution_query.list_environments_for_execution_options(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+    )
+    cases = await test_assets_query.list_cases_for_execution_options(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        execution_source=execution_source,
+    )
+    agent_times_external_ci_allowed = False
+    return {
+        "project_id": str(project_id),
+        "environments": [
+            {
+                "id": str(item["id"]),
+                "name": item["name"],
+                "env_type": item["env_type"],
+                "status": item["status"],
+                "selectable": item["selectable"],
+                "unavailable_reason": item["unavailable_reason"],
+                "health_status": item["health_status"],
+                "capacity": item["capacity"],
+                "credential_present": item["credential_present"],
+                "version": item["version"],
+            }
+            for item in environments
+        ],
+        "cases": [
+            {
+                "id": str(item["id"]),
+                "title": item["title"],
+                "lifecycle_status": item["lifecycle_status"],
+                "validity": item["validity"],
+                "execution_mode": item["execution_mode"],
+                "selectable": item["selectable"],
+                "unavailable_reason": item["unavailable_reason"],
+            }
+            for item in cases
+        ],
+        "combo_constraints": {"agent_times_external_ci_allowed": agent_times_external_ci_allowed},
+    }
+
+
+async def get_command_receipt_for_caller(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+) -> dict[str, Any]:
+    receipt = await repo.get_command_receipt(
+        session,
+        organization_id=organization_id,
+        receipt_id=receipt_id,
+    )
+    if receipt is None:
+        raise ValueError("not_found")
+    role = await identity_query.get_project_membership_role(
+        session,
+        organization_id=organization_id,
+        project_id=receipt.project_id,
+        user_id=user_id,
+    )
+    if role is None:
+        raise ValueError("not_found")
+    if receipt.created_by != user_id and role not in {"owner", "admin"}:
+        raise ValueError("not_found")
+    return {
+        "id": str(receipt.id),
+        "command_type": receipt.command_type,
+        "status": receipt.status,
+        "accepted_at": _iso(receipt.accepted_at),
+        "resource_type": receipt.resource_type,
+        "resource_id": str(receipt.resource_id),
+        "poll": {
+            "path": f"/api/v1/command-receipts/{receipt.id}",
+            "sse_path": f"/api/v1/test-runs/{receipt.resource_id}/events",
+        },
+    }
