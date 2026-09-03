@@ -11,6 +11,7 @@ export const queryKeys = {
   generation: (id: string) => ["ai", "generations", id] as const,
   generationDrafts: (id: string) => ["ai", "generations", id, "drafts"] as const,
   testPlans: (params: Record<string, string>) => ["test-plans", params] as const,
+  testPlan: (id: string) => ["test-plans", id] as const,
   testRuns: (params: Record<string, string>) => ["test-runs", params] as const,
   testRun: (id: string) => ["test-runs", id] as const,
   caseResults: (runId: string) => ["test-runs", runId, "case-results"] as const,

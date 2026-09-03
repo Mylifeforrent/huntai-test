@@ -45,7 +45,14 @@ export const PAGE_APIS = {
     { id: "API-200", method: "POST", path: "/api/v1/test-cases/imports", summary: "Excel 导入" },
     { id: "API-202", method: "POST", path: "/api/v1/test-cases/exports", summary: "Excel 导出" },
   ],
-  P06: [{ id: "API-050", method: "GET", path: "/api/v1/test-plans", summary: "测试计划" }],
+  P06: [
+    { id: "API-050", method: "GET", path: "/api/v1/test-plans", summary: "测试计划列表" },
+    { id: "API-051", method: "GET", path: "/api/v1/test-plans/{test_plan_id}", summary: "计划详情" },
+    { id: "API-052", method: "POST", path: "/api/v1/test-plans", summary: "创建计划" },
+    { id: "API-053", method: "PATCH", path: "/api/v1/test-plans/{test_plan_id}", summary: "更新编排" },
+    { id: "API-054", method: "PUT", path: "/api/v1/test-plans/{test_plan_id}/case-ids", summary: "绑定用例集" },
+    { id: "API-055", method: "PUT", path: "/api/v1/test-plans/{test_plan_id}/schedule", summary: "定时绑定" },
+  ],
   P07: [
     { id: "API-180", method: "POST", path: "/api/v1/ai/generations", summary: "A1 生成受理" },
     { id: "API-181", method: "GET", path: "/api/v1/ai/generations/{generation_id}", summary: "生成状态" },

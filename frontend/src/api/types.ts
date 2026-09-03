@@ -737,3 +737,76 @@ export interface WebhookDeliveryItem {
   payload_ref?: string | null;
   accepted?: boolean;
 }
+
+/** API-030 test case list item. */
+export interface TestCaseListItem {
+  id: string;
+  project_id: string;
+  case_type: string;
+  execution_mode: string;
+  title: string;
+  priority: string;
+  tags: string[];
+  lifecycle_status: TestCaseLifecycle;
+  validity: TestCaseValidity;
+  version: number;
+  current_version_id?: string | null;
+  jira_story_key?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** API-051 report_aggregate projection. */
+export interface ReportAggregate {
+  last_run_id: string | null;
+  last_run_status: TestRunStatus | string | null;
+  pass_rate: number | null;
+  gate_result: GateResult | string | null;
+}
+
+/** API-050 TestPlanListItem. */
+export interface TestPlanListItem {
+  id: string;
+  project_id: string;
+  name: string;
+  jira_fix_version?: string | null;
+  case_count: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** API-051 schedule binding. */
+export interface TestPlanScheduleBinding {
+  enabled?: boolean;
+  schedule?: Record<string, unknown>;
+  env_id?: string;
+}
+
+/** API-051 TestPlanDetail. */
+export interface TestPlanDetail {
+  id: string;
+  project_id: string;
+  name: string;
+  jira_fix_version?: string | null;
+  case_ids: string[];
+  schedule: TestPlanScheduleBinding | null;
+  report_aggregate: ReportAggregate;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+}
+
+/** API-052–055 TestPlan write result. */
+export interface TestPlanWriteResult {
+  id: string;
+  project_id: string;
+  name: string;
+  jira_fix_version?: string | null;
+  version: number;
+  case_ids: string[];
+  enabled?: boolean;
+  schedule?: Record<string, unknown>;
+  env_id?: string;
+}
