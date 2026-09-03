@@ -99,7 +99,9 @@ export const PAGE_APIS = {
   P13: [
     { id: "API-031", method: "GET", path: "/api/v1/test-cases/{test_case_id}", summary: "用例详情" },
     { id: "API-037", method: "GET", path: "/api/v1/test-cases/{test_case_id}/versions", summary: "版本历史" },
+    { id: "API-038", method: "GET", path: "/api/v1/test-cases/{test_case_id}/versions/{version_id}", summary: "版本快照" },
     { id: "API-039", method: "POST", path: "/api/v1/test-cases/{test_case_id}/rollback", summary: "版本回滚" },
+    { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "heal_apply Preview" },
     { id: "API-220", method: "GET", path: "/api/v1/artifacts/{artifact_id}", summary: "制品元数据" },
     { id: "API-221", method: "GET", path: "/api/v1/artifacts/{artifact_id}/content", summary: "制品代理下载" },
   ],
