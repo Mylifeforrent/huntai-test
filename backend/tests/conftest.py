@@ -105,6 +105,8 @@ async def _truncate_tables() -> AsyncGenerator[None]:
         "test_assets.test_plans",
         "test_assets.test_cases",
         "test_assets.import_sources",
+        "quality_gates.command_idempotency_records",
+        "quality_gates.quality_gate_policies",
         "test_assets.command_idempotency_records",
         "integration_hub.command_idempotency_records",
         "integration_hub.inbox_events",
