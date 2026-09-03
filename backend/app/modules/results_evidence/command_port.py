@@ -43,6 +43,20 @@ class StepRunWrite:
     token_usage: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class ArtifactWrite:
+    test_run_id: uuid.UUID
+    kind: str
+    object_key: str
+    checksum: str
+    case_result_id: uuid.UUID | None = None
+    byte_size: int | None = None
+    mime_type: str | None = None
+    data_classification: str = "Confidential"
+    original_filename: str | None = None
+    artifact_id: uuid.UUID | None = None
+
+
 async def append_case_result(
     session: AsyncSession,
     *,
@@ -66,6 +80,33 @@ async def append_case_result(
         chunk_key=payload.chunk_key,
         normalized_summary=payload.normalized_summary,
         data_classification=payload.data_classification,
+    )
+    return row.id
+
+
+async def append_artifact(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_by: uuid.UUID | None,
+    created_at: datetime,
+    payload: ArtifactWrite,
+) -> uuid.UUID:
+    row = await repo.insert_artifact(
+        session,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        case_result_id=payload.case_result_id,
+        test_run_id=payload.test_run_id,
+        kind=payload.kind,
+        object_key=payload.object_key,
+        checksum=payload.checksum,
+        byte_size=payload.byte_size,
+        mime_type=payload.mime_type,
+        data_classification=payload.data_classification,
+        original_filename=payload.original_filename,
+        artifact_id=payload.artifact_id,
     )
     return row.id
 
@@ -403,8 +444,10 @@ async def schedule_failure_triage(
 
 
 __all__ = [
+    "ArtifactWrite",
     "CaseResultWrite",
     "StepRunWrite",
+    "append_artifact",
     "append_case_result",
     "append_step_run",
     "prepare_failure_triage",

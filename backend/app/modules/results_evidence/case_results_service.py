@@ -134,7 +134,12 @@ async def get_case_result_for_caller(
     await _require_run_read(session, auth, test_run_id=row.test_run_id)
     payload = serialize_case_result_list_item(row)
     payload["normalized_summary"] = row.normalized_summary
-    payload["artifact_ids"] = []
+    artifacts = await repo.list_artifacts_for_case_result(
+        session,
+        organization_id=auth.organization_id,
+        case_result_id=row.id,
+    )
+    payload["artifact_ids"] = [str(item.id) for item in artifacts]
     return payload
 
 

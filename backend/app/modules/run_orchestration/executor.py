@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import sys
+import tempfile
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -117,6 +122,65 @@ async def complete_stopping_run(
         )
 
 
+async def _invoke_playwright_worker(payload: dict[str, Any]) -> int:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as handle:
+        json.dump(payload, handle)
+        payload_path = handle.name
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "app.modules.run_orchestration.playwright_worker",
+            payload_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(Path(__file__).resolve().parents[3]),
+        )
+        await proc.communicate()
+        return int(proc.returncode or 0)
+    finally:
+        Path(payload_path).unlink(missing_ok=True)
+
+
+async def _execute_web_case(
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    case: dict[str, Any],
+    params_dict: dict[str, Any],
+    created_by: uuid.UUID | None,
+) -> str:
+    case_payload = dict(case)
+    case_payload["id"] = str(case["id"])
+    if case.get("version_id") is not None:
+        case_payload["version_id"] = str(case["version_id"])
+    payload = {
+        "organization_id": str(organization_id),
+        "test_run_id": str(test_run_id),
+        "created_by": str(created_by) if created_by else None,
+        "case": case_payload,
+        "params": params_dict,
+    }
+    exit_code = await _invoke_playwright_worker(payload)
+    if exit_code != 0:
+        return "failed"
+    factory = get_session_factory()
+    async with factory() as session:
+        from app.modules.results_evidence import repository as evidence_repo
+
+        results = await evidence_repo.list_case_results_for_run(
+            session,
+            organization_id=organization_id,
+            test_run_id=test_run_id,
+        )
+        case_id = uuid.UUID(str(case["id"]))
+        matched = [row for row in results if row.test_case_id == case_id]
+        await session.commit()
+    if not matched:
+        return "failed"
+    return matched[-1].outcome
+
+
 async def _execute_script_run(
     *,
     organization_id: uuid.UUID,
@@ -168,6 +232,74 @@ async def _execute_script_run(
 
             steps = case.get("steps", [])
             assertions = case.get("assertions", [])
+            case_type = str(case.get("case_type", "api"))
+            if case_type == "web":
+                outcome = await _execute_web_case(
+                    organization_id=organization_id,
+                    test_run_id=test_run_id,
+                    case=case,
+                    params_dict=params_dict,
+                    created_by=created_by,
+                )
+                if outcome != "passed":
+                    all_passed = False
+                async with factory() as session:
+                    run = await _load_run(
+                        session, organization_id=organization_id, test_run_id=test_run_id
+                    )
+                    now = datetime.now(UTC)
+                    if run is None:
+                        await session.commit()
+                        return
+                    if run.status == "STOPPING" or run.stop_signal_at is not None:
+                        await complete_stopping_run(session, run=run, now=now)
+                        await session.commit()
+                        return
+                    if run.status != "RUNNING":
+                        await session.commit()
+                        return
+                    await repo.update_test_run_status(
+                        session,
+                        run=run,
+                        new_status="RUNNING",
+                        updated_at=now,
+                        heartbeat=True,
+                    )
+                    await session.commit()
+                continue
+            if case_type not in {"api"}:
+                async with factory() as session:
+                    run = await _load_run(
+                        session, organization_id=organization_id, test_run_id=test_run_id
+                    )
+                    now = datetime.now(UTC)
+                    if run is not None and run.status == "RUNNING":
+                        version_raw = case.get("version_id")
+                        version_id = uuid.UUID(str(version_raw)) if version_raw else None
+                        await append_case_result(
+                            session,
+                            organization_id=organization_id,
+                            created_by=created_by,
+                            created_at=now,
+                            payload=CaseResultWrite(
+                                test_run_id=test_run_id,
+                                test_case_id=uuid.UUID(str(case["id"])),
+                                test_case_version_id=version_id,
+                                attempt_seq=1,
+                                outcome="incomplete",
+                                normalized_summary=_fail_summary("unsupported_case_type"),
+                            ),
+                        )
+                        all_passed = False
+                        await repo.update_test_run_status(
+                            session,
+                            run=run,
+                            new_status="RUNNING",
+                            updated_at=now,
+                            heartbeat=True,
+                        )
+                    await session.commit()
+                continue
             resolved_steps, resolved_assertions, errors = validate_and_resolve_snapshot(
                 params=params_dict,
                 steps=steps,

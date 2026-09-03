@@ -88,6 +88,7 @@ async def get_cases_for_run_validation(
             {
                 "id": case.id,
                 "title": case.title,
+                "case_type": case.case_type,
                 "lifecycle_status": case.lifecycle_status,
                 "validity": case.validity,
                 "execution_mode": case.execution_mode,

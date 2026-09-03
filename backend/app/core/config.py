@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     jenkins_api_token: str | None = None
 
     test_run_heartbeat_timeout_seconds: int | None = None
+    artifact_root: str
 
     @field_validator("test_run_heartbeat_timeout_seconds", mode="before")
     @classmethod

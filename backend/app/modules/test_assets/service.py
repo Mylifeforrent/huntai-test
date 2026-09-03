@@ -14,6 +14,7 @@ from app.modules.ai_governance.llm_factory import InvokeInput, invoke
 from app.modules.execution_registry import query_port as execution_query
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
+from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.run_orchestration import query_port as run_query
 from app.modules.test_assets import repository as repo
@@ -279,7 +280,13 @@ async def get_test_case_for_caller(
             organization_id=ctx.organization.id,
             version_id=row.current_version_id,
         )
-    return serialize_detail(row, version)
+    payload = serialize_detail(row, version)
+    payload["evidence_preview"] = await evidence_query.get_evidence_preview_for_test_case(
+        session,
+        organization_id=ctx.organization.id,
+        test_case_id=test_case_id,
+    )
+    return payload
 
 
 async def register_import_source_for_caller(

@@ -3,15 +3,28 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionOrToken, require_session, require_session_or_token_read
 from app.core.db import get_db_session
-from app.core.errors import forbidden, idempotency_conflict, not_found, validation_failed
+from app.core.errors import (
+    file_validation_failed,
+    forbidden,
+    idempotency_conflict,
+    not_found,
+    policy_deny,
+    precondition_failed,
+    validation_failed,
+)
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
 from app.modules.results_evidence import repository as repo
+from app.modules.results_evidence.artifacts_service import (
+    get_artifact_metadata_for_caller,
+    read_artifact_content_for_caller,
+)
 from app.modules.results_evidence.case_results_service import (
     get_case_result_for_caller,
     list_case_results_for_caller,
@@ -157,6 +170,62 @@ async def api_025_get_audit_event(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": payload}
+
+
+def _map_artifact_error(trace_id: str, exc: ValueError) -> NoReturn:
+    code = str(exc)
+    if code == "not_found":
+        raise not_found(trace_id) from exc
+    if code == "policy_deny":
+        raise policy_deny(trace_id) from exc
+    if code == "not_ready":
+        raise precondition_failed(trace_id) from exc
+    if code == "checksum_mismatch":
+        raise file_validation_failed(trace_id) from exc
+    raise validation_failed(trace_id) from exc
+
+
+@router.get("/artifacts/{artifact_id}")
+async def api_220_get_artifact(
+    request: Request,
+    artifact_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_artifact_metadata_for_caller(
+            db,
+            ctx,
+            artifact_id=artifact_id,
+        )
+    except ValueError as exc:
+        _map_artifact_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.get("/artifacts/{artifact_id}/content")
+async def api_221_get_artifact_content(
+    request: Request,
+    artifact_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> Response:
+    trace_id = get_trace_id(request)
+    try:
+        data, mime_type, filename = await read_artifact_content_for_caller(
+            db,
+            ctx,
+            artifact_id=artifact_id,
+        )
+    except ValueError as exc:
+        _map_artifact_error(trace_id, exc)
+    await db.commit()
+    return Response(
+        content=data,
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/test-runs/{test_run_id}/case-results")
