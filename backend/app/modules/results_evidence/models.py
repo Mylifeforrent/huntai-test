@@ -68,6 +68,48 @@ class StepRun(Base):
     is_incomplete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class EvidenceObject(Base):
+    __tablename__ = "evidence_objects"
+    __table_args__ = (
+        Index("ix_evidence_objects_org_subject", "organization_id", "subject_type", "subject_id"),
+        Index("ix_evidence_objects_org_created_at", "organization_id", "created_at"),
+        {"schema": "results_evidence"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    claim: Mapped[str] = mapped_column(Text, nullable=False)
+    source_object: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    content_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subject_type: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    data_classification: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CommandIdempotencyRecord(Base):
+    __tablename__ = "command_idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "command_type",
+            "idempotency_key",
+            name="uq_results_evidence_idempotency_org_command_key",
+        ),
+        {"schema": "results_evidence"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    command_type: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    response_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
 class FailureCluster(Base):
     __tablename__ = "failure_clusters"
     __table_args__ = (

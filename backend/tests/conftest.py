@@ -111,6 +111,8 @@ async def _truncate_tables() -> AsyncGenerator[None]:
         "run_orchestration.command_receipts",
         "run_orchestration.test_runs",
         "results_evidence.step_runs",
+        "results_evidence.evidence_objects",
+        "results_evidence.command_idempotency_records",
         "results_evidence.case_results",
         "results_evidence.failure_clusters",
         "results_evidence.audit_events",

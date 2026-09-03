@@ -154,6 +154,82 @@ async def _build_failed_case_payloads(
     return payloads
 
 
+async def _create_evidence_pool_for_failed_cases(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_by: uuid.UUID | None,
+    failed_rows: list[Any],
+    now: datetime,
+) -> dict[uuid.UUID, uuid.UUID]:
+    case_result_ids = [row.id for row in failed_rows]
+    step_rows = await repo.list_step_runs_for_case_results(
+        session,
+        organization_id=organization_id,
+        case_result_ids=case_result_ids,
+    )
+    steps_by_case: dict[uuid.UUID, list[Any]] = {}
+    for step in step_rows:
+        steps_by_case.setdefault(step.case_result_id, []).append(step)
+    existing_rows = await repo.list_evidence_objects_for_subjects(
+        session,
+        organization_id=organization_id,
+        subject_type="case_result",
+        subject_ids=case_result_ids,
+    )
+    evidence_by_case: dict[uuid.UUID, uuid.UUID] = {}
+    for existing in existing_rows:
+        evidence_by_case.setdefault(existing.subject_id, existing.id)
+    for row in failed_rows:
+        if row.id in evidence_by_case:
+            continue
+        summary = row.normalized_summary if isinstance(row.normalized_summary, dict) else {}
+        status_code = summary.get("status_code")
+        claim_parts = ["failed case result"]
+        if isinstance(status_code, int):
+            claim_parts.append(f"status_code={status_code}")
+        claim = " ".join(claim_parts)
+        content_ref: str | None = None
+        for step in steps_by_case.get(row.id, []):
+            if step.observation_ref:
+                content_ref = step.observation_ref
+                break
+        evidence = await repo.insert_evidence_object(
+            session,
+            organization_id=organization_id,
+            created_at=now,
+            created_by=created_by,
+            claim=claim,
+            source_object={
+                "connector": "platform_executor",
+                "resource": str(row.id),
+                "version": str(row.attempt_seq),
+                "timestamp": now.isoformat(),
+            },
+            content_ref=content_ref,
+            subject_type="case_result",
+            subject_id=row.id,
+            data_classification="Internal",
+        )
+        evidence_by_case[row.id] = evidence.id
+    return evidence_by_case
+
+
+def _merge_cluster_evidence_refs(
+    draft_evidence_refs: list[uuid.UUID],
+    failure_refs: list[uuid.UUID],
+    evidence_by_case: dict[uuid.UUID, uuid.UUID],
+) -> list[uuid.UUID]:
+    extra_refs = [evidence_by_case[ref] for ref in failure_refs if ref in evidence_by_case]
+    merged: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for ref in [*draft_evidence_refs, *extra_refs]:
+        if ref not in seen:
+            seen.add(ref)
+            merged.append(ref)
+    return merged
+
+
 async def prepare_failure_triage(
     session: AsyncSession,
     *,
@@ -258,14 +334,21 @@ async def run_failure_triage_background(
             organization_id=organization_id,
             failed_rows=failed_rows,
         )
+        now = datetime.now(UTC)
+        evidence_by_case = await _create_evidence_pool_for_failed_cases(
+            session,
+            organization_id=organization_id,
+            created_by=run["created_by"],
+            failed_rows=failed_rows,
+            now=now,
+        )
         triage = await run_a2_triage(
             session,
             organization_id=organization_id,
             user_id=run["created_by"],
             failed_cases=failed_payloads,
-            evidence_pool=set(),
+            evidence_pool=set(evidence_by_case.values()),
         )
-        now = datetime.now(UTC)
         for draft in triage.clusters:
             await repo.insert_failure_cluster(
                 session,
@@ -277,7 +360,11 @@ async def run_failure_triage_background(
                 root_cause=draft.root_cause,
                 confidence=float(confidence_to_decimal(draft.confidence)),
                 blocking_judgment=draft.blocking_judgment,
-                evidence_refs=draft.evidence_refs,
+                evidence_refs=_merge_cluster_evidence_refs(
+                    draft.evidence_refs,
+                    draft.failure_refs,
+                    evidence_by_case,
+                ),
                 failure_refs=draft.failure_refs,
                 unclustered_refs=triage.unclustered_refs or None,
                 fixes=draft.fixes or None,

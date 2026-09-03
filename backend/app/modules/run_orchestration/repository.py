@@ -97,6 +97,21 @@ async def get_test_run(
     return result.scalar_one_or_none()
 
 
+async def list_run_ids_for_project(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    result = await session.execute(
+        select(TestRun.id).where(
+            TestRun.organization_id == organization_id,
+            TestRun.project_id == project_id,
+        )
+    )
+    return [row[0] for row in result.all()]
+
+
 async def create_test_run(
     session: AsyncSession,
     *,

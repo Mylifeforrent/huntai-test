@@ -67,7 +67,7 @@ def _parse_fixes(raw_fixes: Any) -> list[dict[str, Any]]:
         confidence_raw = item.get("confidence", 0.0)
         try:
             confidence = float(confidence_raw)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             confidence = 0.0
         fixes.append(
             {
@@ -112,7 +112,7 @@ def _validate_ai_clusters(
             return None
         try:
             confidence = float(cluster.get("confidence", -1))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):  # fmt: skip
             return None
         if confidence < 0.0 or confidence > 1.0:
             return None

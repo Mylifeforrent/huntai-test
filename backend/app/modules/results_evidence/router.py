@@ -1,23 +1,27 @@
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionOrToken, require_session, require_session_or_token_read
 from app.core.db import get_db_session
-from app.core.errors import forbidden, not_found, validation_failed
+from app.core.errors import forbidden, idempotency_conflict, not_found, validation_failed
 from app.core.logging import get_trace_id
-from app.modules.identity_tenancy.service import SessionContext
+from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
+from app.modules.results_evidence import repository as repo
 from app.modules.results_evidence.case_results_service import (
     get_case_result_for_caller,
     list_case_results_for_caller,
     list_step_runs_for_caller,
 )
 from app.modules.results_evidence.cluster_service import (
+    correct_failure_cluster_for_caller,
     get_failure_cluster_for_caller,
     list_failure_clusters_for_caller,
+    list_similar_failure_clusters_for_caller,
 )
 from app.modules.results_evidence.service import (
     get_audit_event_for_caller,
@@ -25,6 +29,40 @@ from app.modules.results_evidence.service import (
 )
 
 router = APIRouter(prefix="/api/v1")
+
+
+class FailureClusterCorrectionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: Literal["category", "blocking_judgment", "root_cause"]
+    old: str | None = None
+    new: str | None
+
+
+class FailureClusterCorrectBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    corrections: list[FailureClusterCorrectionItem] = Field(min_length=1)
+
+
+def _parse_body(model: type[BaseModel], raw: bytes, trace_id: str) -> BaseModel:
+    try:
+        return model.model_validate_json(raw)
+    except ValidationError as exc:
+        raise validation_failed(trace_id) from exc
+
+
+def _map_write_error(trace_id: str, exc: ValueError) -> NoReturn:
+    code = str(exc)
+    if code == "forbidden":
+        raise forbidden(trace_id) from exc
+    if code == "not_found":
+        raise not_found(trace_id) from exc
+    if code in {"validation", "invalid_cursor"}:
+        raise validation_failed(trace_id) from exc
+    if code == "idempotency_conflict":
+        raise idempotency_conflict(trace_id) from exc
+    raise validation_failed(trace_id) from exc
 
 
 def _map_read_error(trace_id: str, exc: ValueError) -> NoReturn:
@@ -234,3 +272,58 @@ async def api_131_get_failure_cluster(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": payload}
+
+
+@router.patch("/failure-clusters/{failure_cluster_id}")
+async def api_132_correct_failure_cluster(
+    request: Request,
+    failure_cluster_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(FailureClusterCorrectBody, raw, trace_id)
+    assert isinstance(body, FailureClusterCorrectBody)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await correct_failure_cluster_for_caller(
+            db,
+            ctx,
+            failure_cluster_id=failure_cluster_id,
+            corrections=[item.model_dump(exclude_unset=True) for item in body.corrections],
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return payload
+
+
+@router.get("/failure-clusters/{failure_cluster_id}/similar")
+async def api_133_list_similar_failure_clusters(
+    request: Request,
+    failure_cluster_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_similar_failure_clusters_for_caller(
+            db,
+            ctx,
+            failure_cluster_id=failure_cluster_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}

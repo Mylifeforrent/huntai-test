@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import uuid
 from datetime import datetime
@@ -8,7 +9,17 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.results_evidence.audit_models import AuditEvent
-from app.modules.results_evidence.models import CaseResult, FailureCluster, StepRun
+from app.modules.results_evidence.models import (
+    CaseResult,
+    CommandIdempotencyRecord,
+    EvidenceObject,
+    FailureCluster,
+    StepRun,
+)
+
+
+def hash_request_body(body: bytes) -> str:
+    return hashlib.sha256(body).hexdigest()
 
 
 def encode_created_id_cursor(*, created_at: datetime, item_id: uuid.UUID) -> str:
@@ -393,3 +404,151 @@ async def get_failure_cluster(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_idempotency_record(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    command_type: str,
+    idempotency_key: str,
+) -> CommandIdempotencyRecord | None:
+    result = await session.execute(
+        select(CommandIdempotencyRecord).where(
+            CommandIdempotencyRecord.organization_id == organization_id,
+            CommandIdempotencyRecord.command_type == command_type,
+            CommandIdempotencyRecord.idempotency_key == idempotency_key,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_idempotency_record(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    command_type: str,
+    idempotency_key: str,
+    request_hash: str,
+    response_ref: dict[str, Any],
+    created_by: uuid.UUID | None,
+    created_at: datetime,
+) -> CommandIdempotencyRecord:
+    record = CommandIdempotencyRecord(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        command_type=command_type,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response_ref,
+        created_at=created_at,
+        created_by=created_by,
+    )
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def insert_evidence_object(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    claim: str,
+    source_object: dict[str, Any],
+    content_ref: str | None,
+    subject_type: str,
+    subject_id: uuid.UUID,
+    data_classification: str,
+) -> EvidenceObject:
+    row = EvidenceObject(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        claim=claim,
+        source_object=source_object,
+        content_ref=content_ref,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        data_classification=data_classification,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_evidence_objects_for_subjects(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    subject_type: str,
+    subject_ids: list[uuid.UUID],
+) -> list[EvidenceObject]:
+    if not subject_ids:
+        return []
+    result = await session.execute(
+        select(EvidenceObject).where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.subject_type == subject_type,
+            EvidenceObject.subject_id.in_(subject_ids),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def update_failure_cluster_corrections(
+    session: AsyncSession,
+    *,
+    row: FailureCluster,
+    category: str,
+    root_cause: str | None,
+    blocking_judgment: str,
+    correction_history: list[dict[str, Any]],
+) -> FailureCluster:
+    row.category = category
+    row.root_cause = root_cause
+    row.blocking_judgment = blocking_judgment
+    row.correction_history = correction_history
+    await session.flush()
+    return row
+
+
+async def list_similar_failure_clusters(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    source_cluster_id: uuid.UUID,
+    category: str,
+    test_run_ids: list[uuid.UUID],
+    cursor_created_at: datetime | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int | None = None,
+) -> list[FailureCluster]:
+    if not test_run_ids:
+        return []
+    query = (
+        select(FailureCluster)
+        .where(
+            FailureCluster.organization_id == organization_id,
+            FailureCluster.id != source_cluster_id,
+            FailureCluster.category == category,
+            FailureCluster.test_run_id.in_(test_run_ids),
+        )
+        .order_by(FailureCluster.created_at.desc(), FailureCluster.id.desc())
+    )
+    if cursor_created_at is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                FailureCluster.created_at < cursor_created_at,
+                and_(
+                    FailureCluster.created_at == cursor_created_at,
+                    FailureCluster.id < cursor_id,
+                ),
+            )
+        )
+    if limit is not None:
+        query = query.limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())

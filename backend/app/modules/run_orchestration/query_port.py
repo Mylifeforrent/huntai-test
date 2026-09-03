@@ -98,6 +98,19 @@ async def get_run_clustering_context(
     }
 
 
+async def list_run_ids_for_project(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    return await repo.list_run_ids_for_project(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
+
+
 async def list_workbench_active_runs(
     session: AsyncSession,
     *,
