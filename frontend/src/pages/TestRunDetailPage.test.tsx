@@ -14,13 +14,14 @@ import type {
 
 const apiGet = vi.fn();
 const apiPost = vi.fn();
+const apiPatch = vi.fn();
 
 vi.mock("@/api/client", () => ({
   api: {
     get: (...args: unknown[]) => apiGet(...args),
     post: (...args: unknown[]) => apiPost(...args),
     put: vi.fn(),
-    patch: vi.fn(),
+    patch: (...args: unknown[]) => apiPatch(...args),
     delete: vi.fn(),
   },
 }));
@@ -143,6 +144,7 @@ beforeEach(() => {
   FakeEventSource.instances = [];
   apiGet.mockReset();
   apiPost.mockReset();
+  apiPatch.mockReset();
   apiGet.mockImplementation((apiId: string) => {
     if (apiId === "API-061") {
       return Promise.resolve({ data: pendingRun } satisfies ResourceEnvelope<TestRunDetail>);
@@ -197,6 +199,12 @@ beforeEach(() => {
             },
           ],
         },
+      });
+    }
+    if (apiId === "API-133") {
+      return Promise.resolve({
+        data: { items: [] },
+        page: { has_more: false, next_cursor: null },
       });
     }
     return Promise.reject(new Error(`unexpected ${apiId}`));
@@ -287,6 +295,12 @@ describe("TestRunDetailPage", () => {
       if (apiId === "API-031") {
         return Promise.resolve({ data: { id: "case-1", version: 2 } });
       }
+      if (apiId === "API-133") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
       return Promise.reject(new Error(`unexpected ${apiId}`));
     });
     const container = mount(<TestRunDetailPage />);
@@ -308,5 +322,135 @@ describe("TestRunDetailPage", () => {
       "API-031",
       "/api/v1/test-cases/case-result-1",
     );
+  });
+
+  it("submits correction via API-132", async () => {
+    const succeededRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: succeededRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [{ id: "case-result-1", test_case_id: "case-1", outcome: "failed" }] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [
+              {
+                id: "cluster-1",
+                test_run_id: "run-1",
+                category: "assertion_real_bug",
+                confidence: 0.3,
+                blocking_judgment: "uncertain",
+                evidence_refs: [],
+                failure_refs: ["case-result-1"],
+              },
+            ],
+            unclustered_refs: [],
+            generation_status: "ready",
+            degraded: true,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      if (apiId === "API-131") {
+        return Promise.resolve({
+          data: {
+            id: "cluster-1",
+            test_run_id: "run-1",
+            category: "assertion_real_bug",
+            confidence: 0.3,
+            blocking_judgment: "uncertain",
+            evidence_refs: [],
+            failure_refs: ["case-result-1"],
+            correction_history: [],
+            fixes_preview: [],
+          },
+        });
+      }
+      if (apiId === "API-133") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    apiPatch.mockResolvedValue({
+      data: {
+        id: "cluster-1",
+        category: "flaky",
+        blocking_judgment: "uncertain",
+        correction_history: [{ actor: "user-1", field: "category", old: "assertion_real_bug", new: "flaky", timestamp: "t" }],
+      },
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    const categoryInput = container.querySelector("input");
+    expect(categoryInput).toBeTruthy();
+    await act(async () => {
+      if (categoryInput) {
+        const native = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          "value",
+        );
+        native?.set?.call(categoryInput, "flaky");
+        categoryInput.dispatchEvent(new Event("input", { bubbles: true }));
+        categoryInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+    const correct = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("提交修正留痕"),
+    );
+    await act(async () => {
+      correct?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(apiPatch).toHaveBeenCalledWith(
+      "API-132",
+      "/api/v1/failure-clusters/cluster-1",
+      {
+        corrections: [
+          {
+            field: "category",
+            new: "flaky",
+            old: "assertion_real_bug",
+          },
+        ],
+      },
+    );
+  });
+
+  it("shows pending clustering banner", async () => {
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: { ...pendingRun, status: "FAILED" } });
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [],
+            unclustered_refs: [],
+            generation_status: "pending",
+            degraded: false,
+          },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    expect(container.textContent).toContain("聚类生成中");
   });
 });

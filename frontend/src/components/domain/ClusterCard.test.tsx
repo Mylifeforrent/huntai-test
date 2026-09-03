@@ -66,4 +66,47 @@ describe("ClusterCard", () => {
     });
     expect(onApply).toHaveBeenCalledTimes(1);
   });
+
+  it("calls onCorrect with draft values", () => {
+    const onCorrect = vi.fn();
+    const container = mount(
+      <ClusterCard
+        cluster={{
+          id: "c1",
+          category: "unknown",
+          confidence: 0.3,
+          blocking: "uncertain",
+        }}
+        onCorrect={onCorrect}
+      />,
+    );
+    const inputs = container.querySelectorAll("input");
+    act(() => {
+      inputs[0]?.dispatchEvent(new Event("input", { bubbles: true }));
+      (inputs[0] as HTMLInputElement).value = "flaky";
+      inputs[0]?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const correctButton = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("提交修正留痕"),
+    );
+    act(() => {
+      correctButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onCorrect).toHaveBeenCalled();
+  });
+
+  it("renders empty similar list copy", () => {
+    const container = mount(
+      <ClusterCard
+        cluster={{
+          id: "c1",
+          category: "unknown",
+          confidence: 0.3,
+          blocking: "uncertain",
+          similarItems: [],
+        }}
+      />,
+    );
+    expect(container.textContent).toContain("无相似失败");
+  });
 });

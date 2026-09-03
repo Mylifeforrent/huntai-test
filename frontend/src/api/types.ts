@@ -162,6 +162,23 @@ export interface ResourceEnvelope<T> {
   data: T;
 }
 
+export interface CorrectionHistoryItem {
+  actor: string;
+  field: string;
+  old: string | null;
+  new: string | null;
+  timestamp: string;
+}
+
+export interface SimilarFailureClusterItem {
+  id: string;
+  test_run_id: string;
+  category: ClusterCategory | string;
+  confidence: number;
+  similarity_score?: number;
+  created_at: string;
+}
+
 export interface FailureClusterListItem {
   id: string;
   test_run_id: string;
@@ -184,7 +201,7 @@ export interface FailureClusterFixPreview {
 }
 
 export interface FailureClusterDetail extends FailureClusterListItem {
-  correction_history: Array<Record<string, unknown>>;
+  correction_history: CorrectionHistoryItem[];
   fixes_preview?: FailureClusterFixPreview[];
   unclustered_refs?: string[];
 }

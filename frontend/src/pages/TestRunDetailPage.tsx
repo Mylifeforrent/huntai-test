@@ -12,6 +12,7 @@ import type {
   FailureClusterReport,
   ListEnvelope,
   ResourceEnvelope,
+  SimilarFailureClusterItem,
   TestRunCancelResult,
   TestRunDetail,
 } from "@/api/types";
@@ -45,6 +46,7 @@ export function TestRunDetailPage() {
   const [signalSent, setSignalSent] = useState(false);
   const [cancelError, setCancelError] = useState<unknown>(null);
   const [healError, setHealError] = useState<unknown>(null);
+  const [correctError, setCorrectError] = useState<unknown>(null);
   const [sseHint, setSseHint] = useState<string | null>(null);
 
   useEffect(() => {
@@ -112,6 +114,7 @@ export function TestRunDetailPage() {
   const version = run?.version;
   const clusterReport = clusters.data?.data;
   const clusterItems = clusterReport?.items ?? [];
+  const clusterPending = clusterReport?.generation_status === "pending";
   const clusterIds = useMemo(() => clusterItems.map((item) => item.id), [clusterItems]);
   const clusterDetails = useQueries({
     queries: clusterIds.map((clusterId) => ({
@@ -134,6 +137,27 @@ export function TestRunDetailPage() {
     });
     return map;
   }, [clusterDetails, clusterIds]);
+  const similarQueries = useQueries({
+    queries: clusterIds.map((clusterId) => ({
+      queryKey: ["failure-clusters", clusterId, "similar"],
+      queryFn: () =>
+        api.get<ListEnvelope<SimilarFailureClusterItem>>(
+          "API-133",
+          `/api/v1/failure-clusters/${clusterId}/similar`,
+        ),
+      enabled: Boolean(clusterId) && !clusterPending,
+    })),
+  });
+  const similarById = useMemo(() => {
+    const map = new Map<string, SimilarFailureClusterItem[]>();
+    similarQueries.forEach((entry, index) => {
+      const id = clusterIds[index];
+      if (id && entry.data?.data.items) {
+        map.set(id, entry.data.data.items);
+      }
+    });
+    return map;
+  }, [similarQueries, clusterIds]);
 
   const resultItems = results.data?.data.items ?? [];
   const unclustered = clusterReport?.unclustered_refs ?? [];
@@ -170,6 +194,50 @@ export function TestRunDetailPage() {
       }
     },
     onError: (error) => setHealError(error),
+  });
+
+  const correctCluster = useMutation({
+    mutationFn: async (input: {
+      clusterId: string;
+      category: string;
+      blocking: string;
+      currentCategory: string;
+      currentBlocking: string;
+    }) => {
+      const corrections: Array<{
+        field: string;
+        old?: string;
+        new: string;
+      }> = [];
+      if (input.category.trim()) {
+        corrections.push({
+          field: "category",
+          old: input.currentCategory,
+          new: input.category.trim(),
+        });
+      }
+      if (input.blocking.trim()) {
+        corrections.push({
+          field: "blocking_judgment",
+          old: input.currentBlocking,
+          new: input.blocking.trim(),
+        });
+      }
+      if (corrections.length === 0) {
+        throw new Error("请填写至少一项修正");
+      }
+      return api.patch<ResourceEnvelope<FailureClusterDetail>>(
+        "API-132",
+        `/api/v1/failure-clusters/${input.clusterId}`,
+        { corrections },
+      );
+    },
+    onMutate: () => setCorrectError(null),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.clusters(runId) });
+      void queryClient.invalidateQueries({ queryKey: ["failure-clusters"] });
+    },
+    onError: (error) => setCorrectError(error),
   });
 
   const cancel = useMutation({
@@ -257,6 +325,11 @@ export function TestRunDetailPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            {clusterPending ? (
+              <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+                聚类生成中 — 权威报告以 API-130 为准，SSE 进度不代表报告就绪。
+              </p>
+            ) : null}
             {clusters.error ? (
               <CommandFeedback error={clusters.error} apis={PAGE_APIS.P09} action="失败聚类" />
             ) : null}
@@ -278,6 +351,20 @@ export function TestRunDetailPage() {
                     ruleFallback: degraded,
                     canShowApply: !degraded,
                     fixes: detailRow?.fixes_preview,
+                    evidenceRefs: item.evidence_refs,
+                    failureRefs: item.failure_refs,
+                    correctionHistory: detailRow?.correction_history,
+                    similarItems: similarById.get(item.id),
+                  }}
+                  correctPending={correctCluster.isPending}
+                  onCorrect={({ category, blocking }) => {
+                    correctCluster.mutate({
+                      clusterId: item.id,
+                      category,
+                      blocking,
+                      currentCategory: item.category,
+                      currentBlocking: item.blocking_judgment,
+                    });
                   }}
                   applyPending={healApply.isPending}
                   onApply={(fix) => {
@@ -325,6 +412,7 @@ export function TestRunDetailPage() {
               )}
             </div>
             <CommandFeedback error={healError} apis={PAGE_APIS.P09} action="heal_apply Preview（API-120）" />
+            <CommandFeedback error={correctError} apis={PAGE_APIS.P09} action="人工修正（API-132）" />
           </CardContent>
         </Card>
         <Card>
