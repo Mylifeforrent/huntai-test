@@ -5,6 +5,7 @@
 
 | 日期 | 变更对象（路径） | 变更摘要 | 原因 | 批准人 | 状态 |
 |---|---|---|---|---|---|
+| 2026-09-03 | `test_assets.test_plans.schedule_binding`（实现列） | Alembic 0016 可空 jsonb，承接 API-055 定时绑定；cron/时区仍 TBD，禁止写默认频率 | S-M1-06 切片需要持久化 schedule 绑定；`data_model.md` §7.3 未列该列 | 用户（S-M1-06 Plan） | 已完成 |
 | 2026-09-03 | `.env.example` | 新增 `JENKINS_WEBHOOK_SECRET`、`JENKINS_API_TOKEN` 键名（无默认值）；S-M1-05 external_ci Jenkins 验签与 API Token 引用 | S-M1-05 切片需要 Jenkins webhook HMAC 与 trigger Basic 认证 env 引用；禁止硬编码密钥 | 用户（S-M1-05 Plan） | 已完成 |
 | 2026-09-03 | `results_evidence.failure_clusters.fixes`（实现列） | Alembic 0014 增加可空 jsonb `fixes` 列，用于 API-131 `fixes_preview`（A4 建议投影）；`data_model.md` §7.8 未列该列 | S-M1-03 实现需要持久化 A4 fixes；数据模型遗漏，实现侧补列并登记 | 用户（S-M1-03 会话） | 已完成 |
 | 2026-09-02 | `.env.example` | 新增 `TEST_RUN_HEARTBEAT_TIMEOUT_SECONDS` 键名（无默认值）；S-M1-02 TestRun 心跳回收配置项 | S-M1-02 切片需要可选心跳超时配置；TBD 秒数禁止硬编码 | 用户（本会话确认 S-M1-02 Plan） | 已完成 |
