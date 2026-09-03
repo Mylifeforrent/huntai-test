@@ -48,6 +48,32 @@ export const RELEASE_STATUSES = [
 ] as const;
 export type ReleaseStatus = (typeof RELEASE_STATUSES)[number];
 
+export const GATE_POLICY_MODES = ["report_only", "blocking"] as const;
+export type GatePolicyMode = (typeof GATE_POLICY_MODES)[number];
+
+export interface QualityGateThresholds {
+  min_pass_rate: number;
+  max_p95_ms: number;
+  max_error_rate: number;
+}
+
+/** API-140 QualityGatePolicyListItem. */
+export interface QualityGatePolicyListItem {
+  id: string;
+  project_id: string;
+  thresholds: QualityGateThresholds;
+  mode: GatePolicyMode | string;
+  policy_version: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** API-141 QualityGatePolicyDetail. */
+export interface QualityGatePolicyDetail extends QualityGatePolicyListItem {
+  scope: Record<string, unknown>;
+}
+
 export const GATE_RESULTS = ["pass", "fail", "waived"] as const;
 export type GateResult = (typeof GATE_RESULTS)[number];
 

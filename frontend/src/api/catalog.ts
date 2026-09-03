@@ -85,7 +85,12 @@ export const PAGE_APIS = {
   P10_preview: [
     { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "Policy Gate Preview" },
   ],
-  P11: [{ id: "API-140", method: "GET", path: "/api/v1/quality-gate-policies", summary: "门禁策略" }],
+  P11: [
+    { id: "API-140", method: "GET", path: "/api/v1/quality-gate-policies", summary: "门禁策略列表" },
+    { id: "API-141", method: "GET", path: "/api/v1/quality-gate-policies/{policy_id}", summary: "门禁策略详情" },
+    { id: "API-142", method: "POST", path: "/api/v1/quality-gate-policies", summary: "创建门禁策略" },
+    { id: "API-143", method: "PATCH", path: "/api/v1/quality-gate-policies/{policy_id}", summary: "更新门禁策略" },
+  ],
   P12: [{ id: "API-144", method: "GET", path: "/api/v1/gate-evaluations", summary: "门禁评估历史" }],
   P13: [
     { id: "API-031", method: "GET", path: "/api/v1/test-cases/{test_case_id}", summary: "用例详情" },
