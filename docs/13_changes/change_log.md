@@ -5,6 +5,7 @@
 
 | 日期 | 变更对象（路径） | 变更摘要 | 原因 | 批准人 | 状态 |
 |---|---|---|---|---|---|
+| 2026-09-03 | `.env.example` | 新增 `JENKINS_WEBHOOK_SECRET`、`JENKINS_API_TOKEN` 键名（无默认值）；S-M1-05 external_ci Jenkins 验签与 API Token 引用 | S-M1-05 切片需要 Jenkins webhook HMAC 与 trigger Basic 认证 env 引用；禁止硬编码密钥 | 用户（S-M1-05 Plan） | 已完成 |
 | 2026-09-03 | `results_evidence.failure_clusters.fixes`（实现列） | Alembic 0014 增加可空 jsonb `fixes` 列，用于 API-131 `fixes_preview`（A4 建议投影）；`data_model.md` §7.8 未列该列 | S-M1-03 实现需要持久化 A4 fixes；数据模型遗漏，实现侧补列并登记 | 用户（S-M1-03 会话） | 已完成 |
 | 2026-09-02 | `.env.example` | 新增 `TEST_RUN_HEARTBEAT_TIMEOUT_SECONDS` 键名（无默认值）；S-M1-02 TestRun 心跳回收配置项 | S-M1-02 切片需要可选心跳超时配置；TBD 秒数禁止硬编码 | 用户（本会话确认 S-M1-02 Plan） | 已完成 |
 | 2026-09-01 | 根 `AGENTS.md`（新会话起步表、§6、§7 第 20 条、§9）；`docs/00_setup/project_rules.md` §3.3、§4；`docs/00_setup/README.md`；`.cursor/rules/project-conventions.mdc`；新增 `.zcode/rules/project-conventions.md` | 新增「切片进度同步」工程规则：每个 `S-M*` 切片合入前必须回写 `docs/10_ai_context/ai_context.md` 状态列与 `context/mN.md`。权威正文只在 `AGENTS.md` / `project_rules.md`；Cursor 与 ZCode 规则目录仅短指针且必须同改。不新增业务规则、页面、对象、状态或 API 编号 | 切片代码已合入但 Stage 10 表仍标「未做」（S-M0-12）；用户本会话明确要求在 `.cursor` / `.zcode` 加规则，并接受以 AGENTS.md 为唯一正文、工具目录只作指针 | 用户（本会话明确请求） | 已完成 |
