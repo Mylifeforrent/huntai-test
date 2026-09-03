@@ -5,6 +5,7 @@
 
 | 日期 | 变更对象（路径） | 变更摘要 | 原因 | 批准人 | 状态 |
 |---|---|---|---|---|---|
+| 2026-09-03 | `results_evidence.failure_clusters.fixes`（实现列） | Alembic 0014 增加可空 jsonb `fixes` 列，用于 API-131 `fixes_preview`（A4 建议投影）；`data_model.md` §7.8 未列该列 | S-M1-03 实现需要持久化 A4 fixes；数据模型遗漏，实现侧补列并登记 | 用户（S-M1-03 会话） | 已完成 |
 | 2026-09-02 | `.env.example` | 新增 `TEST_RUN_HEARTBEAT_TIMEOUT_SECONDS` 键名（无默认值）；S-M1-02 TestRun 心跳回收配置项 | S-M1-02 切片需要可选心跳超时配置；TBD 秒数禁止硬编码 | 用户（本会话确认 S-M1-02 Plan） | 已完成 |
 | 2026-09-01 | 根 `AGENTS.md`（新会话起步表、§6、§7 第 20 条、§9）；`docs/00_setup/project_rules.md` §3.3、§4；`docs/00_setup/README.md`；`.cursor/rules/project-conventions.mdc`；新增 `.zcode/rules/project-conventions.md` | 新增「切片进度同步」工程规则：每个 `S-M*` 切片合入前必须回写 `docs/10_ai_context/ai_context.md` 状态列与 `context/mN.md`。权威正文只在 `AGENTS.md` / `project_rules.md`；Cursor 与 ZCode 规则目录仅短指针且必须同改。不新增业务规则、页面、对象、状态或 API 编号 | 切片代码已合入但 Stage 10 表仍标「未做」（S-M0-12）；用户本会话明确要求在 `.cursor` / `.zcode` 加规则，并接受以 AGENTS.md 为唯一正文、工具目录只作指针 | 用户（本会话明确请求） | 已完成 |
 | 2026-08-31 | `docs/07_backend_design/data_model.md` §1.2、§2.1、§3.1、§5.5、§6、§7.1、§8、§10、§11、§16 | 在 `identity_tenancy` 增补传输/安全基础设施表 `auth_sessions` 与 `oidc_login_drafts`（非第 24 领域对象），承接 api_spec API-001–003 的可吊销服务端会话与 PKCE 服务端草稿。不新增领域对象、状态或 API 编号；会话时长 / Cookie 名 / SameSite / 再认证窗口仍为 TBD，模型不写默认秒数 | 契约要求「服务端会话记录」可吊销，原 §5 仅覆盖一致性机制（Outbox/Inbox/intent/幂等），未覆盖身份传输面；用户本会话裁定按基础设施表补入而非升格领域对象 | 用户（本会话明确「按基础设施表补进 data_model」） | 已完成 |
