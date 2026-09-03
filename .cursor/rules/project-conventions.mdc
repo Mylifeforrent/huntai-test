@@ -25,3 +25,7 @@ alwaysApply: true
 - 满足「两文件以上 / 改已有结论 / 新增顶层目录或文件 / 改依赖或配置」任一条件时，先 Plan 再实施。
 - 禁止静默修改已冻结设计资产；须先在 `docs/13_changes/change_log.md` 登记。
 - 禁止把密钥、生产数据、用户隐私提供给 AI；禁止自行引入未审计第三方依赖。
+
+## 切片进度同步
+
+每个 `S-M*` 切片在验证通过、准备提交前，必须回写 `docs/10_ai_context/ai_context.md` 状态列与 `docs/10_ai_context/context/mN.md`。权威正文见根 `AGENTS.md` §9 与 `docs/00_setup/project_rules.md` §3.3 / §4。`.zcode/rules/` 必须与本文件同步；禁止只改一处，禁止在工具目录另写业务规则。进度只写 Stage 10，禁止为此改冻结契约（`prd.md` / `api_spec.md` / `data_model.md`）。

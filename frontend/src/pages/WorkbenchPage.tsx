@@ -5,15 +5,14 @@ import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
 import { isUndeveloped } from "@/api/errors";
-import type { ResourceEnvelope, WorkbenchProjection } from "@/api/types";
+import type { OrgQuotaCurrent, ResourceEnvelope, WorkbenchProjection } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader, EmptyState, ErrorState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
-import { RiskBadge } from "@/components/domain/RiskBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
-import { asRecord, tokenRemainingProjection } from "@/lib/utils";
+import { formatServerScalar } from "@/lib/utils";
 
 export function WorkbenchPage() {
   const workbench = useQuery({
@@ -22,17 +21,19 @@ export function WorkbenchPage() {
   });
   const quota = useQuery({
     queryKey: queryKeys.orgQuota,
-    queryFn: () => api.get<ResourceEnvelope<unknown>>("API-017", "/api/v1/org-quotas/current"),
+    queryFn: () => api.get<ResourceEnvelope<OrgQuotaCurrent>>("API-017", "/api/v1/org-quotas/current"),
   });
 
   const data = workbench.data?.data;
-  const pending = Array.isArray(data?.pending_approvals) ? data.pending_approvals : [];
-  const runs = Array.isArray(data?.active_runs) ? data.active_runs : [];
-  const gates = Array.isArray(data?.gate_anomalies) ? data.gate_anomalies : [];
+  const pending = data?.pending_approvals ?? [];
+  const runs = data?.active_runs ?? [];
+  const gates = data?.gate_anomalies ?? [];
   const workbenchBlocked = Boolean(workbench.error) && !workbench.isPending;
   const workbenchUndeveloped = isUndeveloped(workbench.error);
   const quotaUndeveloped = isUndeveloped(quota.error);
-  const remaining = tokenRemainingProjection(quota.data?.data);
+  const workbenchRemaining = formatServerScalar(data?.quota?.token_remaining);
+  const corroborationRemaining = formatServerScalar(quota.data?.data?.token_remaining);
+  const remaining = workbenchRemaining ?? corroborationRemaining;
 
   return (
     <>
@@ -66,16 +67,16 @@ export function WorkbenchPage() {
         <Stat
           label="门禁异常"
           value={workbenchBlocked ? undefined : String(gates.length)}
-          hint="24h 未处理"
+          hint="API-020 gate_anomalies"
           loading={workbench.isPending}
           undeveloped={workbenchUndeveloped}
         />
         <Stat
           label="Token 余量"
           value={remaining}
-          hint="API-017 token_remaining"
-          loading={quota.isPending}
-          undeveloped={quotaUndeveloped}
+          hint="API-020 quota.token_remaining（API-017 佐证）"
+          loading={workbench.isPending || quota.isPending}
+          undeveloped={workbenchUndeveloped && quotaUndeveloped}
         />
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -95,18 +96,16 @@ export function WorkbenchPage() {
             {!workbench.isPending && !workbenchBlocked && pending.length === 0 ? (
               <EmptyState compact title="无待审批" hint="空集是服务端下发。" />
             ) : null}
-            {pending.map((item, index) => {
-              const row = asRecord(item);
-              return (
-                <Link key={String(row.id ?? index)} to="/approvals" className="rounded-md border p-3 hover:bg-muted/40">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">{String(row.id ?? "")}</span>
-                    {typeof row.risk === "string" ? <RiskBadge level={row.risk} /> : null}
-                  </div>
-                  <p className="truncate text-sm">{String(row.target ?? row.action ?? "审批项")}</p>
-                </Link>
-              );
-            })}
+            {pending.map((item) => (
+              <Link key={item.id} to="/approvals" className="rounded-md border p-3 hover:bg-muted/40">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-muted-foreground">{item.id}</span>
+                  <StatusBadge status={item.action_type} />
+                </div>
+                <p className="truncate text-sm">{item.action_type}</p>
+                <p className="text-xs text-muted-foreground">到期 {item.expires_at}</p>
+              </Link>
+            ))}
           </CardContent>
         </Card>
         <Card>
@@ -125,26 +124,23 @@ export function WorkbenchPage() {
             {!workbench.isPending && !workbenchBlocked && runs.length === 0 ? (
               <EmptyState compact title="无进行中运行" hint="WAITING_* 态不得从本列折叠。" />
             ) : null}
-            {runs.map((item, index) => {
-              const row = asRecord(item);
-              return (
-                <Link
-                  key={String(row.id ?? index)}
-                  to={`/test-center/runs/${String(row.id ?? "")}`}
-                  className="rounded-md border p-3 hover:bg-muted/40"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs">{String(row.id ?? "")}</span>
-                    {typeof row.status === "string" ? <StatusBadge status={row.status} /> : null}
-                  </div>
-                      {typeof row.dwell_seconds === "number" ? (
-                        <p className="text-xs text-muted-foreground">滞留 {row.dwell_seconds}s（服务端投影）</p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">滞留时长由服务端下发，前端不推演</p>
-                      )}
-                </Link>
-              );
-            })}
+            {runs.map((item) => (
+              <Link
+                key={item.id}
+                to={`/test-center/runs/${item.id}`}
+                className="rounded-md border p-3 hover:bg-muted/40"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs">{item.id}</span>
+                  <StatusBadge status={item.status} />
+                </div>
+                {typeof item.dwell_seconds === "number" ? (
+                  <p className="text-xs text-muted-foreground">滞留 {item.dwell_seconds}s（服务端投影）</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">滞留时长由服务端下发，前端不推演</p>
+                )}
+              </Link>
+            ))}
           </CardContent>
         </Card>
       </div>
@@ -179,4 +175,3 @@ function Stat({
     </Card>
   );
 }
-

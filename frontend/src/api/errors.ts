@@ -127,3 +127,26 @@ export function toApiError(params: {
 export function isUndeveloped(error: unknown): boolean {
   return error instanceof ApiError && error.kind === "undeveloped";
 }
+
+export function authErrorCode(error: unknown): string | null {
+  if (!(error instanceof ApiError) || !error.body) {
+    return null;
+  }
+  return error.body.code;
+}
+
+export function isUnauthenticated(error: unknown): boolean {
+  return authErrorCode(error) === "HT-AUTH-001";
+}
+
+export function isRequireReauth(error: unknown): boolean {
+  return authErrorCode(error) === "HT-AUTH-002";
+}
+
+export function isOidcAuthFailed(error: unknown): boolean {
+  return authErrorCode(error) === "HT-AUTH-003";
+}
+
+export function isNoOrgContext(error: unknown): boolean {
+  return authErrorCode(error) === "HT-IAM-001";
+}

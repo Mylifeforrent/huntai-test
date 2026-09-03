@@ -1,0 +1,27 @@
+# huntai-test 工程约定
+
+本仓库以根目录 `AGENTS.md` 为跨工具 Agent 指令源（Claude Code 读根 `CLAUDE.md`，指向 `AGENTS.md`）。完整工程规范见 `docs/00_setup/project_rules.md`。工程过程冲突以 `project_rules.md` 为准；设计事实冲突按 `AGENTS.md` §8。
+
+## ZCode 配置
+
+- 项目 MCP：`.zcode/config.json`（LangChain 文档 / 参考）。
+- 同步清单：`.zcode/config.json`、`.mcp.json`、`.cursor/mcp.json` 的服务器条目必须一致；禁止只改其中一份。
+- 保留 `.zcode/`，不要删除或合并进 `.cursor/`。
+- 本目录只允许短指针，正文以 `AGENTS.md` 为准；`.cursor/rules/` 必须与本文件同步。
+
+## 目录与阶段
+
+- 业务目录只有 `frontend/`、`backend/`、`docs/`；设计文档只进 `docs/`，可执行代码只进 `frontend/` / `backend/`。
+- 阶段产出只落入对应 `docs/NN_*`；约定输出文件不存在则该阶段未完成。
+- `backend/` / `frontend/` 内部子结构按 Stage 6/7 设计落地；禁止预建设计未规定的模块目录。
+
+## 配置、依赖与提交
+
+- 后端配置只经 `.env` 注入；`.env.example` 只含键名。依赖一律用 uv，禁止 pip / `requirements.txt` / poetry。
+- 满足「两文件以上 / 改已有结论 / 新增顶层目录或文件 / 改依赖或配置」任一条件时，先 Plan 再实施。
+- 禁止静默修改已冻结设计资产；须先在 `docs/13_changes/change_log.md` 登记。
+- 禁止把密钥、生产数据、用户隐私提供给 AI；禁止自行引入未审计第三方依赖。
+
+## 切片进度同步
+
+每个 `S-M*` 切片在验证通过、准备提交前，必须回写 `docs/10_ai_context/ai_context.md` 状态列与 `docs/10_ai_context/context/mN.md`。权威正文见根 `AGENTS.md` §9 与 `docs/00_setup/project_rules.md` §3.3 / §4。`.cursor/rules/` 必须与本文件同步；禁止只改一处，禁止在工具目录另写业务规则。进度只写 Stage 10，禁止为此改冻结契约（`prd.md` / `api_spec.md` / `data_model.md`）。

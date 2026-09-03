@@ -1,0 +1,54 @@
+[project]
+name = "huntai-backend"
+version = "0.1.0"
+description = "HuntAI Test backend"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic==1.19.1",
+    "argon2-cffi==25.1.0",
+    "asyncpg==0.31.0",
+    "authlib==1.7.2",
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy[asyncio]==2.0.52",
+    "sse-starlette==3.4.8",
+    "starlette==1.6.0",
+    "uvicorn==0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]
+"scripts/*.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+packages = ["app"]
+
+[[tool.mypy.overrides]]
+module = ["alembic.*", "authlib.*", "sse_starlette.*"]
+ignore_missing_imports = true

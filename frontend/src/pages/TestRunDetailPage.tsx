@@ -1,10 +1,22 @@
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope, ResourceEnvelope } from "@/api/types";
+import type {
+  ActionPreview,
+  CaseResultListItem,
+  FailureClusterDetail,
+  FailureClusterFixPreview,
+  FailureClusterReport,
+  ListEnvelope,
+  ResourceEnvelope,
+  SimilarFailureClusterItem,
+  TestRunCancelResult,
+  TestRunDetail,
+} from "@/api/types";
+import { TEST_RUN_TERMINALS } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -28,53 +40,225 @@ import { asRecord } from "@/lib/utils";
 
 export function TestRunDetailPage() {
   const { runId = "" } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [signalSent, setSignalSent] = useState(false);
   const [cancelError, setCancelError] = useState<unknown>(null);
+  const [healError, setHealError] = useState<unknown>(null);
+  const [correctError, setCorrectError] = useState<unknown>(null);
+  const [sseHint, setSseHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!runId) {
+      return undefined;
+    }
+    const source = new EventSource(`/api/v1/test-runs/${runId}/events`, { withCredentials: true });
+    const onProgress = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { hint?: string };
+        setSseHint(payload.hint ?? "progress");
+      } catch {
+        setSseHint("progress");
+      }
+    };
+    const onChanged = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.testRun(runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.caseResults(runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.clusters(runId) });
+    };
+    source.addEventListener("progress", onProgress);
+    source.addEventListener("resource_changed", onChanged);
+    return () => {
+      source.removeEventListener("progress", onProgress);
+      source.removeEventListener("resource_changed", onChanged);
+      source.close();
+    };
+  }, [queryClient, runId]);
 
   const detail = useQuery({
     queryKey: queryKeys.testRun(runId),
-    queryFn: () => api.get<ResourceEnvelope<Record<string, unknown>>>("API-061", `/api/v1/test-runs/${runId}`),
+    queryFn: () => api.get<ResourceEnvelope<TestRunDetail>>("API-061", `/api/v1/test-runs/${runId}`),
     enabled: Boolean(runId),
+    refetchInterval: (query) => {
+      const current = query.state.data?.data.status;
+      if (current && (TEST_RUN_TERMINALS as readonly string[]).includes(current)) {
+        return false;
+      }
+      return 1000;
+    },
   });
   const clusters = useQuery({
     queryKey: queryKeys.clusters(runId),
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-130", `/api/v1/test-runs/${runId}/failure-clusters`),
+      api.get<ResourceEnvelope<FailureClusterReport>>(
+        "API-130",
+        `/api/v1/test-runs/${runId}/failure-clusters`,
+      ),
     enabled: Boolean(runId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.data.generation_status;
+      return status === "pending" ? 1000 : false;
+    },
   });
   const results = useQuery({
     queryKey: queryKeys.caseResults(runId),
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-064", `/api/v1/test-runs/${runId}/case-results`),
+      api.get<ListEnvelope<CaseResultListItem>>("API-064", `/api/v1/test-runs/${runId}/case-results`),
     enabled: Boolean(runId),
   });
 
-  const run = detail.data?.data ?? {};
-  const status = String(run.status ?? "");
-  const source = typeof run.execution_source === "string" ? run.execution_source : undefined;
-  const version = typeof run.version === "number" ? run.version : undefined;
-  const clusterItems = clusters.data?.data.items ?? [];
+  const run = detail.data?.data;
+  const status = run?.status ?? "";
+  const source = run?.execution_source;
+  const version = run?.version;
+  const clusterReport = clusters.data?.data;
+  const clusterItems = clusterReport?.items ?? [];
+  const clusterPending = clusterReport?.generation_status === "pending";
+  const clusterIds = useMemo(() => clusterItems.map((item) => item.id), [clusterItems]);
+  const clusterDetails = useQueries({
+    queries: clusterIds.map((clusterId) => ({
+      queryKey: ["failure-clusters", clusterId],
+      queryFn: () =>
+        api.get<ResourceEnvelope<FailureClusterDetail>>(
+          "API-131",
+          `/api/v1/failure-clusters/${clusterId}`,
+        ),
+      enabled: Boolean(clusterId),
+    })),
+  });
+  const detailsById = useMemo(() => {
+    const map = new Map<string, FailureClusterDetail>();
+    clusterDetails.forEach((entry, index) => {
+      const id = clusterIds[index];
+      if (id && entry.data?.data) {
+        map.set(id, entry.data.data);
+      }
+    });
+    return map;
+  }, [clusterDetails, clusterIds]);
+  const similarQueries = useQueries({
+    queries: clusterIds.map((clusterId) => ({
+      queryKey: ["failure-clusters", clusterId, "similar"],
+      queryFn: () =>
+        api.get<ListEnvelope<SimilarFailureClusterItem>>(
+          "API-133",
+          `/api/v1/failure-clusters/${clusterId}/similar`,
+        ),
+      enabled: Boolean(clusterId) && !clusterPending,
+    })),
+  });
+  const similarById = useMemo(() => {
+    const map = new Map<string, SimilarFailureClusterItem[]>();
+    similarQueries.forEach((entry, index) => {
+      const id = clusterIds[index];
+      if (id && entry.data?.data.items) {
+        map.set(id, entry.data.data.items);
+      }
+    });
+    return map;
+  }, [similarQueries, clusterIds]);
+
   const resultItems = results.data?.data.items ?? [];
-  const unclustered = Array.isArray(run.unclustered_refs)
-    ? run.unclustered_refs
-    : Array.isArray(asRecord(clusters.data?.data).unclustered_refs)
-      ? (asRecord(clusters.data?.data).unclustered_refs as unknown[])
-      : [];
+  const unclustered = clusterReport?.unclustered_refs ?? [];
+  const degraded = clusterReport?.degraded === true;
   const firstResult = asRecord(resultItems[0]);
   const evidence = asRecord(firstResult.evidence);
+
+  const healApply = useMutation({
+    mutationFn: async (input: {
+      clusterId: string;
+      fix: FailureClusterFixPreview;
+      testCaseId: string;
+      caseVersion: number;
+    }) => {
+      const patch = parseSuggestedPatch(input.fix.suggested);
+      return api.post<ResourceEnvelope<ActionPreview>>("API-120", "/api/v1/action-previews", {
+        action_type: "heal_apply",
+        project_id: run?.project_id,
+        target_object_type: "test_case",
+        target_object_id: input.testCaseId,
+        expected_target_version: input.caseVersion,
+        payload: {
+          failure_cluster_id: input.clusterId,
+          cluster_confidence: detailsById.get(input.clusterId)?.confidence,
+          fix_confidence: input.fix.confidence,
+          patch,
+        },
+      });
+    },
+    onMutate: () => setHealError(null),
+    onSuccess: (payload) => {
+      if (payload.data.gate === "REQUIRE_APPROVAL") {
+        navigate("/approvals");
+      }
+    },
+    onError: (error) => setHealError(error),
+  });
+
+  const correctCluster = useMutation({
+    mutationFn: async (input: {
+      clusterId: string;
+      category: string;
+      blocking: string;
+      currentCategory: string;
+      currentBlocking: string;
+    }) => {
+      const corrections: Array<{
+        field: string;
+        old?: string;
+        new: string;
+      }> = [];
+      if (input.category.trim()) {
+        corrections.push({
+          field: "category",
+          old: input.currentCategory,
+          new: input.category.trim(),
+        });
+      }
+      if (input.blocking.trim()) {
+        corrections.push({
+          field: "blocking_judgment",
+          old: input.currentBlocking,
+          new: input.blocking.trim(),
+        });
+      }
+      if (corrections.length === 0) {
+        throw new Error("请填写至少一项修正");
+      }
+      return api.patch<ResourceEnvelope<FailureClusterDetail>>(
+        "API-132",
+        `/api/v1/failure-clusters/${input.clusterId}`,
+        { corrections },
+      );
+    },
+    onMutate: () => setCorrectError(null),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.clusters(runId) });
+      void queryClient.invalidateQueries({ queryKey: ["failure-clusters"] });
+    },
+    onError: (error) => setCorrectError(error),
+  });
 
   const cancel = useMutation({
     mutationFn: () => {
       if (typeof version !== "number") {
         throw new Error("缺少 expected_version，无法提交终止");
       }
-      return api.post("API-063", `/api/v1/test-runs/${runId}/cancel`, { expected_version: version });
+      return api.post<ResourceEnvelope<TestRunCancelResult>>(
+        "API-063",
+        `/api/v1/test-runs/${runId}/cancel`,
+        { expected_version: version },
+      );
     },
     onMutate: () => setCancelError(null),
-    onSuccess: () => {
-      setSignalSent(true);
+    onSuccess: (payload) => {
+      const cancelledRun = payload.data.test_run;
+      if (cancelledRun.status === "CANCELLED") {
+        setSignalSent(true);
+      } else if (cancelledRun.status === "STOPPING" || cancelledRun.stop_signal_at) {
+        setSignalSent(true);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.testRun(runId) });
     },
     onError: (error) => setCancelError(error),
@@ -109,15 +293,27 @@ export function TestRunDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <RunProgressBar status={status} source={source} />
+            {sseHint ? (
+              <p className="text-xs text-muted-foreground">SSE 提示（非终态）：{sseHint}。权威状态以 GET API-061 为准。</p>
+            ) : null}
             {status === "WAITING_APPROVAL" ? (
               <Button variant="outline" asChild className="w-fit">
                 <Link to="/approvals">WAITING_APPROVAL · 前往审批中心</Link>
               </Button>
             ) : null}
             {signalSent ? (
-              <p className="text-sm text-success">终止信号已持久化送达。STOPPING → CANCELLED 由服务端推进。</p>
+              <p className="text-sm text-success">
+                终止信号已持久化送达。
+                {status === "STOPPING" ? " STOPPING → CANCELLED 由服务端推进。" : ""}
+                {status === "CANCELLED" ? "" : " 当前状态不等于 CANCELLED。"}
+              </p>
             ) : null}
-            <AiDegradeBanner active={Boolean(run.ai_degraded)} />
+            {run?.stop_signal_at && status !== "CANCELLED" ? (
+              <p className="text-xs text-muted-foreground">
+                stop_signal_at 已设置（{run.stop_signal_at}），不等于 CANCELLED。
+              </p>
+            ) : null}
+            <AiDegradeBanner active={degraded} />
           </CardContent>
         </Card>
         <Card>
@@ -129,26 +325,70 @@ export function TestRunDetailPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            {clusterPending ? (
+              <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+                聚类生成中 — 权威报告以 API-130 为准，SSE 进度不代表报告就绪。
+              </p>
+            ) : null}
             {clusters.error ? (
               <CommandFeedback error={clusters.error} apis={PAGE_APIS.P09} action="失败聚类" />
             ) : null}
             {!clusters.error && clusterItems.length === 0 ? (
               <EmptyState compact title="无聚类报告" hint="空集是服务端下发；运行中或无失败时可能为空。" />
             ) : null}
-            {clusterItems.map((item, index) => {
-              const row = asRecord(item);
+            {clusterItems.map((item) => {
+              const detailRow = detailsById.get(item.id);
+              const linkedCaseId = testCaseIdForCluster(item.failure_refs, resultItems);
               return (
                 <ClusterCard
-                  key={String(row.id ?? index)}
+                  key={item.id}
                   cluster={{
-                    id: String(row.id ?? index),
-                    category: String(row.category ?? "unknown"),
-                    confidence: typeof row.confidence === "number" ? row.confidence : 0,
-                    blocking: String(row.blocking_judgment ?? "uncertain"),
-                    summary: typeof row.summary === "string" ? row.summary : undefined,
-                    ruleFallback: row.result === "degraded",
-                    canShowApply: Number(row.confidence ?? 0) >= 0.7,
-                    evidenceHref: typeof row.evidence_href === "string" ? row.evidence_href : undefined,
+                    id: item.id,
+                    category: item.category,
+                    confidence: item.confidence,
+                    blocking: item.blocking_judgment,
+                    summary: item.root_cause ?? undefined,
+                    ruleFallback: degraded,
+                    canShowApply: !degraded,
+                    fixes: detailRow?.fixes_preview,
+                    evidenceRefs: item.evidence_refs,
+                    failureRefs: item.failure_refs,
+                    correctionHistory: detailRow?.correction_history,
+                    similarItems: similarById.get(item.id),
+                  }}
+                  correctPending={correctCluster.isPending}
+                  onCorrect={({ category, blocking }) => {
+                    correctCluster.mutate({
+                      clusterId: item.id,
+                      category,
+                      blocking,
+                      currentCategory: item.category,
+                      currentBlocking: item.blocking_judgment,
+                    });
+                  }}
+                  applyPending={healApply.isPending}
+                  onApply={(fix) => {
+                    if (!linkedCaseId) {
+                      setHealError(new Error("缺少目标用例"));
+                      return;
+                    }
+                    void (async () => {
+                      const caseDetail = await api.get<ResourceEnvelope<Record<string, unknown>>>(
+                        "API-031",
+                        `/api/v1/test-cases/${linkedCaseId}`,
+                      );
+                      const caseVersion = caseDetail.data.version;
+                      if (typeof caseVersion !== "number") {
+                        setHealError(new Error("缺少 expected_target_version"));
+                        return;
+                      }
+                      healApply.mutate({
+                        clusterId: item.id,
+                        fix,
+                        testCaseId: linkedCaseId,
+                        caseVersion,
+                      });
+                    })();
                   }}
                 />
               );
@@ -160,20 +400,19 @@ export function TestRunDetailPage() {
               ) : unclustered.length === 0 ? (
                 <p>服务端未返回无法判断项。</p>
               ) : (
-                unclustered.map((item, index) => {
-                  const row = asRecord(item);
-                  const id = String(row.id ?? row.case_result_id ?? index);
-                  return (
-                    <details key={id} className="mb-1">
-                      <summary className="cursor-pointer font-mono text-xs text-primary">{id}</summary>
-                      <pre className="mt-1 overflow-auto rounded bg-muted p-2 text-[10px]">
-                        {JSON.stringify(item, null, 2)}
-                      </pre>
-                    </details>
-                  );
-                })
+                unclustered.map((caseResultId) => (
+                  <Link
+                    key={caseResultId}
+                    className="mb-1 block font-mono text-xs text-primary underline"
+                    to={`/test-center/case-results/${caseResultId}`}
+                  >
+                    {caseResultId}
+                  </Link>
+                ))
               )}
             </div>
+            <CommandFeedback error={healError} apis={PAGE_APIS.P09} action="heal_apply Preview（API-120）" />
+            <CommandFeedback error={correctError} apis={PAGE_APIS.P09} action="人工修正（API-132）" />
           </CardContent>
         </Card>
         <Card>
@@ -200,17 +439,14 @@ export function TestRunDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {resultItems.map((item, index) => {
-                    const row = asRecord(item);
-                    return (
-                      <TableRow key={String(row.id ?? index)}>
-                        <TableCell className="font-mono text-xs">{String(row.test_case_id ?? row.id ?? "")}</TableCell>
-                        <TableCell>
-                          <StatusBadge status={String(row.status ?? row.result ?? "")} />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {resultItems.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-mono text-xs">{item.test_case_id}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={item.outcome} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             ) : null}
@@ -255,6 +491,32 @@ export function TestRunDetailPage() {
       </AlertDialog>
     </>
   );
+}
+
+function testCaseIdForCluster(
+  failureRefs: string[],
+  resultItems: CaseResultListItem[],
+): string | undefined {
+  const ref = failureRefs[0];
+  if (ref) {
+    const match = resultItems.find((row) => row.id === ref);
+    if (match?.test_case_id) {
+      return match.test_case_id;
+    }
+  }
+  return resultItems[0]?.test_case_id;
+}
+
+function parseSuggestedPatch(suggested: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(suggested) as unknown;
+    if (typeof parsed === "object" && parsed !== null) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return { assertions: [{ type: "status_code", expected: Number(suggested) || 200 }] };
+  }
+  return {};
 }
 
 function StepMark({ step }: { step: string }) {

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope } from "@/api/types";
+import type { ListEnvelope, TestRunListItem } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,12 +21,13 @@ export function TestRunListPage() {
   const query = useQuery({
     queryKey: queryKeys.testRuns({ projectId: projectId ?? "", status, source, cursor }),
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-060", "/api/v1/test-runs", {
+      api.get<ListEnvelope<TestRunListItem>>("API-060", "/api/v1/test-runs", {
         project_id: projectId,
         status: status || undefined,
         execution_source: source || undefined,
         cursor: cursor || undefined,
       }),
+    enabled: Boolean(projectId),
   });
 
   const items = query.data?.data.items ?? [];
@@ -70,27 +71,28 @@ export function TestRunListPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((row, index) => {
-                const id = String(row.id ?? index);
-                return (
-                  <TableRow key={id}>
-                    <TableCell>
-                      <Link className="font-mono text-primary" to={`/test-center/runs/${id}`}>
-                        {id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={String(row.status ?? "")} />
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={String(row.execution_source ?? "")} />
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {String(row.waiting_duration ?? "由服务端投影")}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {items.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <Link className="font-mono text-primary" to={`/test-center/runs/${row.id}`}>
+                      {row.id}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={row.status} />
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={row.execution_source} />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {row.status === "WAITING_APPROVAL" || row.status === "WAITING_EXTERNAL"
+                      ? typeof row.dwell_seconds === "number"
+                        ? `${row.dwell_seconds}s`
+                        : "—"
+                      : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         )}

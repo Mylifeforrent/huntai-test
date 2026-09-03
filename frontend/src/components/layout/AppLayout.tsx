@@ -1,11 +1,12 @@
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   Box,
   ClipboardCheck,
   FolderKanban,
   LayoutDashboard,
+  LogOut,
   Menu,
   PlayCircle,
   Search,
@@ -15,7 +16,8 @@ import {
 import { api } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import type { ResourceEnvelope } from "@/api/types";
-import { isUndeveloped } from "@/api/errors";
+import { ApiError, isUndeveloped } from "@/api/errors";
+import { logoutSession } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -70,6 +72,7 @@ const ADMIN_LINKS = [
 export function AppLayout() {
   const { projectId } = useParams();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggle = useUiStore((state) => state.toggleSidebar);
   const inProject = location.pathname.startsWith("/projects");
@@ -168,6 +171,16 @@ export function AppLayout() {
             <Button variant="ghost" size="icon" aria-label="通知">
               <Bell className="size-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="退出登录"
+              onClick={() => {
+                void logoutSession(queryClient);
+              }}
+            >
+              <LogOut className="size-4" />
+            </Button>
           </header>
           {inProject ? <Subnav links={projectLinks(projectId)} /> : null}
           {inTestCenter ? <Subnav links={TEST_CENTER_LINKS} /> : null}
@@ -213,8 +226,17 @@ function aiBanner(
   error: unknown,
   pending: boolean,
 ): { tone: "ok" | "warn" | "pending"; text: string } {
-  if (pending || error || !data) {
-    return { tone: "pending", text: "待 API-010" };
+  if (pending) {
+    return { tone: "pending", text: "加载组织信息…" };
+  }
+  if (error instanceof ApiError && error.kind === "permission") {
+    return { tone: "warn", text: "无组织访问权限" };
+  }
+  if (error || !data) {
+    if (isUndeveloped(error)) {
+      return { tone: "pending", text: "待 API-010" };
+    }
+    return { tone: "pending", text: "组织信息不可用" };
   }
   const controls = asRecord(data.capability_controls);
   if (controls.ai_global_tightened === true) {

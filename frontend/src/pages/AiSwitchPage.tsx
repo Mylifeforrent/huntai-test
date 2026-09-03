@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ResourceEnvelope } from "@/api/types";
+import type { OrganizationCapabilityControls, ResourceEnvelope } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,9 +18,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { PageHeader, QueryGate } from "@/components/domain/PageState";
+import { CommandFeedback, PageHeader, QueryGate } from "@/components/domain/PageState";
 import { AiDegradeBanner } from "@/components/domain/AiDegradeBanner";
-import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 
 const ABILITIES = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"] as const;
 const MODULES = ["copilot", "release", "perf"] as const;
@@ -36,8 +35,9 @@ const LEVELS = [
 type PendingAction = { kind: "tighten" | "restore"; level: string; id: string; label: string };
 
 export function AiSwitchPage() {
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState<PendingAction | null>(null);
-  const [tried, setTried] = useState("");
+  const [commandError, setCommandError] = useState<unknown>(null);
 
   const query = useQuery({
     queryKey: queryKeys.organization,
@@ -49,36 +49,61 @@ export function AiSwitchPage() {
   const globalOff = controls.ai_global_tightened === true;
   const tightCaps = toStringList(controls.tightened_capabilities);
   const tightMods = toStringList(controls.tightened_modules);
+  const tightConns = toStringList(controls.tightened_connectors);
   const banner = typeof controls.banner_scope === "string" ? controls.banner_scope : undefined;
   const orgId = String(org.id ?? "");
-  const orgVersion = org.version;
+  const orgVersion = typeof org.version === "number" ? org.version : undefined;
+
+  const tightenMutation = useMutation({
+    mutationFn: (input: PendingAction) => {
+      if (orgVersion === undefined) {
+        return Promise.reject(new Error("missing org version"));
+      }
+      const target: Record<string, unknown> = { level: input.level };
+      if (input.level === "ability") target.capability_id = input.id;
+      if (input.level === "module") target.module = input.id;
+      if (input.level === "connector") target.connector_id = input.id;
+      return api.post<ResourceEnvelope<OrganizationCapabilityControls>>(
+        "API-199",
+        "/api/v1/organizations/current/capability-controls/tighten",
+        {
+          expected_version: orgVersion,
+          target,
+          reason: `tighten ${input.label}`,
+        },
+      );
+    },
+    onMutate: () => setCommandError(null),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.organization });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
+    },
+    onError: (error) => setCommandError(error),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (input: PendingAction) => {
+      if (orgVersion === undefined) {
+        return Promise.reject(new Error("missing org version"));
+      }
+      return api.post("API-120", "/api/v1/action-previews", {
+        action_type: "kill_switch_restore",
+        target_object_type: "organization",
+        target_object_id: orgId,
+        payload: { target: { level: input.level, id: input.id } },
+        expected_target_version: orgVersion,
+      });
+    },
+    onMutate: () => setCommandError(null),
+    onError: (error) => setCommandError(error),
+  });
 
   function confirmPending() {
     if (!pending) return;
     if (pending.kind === "tighten") {
-      setTried("tighten");
-      const target: Record<string, unknown> = { level: pending.level };
-      if (pending.level === "ability") target.capability_id = pending.id;
-      if (pending.level === "module") target.module = pending.id;
-      if (pending.level === "connector") target.connector_id = pending.id;
-      void api
-        .post("API-199", "/api/v1/organizations/current/capability-controls/tighten", {
-          expected_version: orgVersion,
-          target,
-          reason: `tighten ${pending.label}`,
-        })
-        .catch(() => undefined);
+      tightenMutation.mutate(pending);
     } else {
-      setTried("restore");
-      void api
-        .post("API-120", "/api/v1/action-previews", {
-          action_type: "kill_switch_restore",
-          target_object_type: "organization",
-          target_object_id: orgId,
-          payload: { target: { level: pending.level, id: pending.id } },
-          expected_target_version: orgVersion,
-        })
-        .catch(() => undefined);
+      restoreMutation.mutate(pending);
     }
     setPending(null);
   }
@@ -88,6 +113,7 @@ export function AiSwitchPage() {
       <PageHeader title="AI 能力开关与降级" description="四级 kill switch · 当前降级状态与横幅生效范围 · 压测 kill switch 演练入口" />
       <QueryGate isPending={query.isPending} error={query.error} apis={PAGE_APIS.P23}>
         <AiDegradeBanner active={globalOff || tightCaps.length > 0 || tightMods.length > 0} scope={banner} />
+        <CommandFeedback error={commandError} apis={PAGE_APIS.P23} action="能力开关" />
         <Alert variant="warning">
           <AlertTitle>开关方向不对称</AlertTitle>
           <AlertDescription>
@@ -119,7 +145,11 @@ export function AiSwitchPage() {
                     ? globalOff
                     : level.id === "ability"
                       ? tightCaps.includes(row.id) || globalOff
-                      : tightMods.includes(row.id) || globalOff;
+                      : level.id === "module"
+                        ? tightMods.includes(row.id) || globalOff
+                        : level.id === "connector"
+                          ? tightConns.includes(row.id) || globalOff
+                          : globalOff;
                 return (
                   <div key={row.id} className="flex items-center justify-between rounded-md border p-3">
                     <div className="flex items-center gap-2">
@@ -151,8 +181,6 @@ export function AiSwitchPage() {
           </Card>
         ))}
       </QueryGate>
-      {tried === "tighten" ? <UndevelopedCallout apis={PAGE_APIS.P23} action="关停 API-199" /> : null}
-      {tried === "restore" ? <UndevelopedCallout apis={PAGE_APIS.P23} action="恢复须走 kill_switch_restore（API-120），不得调用 tighten" /> : null}
       <AlertDialog open={Boolean(pending)} onOpenChange={(open) => !open && setPending(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

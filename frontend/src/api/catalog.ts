@@ -22,15 +22,43 @@ export const PAGE_APIS = {
     { id: "API-018", method: "GET", path: "/api/v1/projects/{project_id}/quota-view", summary: "项目配额" },
     { id: "API-019", method: "GET", path: "/api/v1/projects/{project_id}/notification-subscriptions", summary: "通知订阅" },
   ],
+  P04_members: [
+    { id: "API-013", method: "GET", path: "/api/v1/projects/{project_id}/members", summary: "成员列表" },
+    { id: "API-014", method: "POST", path: "/api/v1/projects/{project_id}/members", summary: "添加成员" },
+    { id: "API-015", method: "PATCH", path: "/api/v1/projects/{project_id}/members/{user_id}", summary: "变更角色" },
+    { id: "API-016", method: "DELETE", path: "/api/v1/projects/{project_id}/members/{user_id}", summary: "移除成员" },
+  ],
+  P04_quota: [{ id: "API-018", method: "GET", path: "/api/v1/projects/{project_id}/quota-view", summary: "项目配额" }],
+  P04_notify: [
+    {
+      id: "API-019",
+      method: "GET",
+      path: "/api/v1/projects/{project_id}/notification-subscriptions",
+      summary: "通知订阅",
+    },
+  ],
   P05: [
     { id: "API-030", method: "GET", path: "/api/v1/test-cases", summary: "用例列表" },
+    { id: "API-032", method: "POST", path: "/api/v1/test-cases", summary: "创建草稿" },
+    { id: "API-034", method: "POST", path: "/api/v1/test-cases/{test_case_id}/submit-review", summary: "提交评审" },
+    { id: "API-035", method: "POST", path: "/api/v1/test-cases/{test_case_id}/review", summary: "评审决策" },
     { id: "API-200", method: "POST", path: "/api/v1/test-cases/imports", summary: "Excel 导入" },
     { id: "API-202", method: "POST", path: "/api/v1/test-cases/exports", summary: "Excel 导出" },
   ],
-  P06: [{ id: "API-050", method: "GET", path: "/api/v1/test-plans", summary: "测试计划" }],
+  P06: [
+    { id: "API-050", method: "GET", path: "/api/v1/test-plans", summary: "测试计划列表" },
+    { id: "API-051", method: "GET", path: "/api/v1/test-plans/{test_plan_id}", summary: "计划详情" },
+    { id: "API-052", method: "POST", path: "/api/v1/test-plans", summary: "创建计划" },
+    { id: "API-053", method: "PATCH", path: "/api/v1/test-plans/{test_plan_id}", summary: "更新编排" },
+    { id: "API-054", method: "PUT", path: "/api/v1/test-plans/{test_plan_id}/case-ids", summary: "绑定用例集" },
+    { id: "API-055", method: "PUT", path: "/api/v1/test-plans/{test_plan_id}/schedule", summary: "定时绑定" },
+  ],
   P07: [
     { id: "API-180", method: "POST", path: "/api/v1/ai/generations", summary: "A1 生成受理" },
+    { id: "API-181", method: "GET", path: "/api/v1/ai/generations/{generation_id}", summary: "生成状态" },
     { id: "API-182", method: "GET", path: "/api/v1/ai/generations/{generation_id}/drafts", summary: "结构化草稿" },
+    { id: "API-211", method: "GET", path: "/api/v1/ai/generations/{generation_id}/events", summary: "SSE 进度" },
+    { id: "API-032", method: "POST", path: "/api/v1/test-cases", summary: "采纳草稿" },
   ],
   P08: [
     { id: "API-011", method: "GET", path: "/api/v1/projects", summary: "项目列表" },
@@ -43,6 +71,9 @@ export const PAGE_APIS = {
     { id: "API-061", method: "GET", path: "/api/v1/test-runs/{test_run_id}", summary: "TestRun 详情" },
     { id: "API-064", method: "GET", path: "/api/v1/test-runs/{test_run_id}/case-results", summary: "用例结果" },
     { id: "API-130", method: "GET", path: "/api/v1/test-runs/{test_run_id}/failure-clusters", summary: "聚类报告" },
+    { id: "API-131", method: "GET", path: "/api/v1/failure-clusters/{failure_cluster_id}", summary: "聚类详情" },
+    { id: "API-132", method: "PATCH", path: "/api/v1/failure-clusters/{failure_cluster_id}", summary: "人工修正留痕" },
+    { id: "API-133", method: "GET", path: "/api/v1/failure-clusters/{failure_cluster_id}/similar", summary: "相似失败" },
     { id: "API-210", method: "GET", path: "/api/v1/test-runs/{test_run_id}/events", summary: "SSE 进度" },
     { id: "API-063", method: "POST", path: "/api/v1/test-runs/{test_run_id}/cancel", summary: "终止" },
   ],
@@ -51,11 +82,20 @@ export const PAGE_APIS = {
     { id: "API-112", method: "POST", path: "/api/v1/approval-requests/{approval_request_id}/decisions", summary: "批准/拒绝" },
     { id: "API-113", method: "POST", path: "/api/v1/approval-requests/{approval_request_id}/resubmissions", summary: "修改后重新提交" },
   ],
-  P11: [{ id: "API-140", method: "GET", path: "/api/v1/quality-gate-policies", summary: "门禁策略" }],
+  P10_preview: [
+    { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "Policy Gate Preview" },
+  ],
+  P11: [
+    { id: "API-140", method: "GET", path: "/api/v1/quality-gate-policies", summary: "门禁策略列表" },
+    { id: "API-141", method: "GET", path: "/api/v1/quality-gate-policies/{policy_id}", summary: "门禁策略详情" },
+    { id: "API-142", method: "POST", path: "/api/v1/quality-gate-policies", summary: "创建门禁策略" },
+    { id: "API-143", method: "PATCH", path: "/api/v1/quality-gate-policies/{policy_id}", summary: "更新门禁策略" },
+  ],
   P12: [{ id: "API-144", method: "GET", path: "/api/v1/gate-evaluations", summary: "门禁评估历史" }],
   P13: [
     { id: "API-031", method: "GET", path: "/api/v1/test-cases/{test_case_id}", summary: "用例详情" },
     { id: "API-037", method: "GET", path: "/api/v1/test-cases/{test_case_id}/versions", summary: "版本历史" },
+    { id: "API-039", method: "POST", path: "/api/v1/test-cases/{test_case_id}/rollback", summary: "版本回滚" },
   ],
   P14: [
     { id: "API-067", method: "GET", path: "/api/v1/test-runs/{test_run_id}/trajectory", summary: "Agent 轨迹" },
@@ -64,7 +104,12 @@ export const PAGE_APIS = {
   ],
   P15: [
     { id: "API-100", method: "GET", path: "/api/v1/execution-environments", summary: "环境列表" },
+    { id: "API-101", method: "GET", path: "/api/v1/execution-environments/{environment_id}", summary: "环境详情" },
     { id: "API-102", method: "POST", path: "/api/v1/execution-environments", summary: "环境注册" },
+    { id: "API-103", method: "POST", path: "/api/v1/execution-environments/{environment_id}/disable", summary: "停用环境" },
+    { id: "API-104", method: "GET", path: "/api/v1/execution-environments/{environment_id}/jobs", summary: "Job Registry" },
+    { id: "API-105", method: "GET", path: "/api/v1/execution-environments/{environment_id}/health", summary: "健康投影" },
+    { id: "API-070", method: "GET", path: "/api/v1/execution-environments/{environment_id}/jobs/{job_id}/params-schema", summary: "Job 参数 Schema" },
     { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "Policy Gate Preview" },
   ],
   P16: [
@@ -84,7 +129,10 @@ export const PAGE_APIS = {
   P21: [{ id: "API-183", method: "GET", path: "/api/v1/ai/cost-dashboard", summary: "AI 成本看板" }],
   P22: [
     { id: "API-196", method: "GET", path: "/api/v1/model-routes", summary: "模型路由" },
+    { id: "API-197", method: "PUT", path: "/api/v1/model-routes/{model_route_id}", summary: "更新路由" },
     { id: "API-198", method: "POST", path: "/api/v1/model-routes/{model_route_id}/connection-tests", summary: "测试连接" },
+    { id: "API-184", method: "GET", path: "/api/v1/ai-invocation-logs", summary: "AI 调用日志" },
+    { id: "API-185", method: "GET", path: "/api/v1/ai-invocation-logs/{log_id}", summary: "日志详情" },
   ],
   P23: [
     { id: "API-010", method: "GET", path: "/api/v1/organizations/current", summary: "降级/开关投影" },
@@ -93,6 +141,7 @@ export const PAGE_APIS = {
   ],
   P24: [
     { id: "API-024", method: "GET", path: "/api/v1/audit-events", summary: "审计检索" },
+    { id: "API-025", method: "GET", path: "/api/v1/audit-events/{audit_event_id}", summary: "审计详情" },
     { id: "API-040", method: "PUT", path: "/api/v1/organizations/current/siem-export", summary: "SIEM 外发" },
   ],
   P25: [
