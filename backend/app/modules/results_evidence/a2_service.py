@@ -26,6 +26,7 @@ VALID_CATEGORIES = frozenset(
 )
 VALID_BLOCKING = frozenset({"blocker", "non_blocker", "uncertain"})
 ASSERTION_TYPES_FOR_BUG = frozenset({"status_code", "equals", "contains", "json_path", "header"})
+WEB_LOCATOR_ACTIONS = frozenset({"click", "fill", "type", "select", "check", "hover"})
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,20 @@ def _rule_category_for_case(case: dict[str, Any]) -> str:
         for step in steps:
             if not isinstance(step, dict):
                 continue
+            action_obj = step.get("action")
+            if isinstance(action_obj, dict):
+                action_name = str(action_obj.get("action", ""))
+                if action_name in WEB_LOCATOR_ACTIONS:
+                    params = action_obj.get("params")
+                    if isinstance(params, dict) and isinstance(params.get("selector"), str):
+                        assertion_payload = step.get("assertion_results")
+                        passed: bool | None = None
+                        if isinstance(assertion_payload, dict):
+                            raw_passed = assertion_payload.get("passed")
+                            if isinstance(raw_passed, bool):
+                                passed = raw_passed
+                        if step.get("observation_ref") or passed is False:
+                            return "locator_stale"
             assertions = step.get("assertion_results")
             items: list[Any] = []
             if isinstance(assertions, dict):

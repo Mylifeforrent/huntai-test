@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session_factory
 from app.modules.results_evidence import repository as repo
 from app.modules.results_evidence.a2_service import confidence_to_decimal, run_a2_triage
+from app.modules.results_evidence.a3_service import run_a3_for_locator_cluster
 from app.modules.run_orchestration import command_port as run_command
 from app.modules.run_orchestration import query_port as run_query
 
@@ -390,7 +391,20 @@ async def run_failure_triage_background(
             failed_cases=failed_payloads,
             evidence_pool=set(evidence_by_case.values()),
         )
+        failed_by_id = {item["id"]: item for item in failed_payloads}
+        case_result_test_case_ids = {row.id: row.test_case_id for row in failed_rows}
         for draft in triage.clusters:
+            fixes = list(draft.fixes)
+            if draft.category == "locator_stale":
+                a3_fixes = await run_a3_for_locator_cluster(
+                    session,
+                    organization_id=organization_id,
+                    user_id=run["created_by"],
+                    failure_refs=draft.failure_refs,
+                    failed_payloads=failed_by_id,
+                    case_result_test_case_ids=case_result_test_case_ids,
+                )
+                fixes.extend(a3_fixes)
             await repo.insert_failure_cluster(
                 session,
                 organization_id=organization_id,
@@ -408,7 +422,7 @@ async def run_failure_triage_background(
                 ),
                 failure_refs=draft.failure_refs,
                 unclustered_refs=triage.unclustered_refs or None,
-                fixes=draft.fixes or None,
+                fixes=fixes or None,
             )
         await run_command.merge_clustering_projection(
             session,

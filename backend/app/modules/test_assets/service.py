@@ -18,6 +18,7 @@ from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.run_orchestration import query_port as run_query
 from app.modules.test_assets import repository as repo
+from app.modules.test_assets.locator_health import extract_locator_health_from_steps
 from app.modules.test_assets.models import ImportSource, TestCase, TestCaseVersion, TestPlan
 
 READ_ROLES = frozenset({"owner", "admin", "tester", "viewer"})
@@ -120,6 +121,81 @@ def serialize_list_item(row: TestCase) -> dict[str, Any]:
     }
 
 
+def _fix_confidence(fix: dict[str, Any]) -> float:
+    try:
+        return float(fix.get("confidence", 0.0))
+    except (TypeError, ValueError):  # fmt: skip
+        return 0.0
+
+
+def _overlay_locator_health(
+    locator_health: list[dict[str, Any]],
+    *,
+    cluster: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not locator_health:
+        return locator_health
+    fixes_by_locator: dict[str, dict[str, Any]] = {}
+    cluster_id: str | None = None
+    stale_cluster = cluster is not None and cluster.get("category") == "locator_stale"
+    if stale_cluster and cluster is not None:
+        cluster_id = str(cluster["id"])
+        for cluster_fix in cluster.get("fixes") or []:
+            if not isinstance(cluster_fix, dict) or cluster_fix.get("field") != "locator_health":
+                continue
+            locator_id = cluster_fix.get("locator_id")
+            if isinstance(locator_id, str) and locator_id:
+                fixes_by_locator[locator_id] = cluster_fix
+        matched = any(str(loc.get("locator_id", "")) in fixes_by_locator for loc in locator_health)
+        if fixes_by_locator and not matched:
+            primary = next(
+                (loc for loc in locator_health if loc.get("is_primary") is True),
+                locator_health[0],
+            )
+            primary_id = str(primary.get("locator_id", ""))
+            if primary_id:
+                fixes_by_locator[primary_id] = next(iter(fixes_by_locator.values()))
+
+    overlaid: list[dict[str, Any]] = []
+    for loc in locator_health:
+        item = dict(loc)
+        locator_id = str(item.get("locator_id", ""))
+        fix = fixes_by_locator.get(locator_id)
+        if fix and _fix_confidence(fix) >= 0.7:
+            item["health"] = "stale"
+            item["expression"] = str(fix.get("current", item.get("expression", "")))
+            item["failure_cluster_id"] = cluster_id
+            item["fix_preview"] = {
+                "field": str(fix.get("field", "")),
+                "current": str(fix.get("current", "")),
+                "suggested": str(fix.get("suggested", "")),
+                "reason": str(fix.get("reason", "")),
+                "confidence": _fix_confidence(fix),
+            }
+            candidates = fix.get("candidates")
+            if isinstance(candidates, list):
+                item["candidates"] = candidates
+            note = fix.get("semantic_invariant_note")
+            if isinstance(note, str) and note:
+                item["semantic_invariant_note"] = note
+        elif fix or stale_cluster:
+            item["health"] = "stale"
+            if cluster_id:
+                item["failure_cluster_id"] = cluster_id
+            if fix:
+                for extra_key in ("human_repair_hint", "dom_diff", "semantic_invariant_note"):
+                    extra = fix.get(extra_key)
+                    if isinstance(extra, str) and extra:
+                        item[extra_key] = extra
+                candidates = fix.get("candidates")
+                if isinstance(candidates, list):
+                    item["candidates"] = candidates
+        else:
+            item["health"] = "ok"
+        overlaid.append(item)
+    return overlaid
+
+
 def serialize_detail(row: TestCase, version: TestCaseVersion | None) -> dict[str, Any]:
     payload = serialize_list_item(row)
     payload["version"] = row.aggregate_version
@@ -157,6 +233,9 @@ def _build_snapshot(
                 assertions.extend(draft_assertions)
     elif script:
         steps = [{"action": "script", "params": {"ref": "inline"}}]
+    locator_health: list[dict[str, Any]] = []
+    if case_type == "web":
+        locator_health = extract_locator_health_from_steps(steps)
     return {
         "title": title,
         "priority": priority,
@@ -165,7 +244,7 @@ def _build_snapshot(
         "execution_mode": execution_mode,
         "steps": steps,
         "assertions": assertions,
-        "locator_health": [],
+        "locator_health": locator_health,
     }
 
 
@@ -286,6 +365,20 @@ async def get_test_case_for_caller(
         organization_id=ctx.organization.id,
         test_case_id=test_case_id,
     )
+    locator_health = payload.get("locator_health", [])
+    if isinstance(locator_health, list) and not locator_health:
+        steps = payload.get("steps", [])
+        if isinstance(steps, list) and row.case_type == "web":
+            locator_health = extract_locator_health_from_steps(steps)
+    cluster = await evidence_query.get_latest_locator_stale_cluster_for_test_case(
+        session,
+        organization_id=ctx.organization.id,
+        test_case_id=test_case_id,
+    )
+    if isinstance(locator_health, list):
+        payload["locator_health"] = _overlay_locator_health(locator_health, cluster=cluster)
+    if cluster is not None:
+        payload["locator_stale_cluster_confidence"] = float(cluster["confidence"])
     return payload
 
 
@@ -1386,3 +1479,108 @@ async def put_test_plan_schedule_for_caller(
         ),
     )
     return response
+
+
+def serialize_version_list_item(
+    version: TestCaseVersion,
+    *,
+    is_current: bool,
+) -> dict[str, Any]:
+    return {
+        "id": str(version.id),
+        "created_at": _iso(version.created_at),
+        "created_by": str(version.created_by) if version.created_by else None,
+        "test_case_id": str(version.test_case_id),
+        "version_seq": version.version_seq,
+        "data_classification": version.data_classification,
+        "is_current": is_current,
+    }
+
+
+def _minimize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return dict(snapshot)
+
+
+async def list_test_case_versions_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_case_id: uuid.UUID,
+    cursor: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    row = await repo.get_test_case(
+        session, organization_id=ctx.organization.id, test_case_id=test_case_id
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=READ_ROLES)
+    page_limit = min(limit or 50, 100)
+    cursor_version_seq: int | None = None
+    cursor_id: uuid.UUID | None = None
+    if cursor is not None:
+        cursor_version_seq, cursor_id = repo.decode_version_seq_cursor(cursor)
+    rows = await repo.list_test_case_versions(
+        session,
+        organization_id=ctx.organization.id,
+        test_case_id=test_case_id,
+        cursor_version_seq=cursor_version_seq,
+        cursor_id=cursor_id,
+        limit=page_limit,
+    )
+    has_more = len(rows) > page_limit
+    items = rows[:page_limit]
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = repo.encode_version_seq_cursor(
+            version_seq=last.version_seq,
+            item_id=last.id,
+        )
+    current_version_id = row.current_version_id
+    return {
+        "items": [
+            serialize_version_list_item(
+                item,
+                is_current=current_version_id is not None and item.id == current_version_id,
+            )
+            for item in items
+        ],
+        "page": {"next_cursor": next_cursor, "has_more": has_more},
+    }
+
+
+async def get_test_case_version_snapshot_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_case_id: uuid.UUID,
+    version_id: uuid.UUID,
+) -> dict[str, Any]:
+    row = await repo.get_test_case(
+        session, organization_id=ctx.organization.id, test_case_id=test_case_id
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=READ_ROLES)
+    version = await repo.get_test_case_version_for_case(
+        session,
+        organization_id=ctx.organization.id,
+        test_case_id=test_case_id,
+        version_id=version_id,
+    )
+    if version is None:
+        raise ValueError("not_found")
+    payload = serialize_version_list_item(
+        version,
+        is_current=row.current_version_id is not None and row.current_version_id == version.id,
+    )
+    snapshot = _minimize_snapshot(version.snapshot)
+    locator_health = snapshot.get("locator_health", [])
+    if isinstance(locator_health, list) and not locator_health:
+        steps = snapshot.get("steps", [])
+        if isinstance(steps, list) and row.case_type == "web":
+            derived = extract_locator_health_from_steps(steps)
+            snapshot = {**snapshot, "locator_health": derived}
+    payload["snapshot"] = snapshot
+    return payload
