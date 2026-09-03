@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { BlockingJudgment, ClusterCategory } from "@/api/types";
+import type { BlockingJudgment, ClusterCategory, FailureClusterFixPreview } from "@/api/types";
 import { cn } from "@/lib/utils";
 
 const CATEGORY_LABEL: Record<ClusterCategory, string> = {
@@ -24,17 +24,28 @@ export interface ClusterCardModel {
   summary?: string;
   ruleFallback?: boolean;
   canShowApply?: boolean;
+  fixes?: FailureClusterFixPreview[];
 }
 
 export function ClusterCard({
   cluster,
   onCorrect,
+  onApply,
+  applyPending,
 }: {
   cluster: ClusterCardModel;
   onCorrect?: (next: { category: string; blocking: string }) => void;
+  onApply?: (fix: FailureClusterFixPreview) => void;
+  applyPending?: boolean;
 }) {
   const unknown = cluster.category === "unknown";
-  const applyVisible = Boolean(cluster.canShowApply && cluster.confidence >= 0.7);
+  const bestFix = (cluster.fixes ?? []).find((fix) => fix.confidence >= 0.7);
+  const applyVisible = Boolean(
+    cluster.canShowApply &&
+      !cluster.ruleFallback &&
+      cluster.confidence >= 0.7 &&
+      bestFix,
+  );
 
   return (
     <Card className={cn(unknown && "border-warning/40")}>
@@ -80,8 +91,12 @@ export function ClusterCard({
           >
             提交修正留痕
           </Button>
-          {applyVisible ? (
-            <Button size="sm" disabled>
+          {applyVisible && bestFix ? (
+            <Button
+              size="sm"
+              disabled={applyPending}
+              onClick={() => onApply?.(bestFix)}
+            >
               可应用（须审批）
             </Button>
           ) : null}

@@ -162,6 +162,42 @@ export interface ResourceEnvelope<T> {
   data: T;
 }
 
+export interface FailureClusterListItem {
+  id: string;
+  test_run_id: string;
+  category: ClusterCategory | string;
+  root_cause?: string | null;
+  confidence: number;
+  blocking_judgment: BlockingJudgment | string;
+  evidence_refs: string[];
+  failure_refs: string[];
+  created_at?: string;
+}
+
+export interface FailureClusterFixPreview {
+  field: string;
+  current: string;
+  suggested: string;
+  reason: string;
+  confidence: number;
+  can_auto_apply: false;
+}
+
+export interface FailureClusterDetail extends FailureClusterListItem {
+  correction_history: Array<Record<string, unknown>>;
+  fixes_preview?: FailureClusterFixPreview[];
+  unclustered_refs?: string[];
+}
+
+export interface FailureClusterReport {
+  test_run_id: string;
+  items: FailureClusterListItem[];
+  unclustered_refs: string[];
+  generation_status: "pending" | "ready" | "degraded" | string;
+  degraded: boolean;
+  page?: PageCursor;
+}
+
 export interface CommandReceipt {
   id: string;
   command_type: string;

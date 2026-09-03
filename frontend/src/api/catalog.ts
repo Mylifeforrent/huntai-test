@@ -80,6 +80,7 @@ export const PAGE_APIS = {
   P13: [
     { id: "API-031", method: "GET", path: "/api/v1/test-cases/{test_case_id}", summary: "用例详情" },
     { id: "API-037", method: "GET", path: "/api/v1/test-cases/{test_case_id}/versions", summary: "版本历史" },
+    { id: "API-039", method: "POST", path: "/api/v1/test-cases/{test_case_id}/rollback", summary: "版本回滚" },
   ],
   P14: [
     { id: "API-067", method: "GET", path: "/api/v1/test-runs/{test_run_id}/trajectory", summary: "Agent 轨迹" },

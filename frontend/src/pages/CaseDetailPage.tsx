@@ -1,20 +1,24 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
 import type { ListEnvelope, ResourceEnvelope } from "@/api/types";
+import { useSession } from "@/hooks/useSession";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
 import { EvidenceViewer } from "@/components/domain/EvidenceViewer";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 
 export function CaseDetailPage() {
   const { caseId = "" } = useParams();
+  const queryClient = useQueryClient();
+  const session = useSession();
 
   const detail = useQuery({
     queryKey: queryKeys.testCase(caseId),
@@ -29,12 +33,38 @@ export function CaseDetailPage() {
   });
 
   const data = detail.data?.data ?? {};
+  const projectId = typeof data.project_id === "string" ? data.project_id : "";
+  const membership = session.me?.memberships.find((item) => item.project_id === projectId);
+  const canRollback = membership?.role === "owner" || membership?.role === "admin";
+
   const caseType = String(data.case_type ?? "");
   const isWeb = caseType === "web";
   const steps = Array.isArray(data.steps) ? data.steps : [];
   const locators = Array.isArray(data.locator_health) ? data.locator_health : [];
   const evidence = asRecord(data.evidence_preview);
   const versionItems = versions.data?.data.items ?? [];
+  const currentVersionId = typeof data.current_version_id === "string" ? data.current_version_id : "";
+  const caseVersion = typeof data.version === "number" ? data.version : null;
+
+  const rollback = useMutation({
+    mutationFn: () => {
+      if (caseVersion === null || !currentVersionId) {
+        throw new Error("缺少版本指针");
+      }
+      return api.post<ResourceEnvelope<Record<string, unknown>>>(
+        "API-039",
+        `/api/v1/test-cases/${caseId}/rollback`,
+        {
+          expected_version: caseVersion,
+          target_version_id: currentVersionId,
+          reason: "heal rollback",
+        },
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.testCase(caseId) });
+    },
+  });
 
   return (
     <>
@@ -125,10 +155,21 @@ export function CaseDetailPage() {
           </>
         ) : null}
         <Card>
-          <CardHeader>
+          <CardHeader className="flex-row items-center justify-between gap-2">
             <CardTitle>版本历史</CardTitle>
+            {canRollback && currentVersionId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={rollback.isPending}
+                onClick={() => rollback.mutate()}
+              >
+                回滚到当前快照（API-039）
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent>
+            <CommandFeedback error={rollback.error} apis={PAGE_APIS.P13} action="版本回滚 API-039" />
             {versions.error ? (
               <UndevelopedCallout apis={PAGE_APIS.P13} error={versions.error} action="版本历史 API-037" />
             ) : versionItems.length === 0 ? (

@@ -3,7 +3,12 @@ import { act, type ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ListEnvelope, ResourceEnvelope, TestRunDetail } from "@/api/types";
+import type {
+  FailureClusterReport,
+  ListEnvelope,
+  ResourceEnvelope,
+  TestRunDetail,
+} from "@/api/types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -149,7 +154,50 @@ beforeEach(() => {
       } satisfies ListEnvelope<Record<string, unknown>>);
     }
     if (apiId === "API-130") {
-      return Promise.reject(new Error("undeveloped"));
+      return Promise.resolve({
+        data: {
+          test_run_id: "run-1",
+          items: [
+            {
+              id: "cluster-1",
+              test_run_id: "run-1",
+              category: "assertion_real_bug",
+              confidence: 0.85,
+              blocking_judgment: "blocker",
+              evidence_refs: [],
+              failure_refs: ["case-result-1"],
+            },
+          ],
+          unclustered_refs: [],
+          generation_status: "ready",
+          degraded: false,
+          page: { has_more: false, next_cursor: null },
+        },
+      } satisfies ResourceEnvelope<FailureClusterReport>);
+    }
+    if (apiId === "API-131") {
+      return Promise.resolve({
+        data: {
+          id: "cluster-1",
+          test_run_id: "run-1",
+          category: "assertion_real_bug",
+          confidence: 0.85,
+          blocking_judgment: "blocker",
+          evidence_refs: [],
+          failure_refs: ["case-result-1"],
+          correction_history: [],
+          fixes_preview: [
+            {
+              field: "assertions",
+              current: "200",
+              suggested: '{"assertions":[{"type":"status_code","expected":500}]}',
+              reason: "align",
+              confidence: 0.85,
+              can_auto_apply: false,
+            },
+          ],
+        },
+      });
     }
     return Promise.reject(new Error(`unexpected ${apiId}`));
   });
@@ -177,5 +225,88 @@ describe("TestRunDetailPage", () => {
     await flush();
     expect(container.textContent).toContain("PENDING");
     expect(container.textContent).toContain("SSE 提示（非终态）：succeeded");
+  });
+
+  it("renders API-130 report shape and shows apply for high confidence", async () => {
+    const succeededRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: succeededRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [{ id: "case-result-1", test_case_id: "case-1", outcome: "failed" }] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [
+              {
+                id: "cluster-1",
+                test_run_id: "run-1",
+                category: "assertion_real_bug",
+                confidence: 0.85,
+                blocking_judgment: "blocker",
+                evidence_refs: [],
+                failure_refs: ["case-result-1"],
+              },
+            ],
+            unclustered_refs: [],
+            generation_status: "ready",
+            degraded: false,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      if (apiId === "API-131") {
+        return Promise.resolve({
+          data: {
+            id: "cluster-1",
+            test_run_id: "run-1",
+            category: "assertion_real_bug",
+            confidence: 0.85,
+            blocking_judgment: "blocker",
+            evidence_refs: [],
+            failure_refs: ["case-result-1"],
+            correction_history: [],
+            fixes_preview: [
+              {
+                field: "assertions",
+                current: "200",
+                suggested: "{}",
+                reason: "align",
+                confidence: 0.85,
+                can_auto_apply: false,
+              },
+            ],
+          },
+        });
+      }
+      if (apiId === "API-031") {
+        return Promise.resolve({ data: { id: "case-1", version: 2 } });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    expect(container.textContent).toContain("可应用");
+    apiPost.mockResolvedValue({
+      data: { gate: "REQUIRE_APPROVAL", approval_request_id: "apr-1" },
+    });
+    const apply = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("可应用"),
+    );
+    expect(apply).toBeTruthy();
+    await act(async () => {
+      apply?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(apiGet).toHaveBeenCalledWith("API-031", "/api/v1/test-cases/case-1");
+    expect(apiGet).not.toHaveBeenCalledWith(
+      "API-031",
+      "/api/v1/test-cases/case-result-1",
+    );
   });
 });
