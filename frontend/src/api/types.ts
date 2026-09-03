@@ -652,6 +652,8 @@ export interface ExecutionOptionCase {
   lifecycle_status: TestCaseLifecycle;
   validity: TestCaseValidity;
   execution_mode: string;
+  case_type?: string | null;
+  job_id?: string | null;
   selectable: boolean;
   unavailable_reason?: string | null;
 }

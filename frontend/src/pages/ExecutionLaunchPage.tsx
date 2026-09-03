@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Bot, Terminal } from "lucide-react";
@@ -8,6 +8,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { isUndeveloped } from "@/api/errors";
 import type {
   ExecutionOptions,
+  JobParamsSchema,
   ResourceEnvelope,
   TestRunStartResult,
 } from "@/api/types";
@@ -27,6 +28,20 @@ type Mode = "script" | "agent";
 const PROJECT_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-011");
 const OPTIONS_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-069");
 const LAUNCH_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-062");
+const SCHEMA_APIS = PAGE_APIS.P08.filter((item) => item.id === "API-070");
+
+function executionSourceFor(mode: Mode, envType: string | undefined): string {
+  if (mode === "agent") return "agent";
+  if (envType === "external_ci") return "external_ci";
+  return "script";
+}
+
+function schemaRequiredFields(schema: Record<string, unknown> | undefined): string[] {
+  if (!schema) return [];
+  const required = schema.required;
+  if (!Array.isArray(required)) return [];
+  return required.filter((item): item is string => typeof item === "string");
+}
 
 export function ExecutionLaunchPage() {
   const { get, set } = useUrlState();
@@ -37,6 +52,7 @@ export function ExecutionLaunchPage() {
   const [envId, setEnvId] = useState("");
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>(urlCaseId ? [urlCaseId] : []);
   const [targetEnv, setTargetEnv] = useState("");
+  const [jobParams, setJobParams] = useState<Record<string, string>>({});
   const [localError, setLocalError] = useState("");
   const [launchError, setLaunchError] = useState<unknown>(null);
 
@@ -44,38 +60,91 @@ export function ExecutionLaunchPage() {
     queryKey: queryKeys.projects,
     queryFn: () => api.get<{ data: { items: Record<string, unknown>[] } }>("API-011", "/api/v1/projects"),
   });
-  const executionOptions = useQuery({
-    queryKey: [...queryKeys.executionOptions(projectId || ""), mode],
+
+  const envItemsQuery = useQuery({
+    queryKey: [...queryKeys.executionOptions(projectId || ""), "envs"],
     queryFn: () =>
       api.get<ResourceEnvelope<ExecutionOptions>>(
         "API-069",
         `/api/v1/projects/${projectId}/execution-options`,
-        { execution_source: mode === "agent" ? "agent" : "script" },
+        {},
       ),
     enabled: Boolean(projectId),
   });
 
-  const projectItems = projects.data?.data.items ?? [];
-  const options = executionOptions.data?.data;
-  const envItems = options?.environments ?? [];
-  const caseItems = options?.cases ?? [];
+  const envItems = envItemsQuery.data?.data.environments ?? [];
   const selected = envItems.find((item) => item.id === envId);
   const agentBlocked = selected?.env_type === "external_ci";
+  const isExternalCi = selected?.env_type === "external_ci";
+
+  const executionOptionsScoped = useQuery({
+    queryKey: [
+      ...queryKeys.executionOptions(projectId || ""),
+      mode,
+      selected?.env_type ?? "none",
+    ],
+    queryFn: () =>
+      api.get<ResourceEnvelope<ExecutionOptions>>(
+        "API-069",
+        `/api/v1/projects/${projectId}/execution-options`,
+        { execution_source: executionSourceFor(mode, selected?.env_type) },
+      ),
+    enabled: Boolean(projectId && selected?.selectable),
+  });
+
+  const scopedCaseItems = executionOptionsScoped.data?.data.cases ?? [];
+
+  const projectItems = projects.data?.data.items ?? [];
+  const primaryCaseId = selectedCaseIds[0] ?? "";
+  const primaryCase = scopedCaseItems.find((item) => item.id === primaryCaseId);
+  const primaryJobId = primaryCase?.job_id ?? null;
+
+  const paramsSchemaQuery = useQuery({
+    queryKey: [...queryKeys.environments({}), "launch-schema", envId, primaryJobId ?? ""],
+    queryFn: () =>
+      api.get<ResourceEnvelope<JobParamsSchema>>(
+        "API-070",
+        `/api/v1/execution-environments/${envId}/jobs/${primaryJobId}/params-schema`,
+      ),
+    enabled: Boolean(isExternalCi && envId && primaryJobId),
+  });
+
+  const requiredFields = useMemo(
+    () => schemaRequiredFields(paramsSchemaQuery.data?.data.schema),
+    [paramsSchemaQuery.data?.data.schema],
+  );
+
+  useEffect(() => {
+    if (!isExternalCi) return;
+    setJobParams((prev) => {
+      const next: Record<string, string> = {};
+      for (const field of requiredFields) {
+        next[field] = prev[field] ?? "";
+      }
+      return next;
+    });
+  }, [isExternalCi, requiredFields.join("|")]);
 
   const launch = useMutation({
     mutationFn: () => {
       if (!selected) {
         throw new Error("未选择环境");
       }
+      const params = isExternalCi
+        ? Object.fromEntries(
+            Object.entries(jobParams).map(([key, value]) => [key, value.trim()]),
+          )
+        : targetEnv.trim()
+          ? { TARGET_ENV: targetEnv.trim() }
+          : undefined;
       return api.post<ResourceEnvelope<TestRunStartResult>>("API-062", "/api/v1/test-runs", {
         project_id: projectId,
         env_id: envId,
-        execution_source:
-          mode === "agent" ? "agent" : selected.env_type === "external_ci" ? "external_ci" : "script",
+        execution_source: executionSourceFor(mode, selected.env_type),
         trigger_type: "manual",
         case_ids: selectedCaseIds,
         expected_env_version: selected.version,
-        params: targetEnv.trim() ? { TARGET_ENV: targetEnv.trim() } : undefined,
+        params,
       });
     },
     onMutate: () => setLaunchError(null),
@@ -91,8 +160,8 @@ export function ExecutionLaunchPage() {
   });
 
   const selectableCases = useMemo(
-    () => caseItems.filter((item) => item.selectable),
-    [caseItems],
+    () => scopedCaseItems.filter((item) => item.selectable),
+    [scopedCaseItems],
   );
 
   function toggleCase(caseId: string, checked: boolean) {
@@ -122,7 +191,14 @@ export function ExecutionLaunchPage() {
       setLocalError("至少选择一个 ACTIVE 用例（API-069）");
       return;
     }
-    if (!targetEnv.trim()) {
+    if (isExternalCi) {
+      for (const field of requiredFields) {
+        if (!jobParams[field]?.trim()) {
+          setLocalError(`Job 参数 ${field} 未通过本地即时校验`);
+          return;
+        }
+      }
+    } else if (!targetEnv.trim()) {
       setLocalError("TARGET_ENV 未通过本地即时校验");
       return;
     }
@@ -190,10 +266,10 @@ export function ExecutionLaunchPage() {
       <Layer step="2" title="环境选择" hint="API-069：仅 selectable=true 可选">
         {!projectId ? (
           <EmptyState compact title="先选择项目" />
-        ) : executionOptions.isPending ? (
+        ) : envItemsQuery.isPending ? (
           <LoadingState rows={3} />
-        ) : executionOptions.error ? (
-          <CommandFeedback error={executionOptions.error} apis={OPTIONS_APIS} action="执行选项" />
+        ) : envItemsQuery.error ? (
+          <CommandFeedback error={envItemsQuery.error} apis={OPTIONS_APIS} action="执行选项" />
         ) : (
           <div className="flex flex-col gap-2">
             {envItems.map((row) => {
@@ -227,13 +303,17 @@ export function ExecutionLaunchPage() {
         )}
       </Layer>
 
-      <Layer step="3" title="参数表单" hint="用例多选 + TARGET_ENV；提交走 API-062">
+      <Layer
+        step="3"
+        title="参数表单"
+        hint={isExternalCi ? "引用型用例 Job 参数（API-070）" : "用例多选 + TARGET_ENV；提交走 API-062"}
+      >
         <div className="flex flex-col gap-2">
           <Label>用例（API-069）</Label>
-          {caseItems.length === 0 ? (
+          {scopedCaseItems.length === 0 ? (
             <EmptyState compact title="无用例选项" />
           ) : (
-            caseItems.map((row) => (
+            scopedCaseItems.map((row) => (
               <label key={row.id} className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={selectedCaseIds.includes(row.id)}
@@ -242,17 +322,42 @@ export function ExecutionLaunchPage() {
                 />
                 <span className={row.selectable ? "" : "text-muted-foreground line-through"}>
                   {row.title} ({row.lifecycle_status})
+                  {row.case_type ? ` · ${row.case_type}` : ""}
                 </span>
               </label>
             ))
           )}
           <p className="text-xs text-muted-foreground">已选 {selectedCaseIds.length} 个；可选 {selectableCases.length} 个。</p>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="target-env">TARGET_ENV（必填）</Label>
-          <Input id="target-env" value={targetEnv} onChange={(event) => setTargetEnv(event.target.value)} />
-          {localError ? <p className="text-xs text-destructive">{localError}</p> : null}
-        </div>
+        {isExternalCi ? (
+          <div className="flex flex-col gap-3">
+            {paramsSchemaQuery.isPending ? <LoadingState rows={2} /> : null}
+            {paramsSchemaQuery.error ? (
+              <CommandFeedback error={paramsSchemaQuery.error} apis={SCHEMA_APIS} action="Job Schema" />
+            ) : null}
+            {requiredFields.map((field) => (
+              <div key={field} className="flex flex-col gap-1.5">
+                <Label htmlFor={`job-param-${field}`}>{field}（必填）</Label>
+                <Input
+                  id={`job-param-${field}`}
+                  value={jobParams[field] ?? ""}
+                  onChange={(event) =>
+                    setJobParams((prev) => ({ ...prev, [field]: event.target.value }))
+                  }
+                />
+              </div>
+            ))}
+            {requiredFields.length === 0 && primaryJobId ? (
+              <p className="text-xs text-muted-foreground">API-070 未声明 required 字段。</p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="target-env">TARGET_ENV（必填）</Label>
+            <Input id="target-env" value={targetEnv} onChange={(event) => setTargetEnv(event.target.value)} />
+          </div>
+        )}
+        {localError ? <p className="text-xs text-destructive">{localError}</p> : null}
       </Layer>
 
       <Button onClick={submit} disabled={launch.isPending}>

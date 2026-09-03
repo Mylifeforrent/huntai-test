@@ -143,6 +143,7 @@ export function EnvironmentPage() {
             job_id: jobId.trim(),
             supports_cancel: true,
             contract_version: 1,
+            report_adapter: envType === "external_ci" ? "junit" : undefined,
             schema,
           },
         ];

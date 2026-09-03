@@ -55,6 +55,14 @@ const options: ExecutionOptions = {
       version: 2,
     },
     {
+      id: "env-ci",
+      name: "External CI",
+      env_type: "external_ci",
+      status: "ACTIVE",
+      selectable: true,
+      version: 3,
+    },
+    {
       id: "env-disabled",
       name: "Disabled env",
       env_type: "platform_executor",
@@ -119,7 +127,7 @@ async function flush() {
 beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
-  apiGet.mockImplementation((apiId: string) => {
+  apiGet.mockImplementation((apiId: string, _path: string, params?: Record<string, unknown>) => {
     if (apiId === "API-011") {
       return Promise.resolve({
         data: { items: [{ id: "proj-1", name: "P1" }] },
@@ -127,7 +135,38 @@ beforeEach(() => {
       } satisfies ListEnvelope<Record<string, unknown>>);
     }
     if (apiId === "API-069") {
+      if (params?.execution_source === "external_ci") {
+        return Promise.resolve({
+          data: {
+            ...options,
+            cases: [
+              {
+                id: "case-ref",
+                title: "CI case",
+                lifecycle_status: "ACTIVE",
+                validity: "valid",
+                execution_mode: "script",
+                case_type: "referenced",
+                job_id: "smoke-suite",
+                selectable: true,
+              },
+            ],
+          },
+        } satisfies ResourceEnvelope<ExecutionOptions>);
+      }
       return Promise.resolve({ data: options } satisfies ResourceEnvelope<ExecutionOptions>);
+    }
+    if (apiId === "API-070") {
+      return Promise.resolve({
+        data: {
+          job_id: "smoke-suite",
+          schema: {
+            type: "object",
+            required: ["branch"],
+            properties: { branch: { type: "string" } },
+          },
+        },
+      } satisfies ResourceEnvelope<{ job_id: string; schema: Record<string, unknown> }>);
     }
     return Promise.reject(new Error(`unexpected ${apiId}`));
   });
@@ -144,16 +183,87 @@ describe("ExecutionLaunchPage", () => {
   it("loads execution options from API-069 and does not select non-ACTIVE environments", async () => {
     const container = mount(<ExecutionLaunchPage />);
     await flush();
-    expect(apiGet).toHaveBeenCalledWith(
-      "API-069",
-      "/api/v1/projects/proj-1/execution-options",
-      expect.objectContaining({ execution_source: "script" }),
-    );
+    expect(apiGet).toHaveBeenCalledWith("API-069", "/api/v1/projects/proj-1/execution-options", {});
     expect(container.textContent).toContain("Active env");
     const disabled = Array.from(container.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Disabled env"),
     );
     expect(disabled).toBeDefined();
     expect(disabled?.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("loads API-070 job params for external_ci and submits them", async () => {
+    const container = mount(<ExecutionLaunchPage />);
+    await flush();
+    const ciEnv = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("External CI"),
+    );
+    expect(ciEnv).toBeDefined();
+    await act(async () => {
+      ciEnv?.click();
+    });
+    await flush();
+    expect(apiGet).toHaveBeenCalledWith(
+      "API-069",
+      "/api/v1/projects/proj-1/execution-options",
+      expect.objectContaining({ execution_source: "external_ci" }),
+    );
+    const caseCheckbox = container.querySelector('[role="checkbox"]') as HTMLButtonElement | null;
+    await act(async () => {
+      caseCheckbox?.click();
+    });
+    await flush();
+    await flush();
+    expect(apiGet).toHaveBeenCalledWith(
+      "API-070",
+      "/api/v1/execution-environments/env-ci/jobs/smoke-suite/params-schema",
+    );
+    const branchInput = container.querySelector("#job-param-branch") as HTMLInputElement | null;
+    expect(branchInput).toBeTruthy();
+    await act(async () => {
+      if (branchInput) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        setter?.call(branchInput, "main");
+        branchInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await flush();
+    apiPost.mockResolvedValueOnce({
+      data: { id: "run-1", status: "PENDING", receipt: { id: "r1", status: "accepted" } },
+    });
+    const launchButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("发起执行"),
+    );
+    await act(async () => {
+      launchButton?.click();
+    });
+    await flush();
+    expect(apiPost).toHaveBeenCalledWith(
+      "API-062",
+      "/api/v1/test-runs",
+      expect.objectContaining({
+        execution_source: "external_ci",
+        params: expect.objectContaining({ branch: "main" }),
+      }),
+    );
+  });
+
+  it("blocks agent mode on external_ci environments", async () => {
+    const container = mount(<ExecutionLaunchPage />);
+    await flush();
+    const ciEnv = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("External CI"),
+    );
+    await act(async () => {
+      ciEnv?.click();
+    });
+    await flush();
+    const agentCard = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Agent Mode"),
+    );
+    expect(agentCard?.hasAttribute("disabled")).toBe(true);
   });
 });
