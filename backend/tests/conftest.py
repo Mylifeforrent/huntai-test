@@ -101,6 +101,8 @@ async def _truncate_tables() -> AsyncGenerator[None]:
     tables = [
         "ai_governance.a1_generations",
         "test_assets.test_case_versions",
+        "test_assets.test_plan_cases",
+        "test_assets.test_plans",
         "test_assets.test_cases",
         "test_assets.import_sources",
         "test_assets.command_idempotency_records",

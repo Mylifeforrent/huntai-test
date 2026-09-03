@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ai_governance import query_port as ai_query
 from app.modules.ai_governance.llm_factory import InvokeInput, invoke
+from app.modules.execution_registry import query_port as execution_query
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
+from app.modules.run_orchestration import query_port as run_query
 from app.modules.test_assets import repository as repo
-from app.modules.test_assets.models import ImportSource, TestCase, TestCaseVersion
+from app.modules.test_assets.models import ImportSource, TestCase, TestCaseVersion, TestPlan
 
 READ_ROLES = frozenset({"owner", "admin", "tester", "viewer"})
 WRITE_ROLES = frozenset({"owner", "admin", "tester"})
@@ -27,6 +29,11 @@ COMMAND_PATCH_DRAFT = "test_case.patch_draft"
 COMMAND_SUBMIT_REVIEW = "test_case.submit_review"
 COMMAND_REVIEW = "test_case.review"
 COMMAND_ROLLBACK = "test_case.rollback_pointer"
+
+COMMAND_PLAN_CREATE = "test_plan.create"
+COMMAND_PLAN_PATCH = "test_plan.patch"
+COMMAND_PLAN_PUT_CASE_IDS = "test_plan.put_case_ids"
+COMMAND_PLAN_PUT_SCHEDULE = "test_plan.put_schedule"
 
 ROLLBACK_ROLES = frozenset({"owner", "admin"})
 
@@ -883,4 +890,492 @@ async def rollback_test_case_for_caller(
         ),
     )
     _ = reason
+    return response
+
+
+def _serialize_schedule_binding(binding: dict[str, Any] | None) -> dict[str, Any] | None:
+    if binding is None:
+        return None
+    payload: dict[str, Any] = {}
+    if "enabled" in binding:
+        payload["enabled"] = binding["enabled"]
+    if "schedule" in binding:
+        payload["schedule"] = binding["schedule"]
+    if "env_id" in binding and binding["env_id"] is not None:
+        payload["env_id"] = str(binding["env_id"])
+    return payload
+
+
+def serialize_plan_list_item(row: TestPlan, *, case_count: int) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "project_id": str(row.project_id),
+        "name": row.name,
+        "jira_fix_version": row.jira_fix_version,
+        "case_count": case_count,
+        "version": row.aggregate_version,
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+    }
+
+
+def serialize_plan_write(row: TestPlan, *, case_ids: list[uuid.UUID]) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "project_id": str(row.project_id),
+        "name": row.name,
+        "jira_fix_version": row.jira_fix_version,
+        "version": row.aggregate_version,
+        "case_ids": [str(case_id) for case_id in case_ids],
+    }
+
+
+async def _serialize_plan_detail(
+    session: AsyncSession,
+    ctx: SessionContext,
+    row: TestPlan,
+) -> dict[str, Any]:
+    case_ids = await repo.list_plan_case_ids(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=row.id,
+    )
+    latest_run = await run_query.get_latest_run_for_plan(
+        session,
+        organization_id=ctx.organization.id,
+        plan_id=row.id,
+    )
+    report_aggregate: dict[str, Any] = {
+        "last_run_id": None,
+        "last_run_status": None,
+        "pass_rate": None,
+        "gate_result": None,
+    }
+    if latest_run is not None:
+        report_aggregate["last_run_id"] = str(latest_run["id"])
+        report_aggregate["last_run_status"] = latest_run["status"]
+    return {
+        "id": str(row.id),
+        "project_id": str(row.project_id),
+        "name": row.name,
+        "jira_fix_version": row.jira_fix_version,
+        "case_ids": [str(case_id) for case_id in case_ids],
+        "schedule": _serialize_schedule_binding(row.schedule_binding),
+        "report_aggregate": report_aggregate,
+        "version": row.aggregate_version,
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+        "created_by": str(row.created_by) if row.created_by else None,
+    }
+
+
+@dataclass(frozen=True)
+class TestPlanCreateInput:
+    project_id: uuid.UUID
+    name: str
+    jira_fix_version: str | None = None
+
+
+@dataclass(frozen=True)
+class TestPlanPatchInput:
+    expected_version: int
+    name: str | None = None
+    jira_fix_version: str | None = None
+
+
+@dataclass(frozen=True)
+class TestPlanCaseIdsInput:
+    expected_version: int
+    case_ids: list[uuid.UUID]
+
+
+@dataclass(frozen=True)
+class TestPlanScheduleInput:
+    expected_version: int
+    enabled: bool | None = None
+    schedule: dict[str, Any] | None = None
+    env_id: uuid.UUID | None = None
+
+
+async def list_test_plans_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    cursor: str | None = None,
+    limit: int | None = None,
+    q: str | None = None,
+) -> dict[str, Any]:
+    await _require_project_role(session, ctx, project_id=project_id, allowed=READ_ROLES)
+    page_limit = min(limit or 50, 100)
+    cursor_updated_at: datetime | None = None
+    cursor_id: uuid.UUID | None = None
+    if cursor is not None:
+        cursor_updated_at, cursor_id = repo.decode_updated_id_cursor(cursor)
+    rows = await repo.list_test_plans(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        q=q,
+        cursor_updated_at=cursor_updated_at,
+        cursor_id=cursor_id,
+        limit=page_limit,
+    )
+    has_more = len(rows) > page_limit
+    items = rows[:page_limit]
+    next_cursor = None
+    if has_more and items:
+        last_plan, _ = items[-1]
+        next_cursor = repo.encode_updated_id_cursor(
+            updated_at=last_plan.updated_at,
+            item_id=last_plan.id,
+        )
+    return {
+        "items": [serialize_plan_list_item(plan, case_count=count) for plan, count in items],
+        "page": {"next_cursor": next_cursor, "has_more": has_more},
+    }
+
+
+async def get_test_plan_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_plan_id: uuid.UUID,
+) -> dict[str, Any]:
+    row = await repo.get_test_plan(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=READ_ROLES)
+    return await _serialize_plan_detail(session, ctx, row)
+
+
+async def _validate_case_ids_for_plan(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    case_ids: list[uuid.UUID],
+) -> None:
+    if len(case_ids) != len(set(case_ids)):
+        raise ValueError("validation")
+    for case_id in case_ids:
+        case = await repo.get_test_case(
+            session,
+            organization_id=ctx.organization.id,
+            test_case_id=case_id,
+        )
+        if case is None or case.project_id != project_id:
+            raise ValueError("validation")
+
+
+async def create_test_plan_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    body: TestPlanCreateInput,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_project_role(session, ctx, project_id=body.project_id, allowed=WRITE_ROLES)
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_CREATE,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return dict(existing.response_ref or {})
+
+    name = body.name.strip()
+    if not name:
+        raise ValueError("validation")
+
+    now = datetime.now(UTC)
+    plan_id = uuid.uuid4()
+    row = TestPlan(
+        id=plan_id,
+        organization_id=ctx.organization.id,
+        created_at=now,
+        updated_at=now,
+        created_by=ctx.user.id,
+        aggregate_version=1,
+        project_id=body.project_id,
+        name=name,
+        jira_fix_version=body.jira_fix_version,
+        schedule_binding=None,
+    )
+    await repo.insert_test_plan(session, row)
+    response = {"data": serialize_plan_write(row, case_ids=[])}
+    await repo.create_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_CREATE,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=ctx.organization.id,
+            actor_user_id=ctx.user.id,
+            action="test_plan.create",
+            resource_type="test_plan",
+            resource_id=plan_id,
+            project_id=body.project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    return response
+
+
+async def patch_test_plan_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_plan_id: uuid.UUID,
+    body: TestPlanPatchInput,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    row = await repo.get_test_plan(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+        for_update=True,
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=WRITE_ROLES)
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_PATCH,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return dict(existing.response_ref or {})
+
+    if row.aggregate_version != body.expected_version:
+        raise ValueError("version")
+
+    now = datetime.now(UTC)
+    if body.name is not None:
+        next_name = body.name.strip()
+        if not next_name:
+            raise ValueError("validation")
+        row.name = next_name
+    if body.jira_fix_version is not None:
+        row.jira_fix_version = body.jira_fix_version
+    row.aggregate_version += 1
+    row.updated_at = now
+    case_ids = await repo.list_plan_case_ids(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+    )
+    response = {"data": serialize_plan_write(row, case_ids=case_ids)}
+    await repo.create_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_PATCH,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=ctx.organization.id,
+            actor_user_id=ctx.user.id,
+            action="test_plan.patch",
+            resource_type="test_plan",
+            resource_id=test_plan_id,
+            project_id=row.project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    return response
+
+
+async def put_test_plan_case_ids_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_plan_id: uuid.UUID,
+    body: TestPlanCaseIdsInput,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    row = await repo.get_test_plan(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+        for_update=True,
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=WRITE_ROLES)
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_PUT_CASE_IDS,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return dict(existing.response_ref or {})
+
+    if row.aggregate_version != body.expected_version:
+        raise ValueError("version")
+
+    await _validate_case_ids_for_plan(
+        session,
+        ctx,
+        project_id=row.project_id,
+        case_ids=body.case_ids,
+    )
+
+    now = datetime.now(UTC)
+    await repo.replace_plan_cases(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+        case_ids=body.case_ids,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    row.aggregate_version += 1
+    row.updated_at = now
+    response = {"data": serialize_plan_write(row, case_ids=body.case_ids)}
+    await repo.create_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_PUT_CASE_IDS,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=ctx.organization.id,
+            actor_user_id=ctx.user.id,
+            action="test_plan.put_case_ids",
+            resource_type="test_plan",
+            resource_id=test_plan_id,
+            project_id=row.project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    return response
+
+
+async def put_test_plan_schedule_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_plan_id: uuid.UUID,
+    body: TestPlanScheduleInput,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    row = await repo.get_test_plan(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+        for_update=True,
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=WRITE_ROLES)
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_PUT_SCHEDULE,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return dict(existing.response_ref or {})
+
+    if row.aggregate_version != body.expected_version:
+        raise ValueError("version")
+
+    if body.env_id is not None:
+        env = await execution_query.get_environment_for_run(
+            session,
+            organization_id=ctx.organization.id,
+            environment_id=body.env_id,
+        )
+        if env is None:
+            raise ValueError("not_found")
+
+    now = datetime.now(UTC)
+    binding: dict[str, Any] = dict(row.schedule_binding or {})
+    if body.enabled is not None:
+        binding["enabled"] = body.enabled
+    if body.schedule is not None:
+        binding["schedule"] = body.schedule
+    if body.env_id is not None:
+        binding["env_id"] = str(body.env_id)
+    row.schedule_binding = binding
+    row.aggregate_version += 1
+    row.updated_at = now
+    case_ids = await repo.list_plan_case_ids(
+        session,
+        organization_id=ctx.organization.id,
+        test_plan_id=test_plan_id,
+    )
+    write_payload = serialize_plan_write(row, case_ids=case_ids)
+    schedule = _serialize_schedule_binding(binding)
+    if schedule is not None and "enabled" in binding:
+        write_payload["enabled"] = binding["enabled"]
+    if schedule is not None:
+        write_payload["schedule"] = schedule.get("schedule")
+        if "env_id" in schedule:
+            write_payload["env_id"] = schedule["env_id"]
+    response = {"data": write_payload}
+    await repo.create_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_PLAN_PUT_SCHEDULE,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=ctx.organization.id,
+            actor_user_id=ctx.user.id,
+            action="test_plan.put_schedule",
+            resource_type="test_plan",
+            resource_id=test_plan_id,
+            project_id=row.project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
     return response

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.test_assets.models import (
@@ -13,6 +13,8 @@ from app.modules.test_assets.models import (
     ImportSource,
     TestCase,
     TestCaseVersion,
+    TestPlan,
+    TestPlanCase,
 )
 
 
@@ -210,3 +212,117 @@ async def count_test_cases_for_project(
         )
     )
     return len(list(result.scalars().all()))
+
+
+async def get_test_plan(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_plan_id: uuid.UUID,
+    for_update: bool = False,
+) -> TestPlan | None:
+    query = select(TestPlan).where(
+        TestPlan.organization_id == organization_id,
+        TestPlan.id == test_plan_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def list_test_plans(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    q: str | None = None,
+    cursor_updated_at: datetime | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int,
+) -> list[tuple[TestPlan, int]]:
+    case_count_subq = (
+        select(
+            TestPlanCase.test_plan_id.label("plan_id"),
+            func.count(TestPlanCase.id).label("case_count"),
+        )
+        .where(TestPlanCase.organization_id == organization_id)
+        .group_by(TestPlanCase.test_plan_id)
+        .subquery()
+    )
+    query = (
+        select(
+            TestPlan,
+            func.coalesce(case_count_subq.c.case_count, 0).label("case_count"),
+        )
+        .outerjoin(case_count_subq, TestPlan.id == case_count_subq.c.plan_id)
+        .where(
+            TestPlan.organization_id == organization_id,
+            TestPlan.project_id == project_id,
+        )
+        .order_by(TestPlan.updated_at.desc(), TestPlan.id.desc())
+    )
+    if q is not None:
+        query = query.where(TestPlan.name.ilike(f"%{q}%"))
+    if cursor_updated_at is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                TestPlan.updated_at < cursor_updated_at,
+                and_(TestPlan.updated_at == cursor_updated_at, TestPlan.id < cursor_id),
+            )
+        )
+    query = query.limit(limit + 1)
+    result = await session.execute(query)
+    return [(row[0], int(row[1])) for row in result.all()]
+
+
+async def insert_test_plan(session: AsyncSession, row: TestPlan) -> TestPlan:
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_plan_case_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_plan_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    result = await session.execute(
+        select(TestPlanCase.test_case_id)
+        .where(
+            TestPlanCase.organization_id == organization_id,
+            TestPlanCase.test_plan_id == test_plan_id,
+        )
+        .order_by(TestPlanCase.created_at.asc(), TestPlanCase.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def replace_plan_cases(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_plan_id: uuid.UUID,
+    case_ids: list[uuid.UUID],
+    created_by: uuid.UUID | None,
+    created_at: datetime,
+) -> None:
+    await session.execute(
+        delete(TestPlanCase).where(
+            TestPlanCase.organization_id == organization_id,
+            TestPlanCase.test_plan_id == test_plan_id,
+        )
+    )
+    for case_id in case_ids:
+        session.add(
+            TestPlanCase(
+                id=uuid.uuid4(),
+                organization_id=organization_id,
+                created_at=created_at,
+                created_by=created_by,
+                test_plan_id=test_plan_id,
+                test_case_id=case_id,
+            )
+        )
+    await session.flush()

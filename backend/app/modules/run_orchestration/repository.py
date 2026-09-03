@@ -409,3 +409,24 @@ async def update_test_run_status(
         run.last_heartbeat_at = updated_at
     await session.flush()
     return run
+
+
+async def get_latest_run_for_plan(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    plan_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    result = await session.execute(
+        select(TestRun.id, TestRun.status)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.plan_id == plan_id,
+        )
+        .order_by(TestRun.created_at.desc())
+        .limit(1)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    return {"id": row[0], "status": row[1]}

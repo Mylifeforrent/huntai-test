@@ -127,3 +127,16 @@ async def list_workbench_active_runs(
         limit=effective_limit,
     )
     return [_serialize_workbench_run(row, now=now) for row in rows]
+
+
+async def get_latest_run_for_plan(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    plan_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    return await repo.get_latest_run_for_plan(
+        session,
+        organization_id=organization_id,
+        plan_id=plan_id,
+    )

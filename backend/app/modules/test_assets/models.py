@@ -86,6 +86,49 @@ class ImportSource(Base):
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class TestPlan(Base):
+    __tablename__ = "test_plans"
+    __table_args__ = (
+        Index(
+            "ix_test_plans_org_project",
+            "organization_id",
+            "project_id",
+        ),
+        {"schema": "test_assets"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    jira_fix_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schedule_binding: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+class TestPlanCase(Base):
+    __tablename__ = "test_plan_cases"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "test_plan_id",
+            "test_case_id",
+            name="uq_test_plan_cases_org_plan_case",
+        ),
+        {"schema": "test_assets"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    test_plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    test_case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+
 class CommandIdempotencyRecord(Base):
     __tablename__ = "command_idempotency_records"
     __table_args__ = (

@@ -188,3 +188,23 @@ async def get_test_case_pointer(
         "aggregate_version": case.aggregate_version,
         "current_version_id": case.current_version_id,
     }
+
+
+async def get_plan_scope(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_plan_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    row = await repo.get_test_plan(
+        session,
+        organization_id=organization_id,
+        test_plan_id=test_plan_id,
+    )
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "project_id": row.project_id,
+        "aggregate_version": row.aggregate_version,
+    }
