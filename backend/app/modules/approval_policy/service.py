@@ -21,7 +21,10 @@ from app.modules.execution_registry import command_port as execution_command
 from app.modules.identity_tenancy import command_port as identity_command
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext, compute_reauth_required
+from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
+from app.modules.test_assets import command_port as test_assets_command
+from app.modules.test_assets import query_port as test_assets_query
 
 COMMAND_TYPE_ACTION_PREVIEW = "action_preview"
 COMMAND_TYPE_APPROVAL_DECISION = "approval_decision"
@@ -209,6 +212,65 @@ def _validate_payload_secrets(payload: dict[str, Any]) -> None:
             _validate_payload_secrets(value)
 
 
+async def _validate_heal_apply_preview(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    target_object_id: uuid.UUID,
+    payload: dict[str, Any],
+    expected_target_version: int | None,
+) -> uuid.UUID:
+    cluster_raw = payload.get("failure_cluster_id")
+    if cluster_raw is None:
+        raise ValueError("validation")
+    try:
+        cluster_id = uuid.UUID(str(cluster_raw))
+    except ValueError as exc:
+        raise ValueError("validation") from exc
+    payload_cluster_conf = payload.get("cluster_confidence")
+    payload_fix_conf = payload.get("fix_confidence")
+    if payload_cluster_conf is not None:
+        try:
+            if float(payload_cluster_conf) < 0.7:
+                raise ValueError("policy_deny")
+        except (TypeError, ValueError) as exc:
+            if str(exc) == "policy_deny":
+                raise
+            raise ValueError("validation") from exc
+    if payload_fix_conf is not None:
+        try:
+            if float(payload_fix_conf) < 0.7:
+                raise ValueError("policy_deny")
+        except (TypeError, ValueError) as exc:
+            if str(exc) == "policy_deny":
+                raise
+            raise ValueError("validation") from exc
+    cluster_confidence = await evidence_query.get_failure_cluster_confidence(
+        session,
+        organization_id=organization_id,
+        failure_cluster_id=cluster_id,
+    )
+    if cluster_confidence is None:
+        raise ValueError("not_found")
+    if cluster_confidence < 0.7:
+        raise ValueError("policy_deny")
+    case = await test_assets_query.get_test_case_pointer(
+        session,
+        organization_id=organization_id,
+        test_case_id=target_object_id,
+    )
+    if case is None:
+        raise ValueError("not_found")
+    if case["lifecycle_status"] != "ACTIVE" or case["current_version_id"] is None:
+        raise ValueError("state")
+    if expected_target_version is not None and case["aggregate_version"] != expected_target_version:
+        raise ValueError("version")
+    snapshot_ref = case["current_version_id"]
+    if not isinstance(snapshot_ref, uuid.UUID):
+        raise ValueError("state")
+    return snapshot_ref
+
+
 async def create_action_preview(
     session: AsyncSession,
     ctx: SessionContext,
@@ -349,6 +411,36 @@ async def create_action_preview(
         )
         raise ValueError("state")
 
+    heal_snapshot_ref: uuid.UUID | None = None
+    if action_type == "heal_apply":
+        if preview_input.target_object_type != "test_case":
+            raise ValueError("validation")
+        try:
+            heal_snapshot_ref = await _validate_heal_apply_preview(
+                session,
+                organization_id=org_id,
+                target_object_id=preview_input.target_object_id,
+                payload=preview_input.payload,
+                expected_target_version=preview_input.expected_target_version,
+            )
+        except ValueError as exc:
+            if str(exc) == "policy_deny":
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=audit_base.organization_id,
+                        actor_user_id=audit_base.actor_user_id,
+                        action=audit_base.action,
+                        resource_type=audit_base.resource_type,
+                        resource_id=audit_base.resource_id,
+                        project_id=audit_base.project_id,
+                        request_hash=audit_base.request_hash,
+                        result="failed",
+                    ),
+                )
+                raise ValueError("policy_deny") from exc
+            raise
+
     param_hash = compute_param_hash(
         action_type=action_type,
         target_object_type=preview_input.target_object_type,
@@ -365,6 +457,13 @@ async def create_action_preview(
         side_effect_level=side_effect_level,
         param_hash=param_hash,
     )
+    if action_type == "heal_apply" and heal_snapshot_ref is not None:
+        card_payload["rollback"] = {
+            "capability": "snapshot",
+            "snapshot_ref": str(heal_snapshot_ref),
+            "compensation_summary": "Rollback pointer via API-039",
+            "none_declared": False,
+        }
 
     approval_request_id: uuid.UUID | None = None
     if gate_result.gate == PolicyGate.REQUIRE_APPROVAL:
@@ -891,6 +990,59 @@ async def submit_approval_decision(
             )
         except ValueError:
             pass
+
+    if decision == "approve" and approval.action_type == "heal_apply":
+        patch_raw = approval.action_payload.get("patch")
+        patch = patch_raw if isinstance(patch_raw, dict) else {}
+        expected_version_raw = approval.expected_target_version
+        try:
+            if expected_version_raw is None:
+                raise ValueError("state")
+            await test_assets_command.apply_heal_after_approval(
+                session,
+                organization_id=org_id,
+                test_case_id=approval.target_object_id,
+                expected_target_version=expected_version_raw,
+                patch=patch,
+                actor_user_id=caller_id,
+            )
+            approval.status = "EXECUTED"
+            approval.execution_result = "ok"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="heal_apply",
+                    resource_type="test_case",
+                    resource_id=approval.target_object_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="ok",
+                ),
+            )
+        except ValueError:
+            approval.status = "EXECUTED"
+            approval.execution_result = "failed"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="heal_apply",
+                    resource_type="test_case",
+                    resource_id=approval.target_object_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="failed",
+                ),
+            )
 
     response = _serialize_approval_item(approval, caller_id=caller_id)
     await append_audit_event(

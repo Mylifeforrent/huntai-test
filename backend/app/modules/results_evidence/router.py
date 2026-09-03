@@ -15,6 +15,10 @@ from app.modules.results_evidence.case_results_service import (
     list_case_results_for_caller,
     list_step_runs_for_caller,
 )
+from app.modules.results_evidence.cluster_service import (
+    get_failure_cluster_for_caller,
+    list_failure_clusters_for_caller,
+)
 from app.modules.results_evidence.service import (
     get_audit_event_for_caller,
     list_audit_events_for_caller,
@@ -186,3 +190,47 @@ async def api_066_list_step_runs(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/test-runs/{test_run_id}/failure-clusters")
+async def api_130_list_failure_clusters(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+    category: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_failure_clusters_for_caller(
+            db,
+            ctx,
+            test_run_id=test_run_id,
+            category=category,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.get("/failure-clusters/{failure_cluster_id}")
+async def api_131_get_failure_cluster(
+    request: Request,
+    failure_cluster_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_failure_cluster_for_caller(
+            db,
+            ctx,
+            failure_cluster_id=failure_cluster_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}

@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.results_evidence.audit_models import AuditEvent
-from app.modules.results_evidence.models import CaseResult, StepRun
+from app.modules.results_evidence.models import CaseResult, FailureCluster, StepRun
 
 
 def encode_created_id_cursor(*, created_at: datetime, item_id: uuid.UUID) -> str:
@@ -253,3 +253,143 @@ async def list_step_runs_for_case_result(
         query = query.limit(limit)
     result = await session.execute(query)
     return list(result.scalars().all())
+
+
+async def list_failed_case_results_for_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> list[CaseResult]:
+    result = await session.execute(
+        select(CaseResult)
+        .where(
+            CaseResult.organization_id == organization_id,
+            CaseResult.test_run_id == test_run_id,
+            CaseResult.outcome == "failed",
+        )
+        .order_by(CaseResult.created_at.asc(), CaseResult.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def list_step_runs_for_case_results(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_ids: list[uuid.UUID],
+) -> list[StepRun]:
+    if not case_result_ids:
+        return []
+    result = await session.execute(
+        select(StepRun)
+        .where(
+            StepRun.organization_id == organization_id,
+            StepRun.case_result_id.in_(case_result_ids),
+        )
+        .order_by(StepRun.case_result_id.asc(), StepRun.step_index.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def count_failure_clusters_for_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> int:
+    result = await session.execute(
+        select(FailureCluster.id).where(
+            FailureCluster.organization_id == organization_id,
+            FailureCluster.test_run_id == test_run_id,
+        )
+    )
+    return len(list(result.scalars().all()))
+
+
+async def insert_failure_cluster(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    test_run_id: uuid.UUID,
+    category: str,
+    root_cause: str | None,
+    confidence: float,
+    blocking_judgment: str,
+    evidence_refs: list[uuid.UUID],
+    failure_refs: list[uuid.UUID],
+    unclustered_refs: list[uuid.UUID] | None,
+    fixes: list[dict[str, Any]] | None,
+) -> FailureCluster:
+    row = FailureCluster(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        test_run_id=test_run_id,
+        category=category,
+        root_cause=root_cause,
+        confidence=confidence,
+        blocking_judgment=blocking_judgment,
+        evidence_refs=evidence_refs,
+        failure_refs=failure_refs,
+        correction_history=[],
+        unclustered_refs=unclustered_refs,
+        fixes=fixes,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_failure_clusters_for_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    category: str | None = None,
+    cursor_created_at: datetime | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int | None = None,
+) -> list[FailureCluster]:
+    query = (
+        select(FailureCluster)
+        .where(
+            FailureCluster.organization_id == organization_id,
+            FailureCluster.test_run_id == test_run_id,
+        )
+        .order_by(FailureCluster.created_at.asc(), FailureCluster.id.asc())
+    )
+    if category is not None:
+        query = query.where(FailureCluster.category == category)
+    if cursor_created_at is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                FailureCluster.created_at > cursor_created_at,
+                and_(
+                    FailureCluster.created_at == cursor_created_at,
+                    FailureCluster.id > cursor_id,
+                ),
+            )
+        )
+    if limit is not None:
+        query = query.limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_failure_cluster(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    failure_cluster_id: uuid.UUID,
+) -> FailureCluster | None:
+    result = await session.execute(
+        select(FailureCluster).where(
+            FailureCluster.organization_id == organization_id,
+            FailureCluster.id == failure_cluster_id,
+        )
+    )
+    return result.scalar_one_or_none()

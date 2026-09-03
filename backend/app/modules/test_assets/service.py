@@ -26,6 +26,9 @@ COMMAND_CREATE_DRAFT = "test_case.create_draft"
 COMMAND_PATCH_DRAFT = "test_case.patch_draft"
 COMMAND_SUBMIT_REVIEW = "test_case.submit_review"
 COMMAND_REVIEW = "test_case.review"
+COMMAND_ROLLBACK = "test_case.rollback_pointer"
+
+ROLLBACK_ROLES = frozenset({"owner", "admin"})
 
 VALID_CASE_TYPES = frozenset({"api", "web", "performance", "referenced"})
 VALID_EXECUTION_MODES = frozenset({"script", "agent"})
@@ -772,4 +775,78 @@ async def review_test_case_for_caller(
             request_hash=request_hash,
         ),
     )
+    return response
+
+
+async def rollback_test_case_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_case_id: uuid.UUID,
+    expected_version: int,
+    target_version_id: uuid.UUID,
+    reason: str | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    row = await repo.get_test_case(
+        session,
+        organization_id=ctx.organization.id,
+        test_case_id=test_case_id,
+        for_update=True,
+    )
+    if row is None:
+        raise ValueError("not_found")
+    await _require_project_role(session, ctx, project_id=row.project_id, allowed=ROLLBACK_ROLES)
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_ROLLBACK,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        return dict(existing.response_ref or {})
+
+    if row.aggregate_version != expected_version:
+        raise ValueError("version")
+    target_version = await repo.get_test_case_version(
+        session,
+        organization_id=ctx.organization.id,
+        version_id=target_version_id,
+    )
+    if target_version is None or target_version.test_case_id != test_case_id:
+        raise ValueError("state")
+
+    now = datetime.now(UTC)
+    row.current_version_id = target_version_id
+    row.updated_at = now
+    row.aggregate_version += 1
+    await session.flush()
+    response = {"data": serialize_list_item(row)}
+    await repo.create_idempotency_record(
+        session,
+        organization_id=ctx.organization.id,
+        command_type=COMMAND_ROLLBACK,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=ctx.organization.id,
+            actor_user_id=ctx.user.id,
+            action="test_case.rollback_pointer",
+            resource_type="test_case",
+            resource_id=test_case_id,
+            project_id=row.project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    _ = reason
     return response

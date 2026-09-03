@@ -17,6 +17,7 @@ from app.modules.results_evidence.command_port import (
     StepRunWrite,
     append_case_result,
     append_step_run,
+    schedule_failure_triage,
 )
 from app.modules.run_orchestration import repository as repo
 from app.modules.run_orchestration.http_runner import run_case_http
@@ -210,6 +211,22 @@ async def _execute_script_run(
                     return
                 version_raw = case.get("version_id")
                 version_id = uuid.UUID(str(version_raw)) if version_raw else None
+                normalized_summary: dict[str, Any] | None = None
+                if outcome != "passed" and step_records:
+                    for record in step_records:
+                        observation = record.get("observation")
+                        if isinstance(observation, dict) and "status_code" in observation:
+                            path_val = None
+                            action = record.get("action")
+                            if isinstance(action, dict):
+                                params = action.get("params")
+                                if isinstance(params, dict) and isinstance(params.get("path"), str):
+                                    path_val = params["path"]
+                            normalized_summary = {
+                                "status_code": observation.get("status_code"),
+                                "path": path_val,
+                            }
+                            break
                 case_result_id = await append_case_result(
                     session,
                     organization_id=organization_id,
@@ -221,6 +238,7 @@ async def _execute_script_run(
                         test_case_version_id=version_id,
                         attempt_seq=1,
                         outcome=outcome,
+                        normalized_summary=normalized_summary,
                     ),
                 )
                 for record in step_records:
@@ -260,11 +278,23 @@ async def _execute_script_run(
                 run=run,
                 new_status=final_status,
                 updated_at=now,
-                result_summary={"cases": len(cases), "outcome": final_status.lower()},
+                result_summary={
+                    "cases": len(cases),
+                    "outcome": final_status.lower(),
+                    "clustering": {
+                        "generation_status": "pending",
+                        "degraded": False,
+                        "unclustered_refs": [],
+                    },
+                },
             )
         elif run is not None:
             await complete_stopping_run(session, run=run, now=now)
         await session.commit()
+    await schedule_failure_triage(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
 
 
 async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uuid.UUID) -> None:
@@ -466,3 +496,7 @@ async def complete_stopping_background(
         if run is not None:
             await complete_stopping_run(session, run=run, now=now)
         await session.commit()
+    await schedule_failure_triage(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )

@@ -33,6 +33,7 @@ from app.modules.test_assets.service import (
     patch_test_case_draft_for_caller,
     register_import_source_for_caller,
     review_test_case_for_caller,
+    rollback_test_case_for_caller,
     submit_review_for_caller,
 )
 
@@ -96,6 +97,14 @@ class ReviewBody(BaseModel):
     expected_version: int = Field(ge=1)
     decision: ReviewDecisionLiteral
     jira_story_key: str | None = None
+    reason: str | None = None
+
+
+class RollbackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    target_version_id: uuid.UUID
     reason: str | None = None
 
 
@@ -333,6 +342,39 @@ async def api_035_review_test_case(
             expected_version=body.expected_version,
             decision=body.decision,
             jira_story_key=body.jira_story_key,
+            reason=body.reason,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return payload
+
+
+@router.post("/test-cases/{test_case_id}/rollback")
+async def api_039_rollback_test_case(
+    request: Request,
+    test_case_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(RollbackBody, raw, trace_id)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await rollback_test_case_for_caller(
+            db,
+            ctx,
+            test_case_id=test_case_id,
+            expected_version=body.expected_version,
+            target_version_id=body.target_version_id,
             reason=body.reason,
             idempotency_key=idempotency_key,
             request_hash=request_hash,

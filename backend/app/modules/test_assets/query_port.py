@@ -148,3 +148,25 @@ async def list_cases_for_execution_options(
             }
         )
     return items
+
+
+async def get_test_case_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    case = await repo.get_test_case(
+        session,
+        organization_id=organization_id,
+        test_case_id=test_case_id,
+    )
+    if case is None:
+        return None
+    return {
+        "id": case.id,
+        "project_id": case.project_id,
+        "lifecycle_status": case.lifecycle_status,
+        "aggregate_version": case.aggregate_version,
+        "current_version_id": case.current_version_id,
+    }
