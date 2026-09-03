@@ -146,4 +146,43 @@ export const api = {
       idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
       ...options,
     }),
+  getBlob: async (
+    apiId: string,
+    path: string,
+    options?: ApiCallOptions,
+  ): Promise<Blob> => {
+    const url = buildUrl(path);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        signal: options?.signal,
+      });
+    } catch (cause) {
+      throw toApiError({ apiId, path: `GET ${path}`, cause });
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      let payload: unknown = null;
+      if (text) {
+        try {
+          payload = JSON.parse(text) as unknown;
+        } catch {
+          payload = null;
+        }
+      }
+      const apiError = toApiError({
+        apiId,
+        path: `GET ${path}`,
+        httpStatus: response.status,
+        payload,
+      });
+      if (!options?.skipAuthIntercept && response.status === 401 && apiError.body) {
+        handleAuthApiError(apiError);
+      }
+      throw apiError;
+    }
+    return response.blob();
+  },
 };

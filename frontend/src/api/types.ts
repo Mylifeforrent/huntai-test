@@ -703,6 +703,51 @@ export interface CaseResultListItem {
   data_classification: string;
 }
 
+export interface CaseResultDetail extends CaseResultListItem {
+  normalized_summary?: Record<string, unknown> | null;
+  artifact_ids: string[];
+}
+
+export interface StepRunItem {
+  id: string;
+  created_at: string;
+  case_result_id: string;
+  step_index: number;
+  action?: Record<string, unknown> | null;
+  observation_ref?: string | null;
+  assertion_results?: Record<string, unknown> | null;
+  token_usage?: Record<string, unknown> | null;
+  is_incomplete: boolean;
+}
+
+export interface ArtifactContentAccess {
+  mode: "app_proxy";
+  content_path: string;
+}
+
+export interface ArtifactMetadata {
+  id: string;
+  created_at: string;
+  created_by?: string | null;
+  kind: string;
+  object_key: string;
+  checksum: string;
+  byte_size?: number | null;
+  mime_type?: string | null;
+  data_classification: string;
+  original_filename?: string | null;
+  test_run_id: string;
+  case_result_id?: string | null;
+  scan_status: string;
+  content_access: ArtifactContentAccess;
+}
+
+export interface EvidencePreview {
+  screenshot_artifact_ids: string[];
+  video_artifact_ids: string[];
+  trace_artifact_ids: string[];
+}
+
 export const CONNECTOR_TYPES = ["jira", "github", "ci", "release"] as const;
 export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
 

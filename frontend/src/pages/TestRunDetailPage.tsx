@@ -6,6 +6,8 @@ import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
 import type {
   ActionPreview,
+  ArtifactMetadata,
+  CaseResultDetail,
   CaseResultListItem,
   FailureClusterDetail,
   FailureClusterFixPreview,
@@ -13,6 +15,7 @@ import type {
   ListEnvelope,
   ResourceEnvelope,
   SimilarFailureClusterItem,
+  StepRunItem,
   TestRunCancelResult,
   TestRunDetail,
 } from "@/api/types";
@@ -36,8 +39,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { asRecord } from "@/lib/utils";
-
 export function TestRunDetailPage() {
   const { runId = "" } = useParams();
   const navigate = useNavigate();
@@ -48,6 +49,7 @@ export function TestRunDetailPage() {
   const [healError, setHealError] = useState<unknown>(null);
   const [correctError, setCorrectError] = useState<unknown>(null);
   const [sseHint, setSseHint] = useState<string | null>(null);
+  const [selectedCaseResultId, setSelectedCaseResultId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!runId) {
@@ -162,8 +164,57 @@ export function TestRunDetailPage() {
   const resultItems = results.data?.data.items ?? [];
   const unclustered = clusterReport?.unclustered_refs ?? [];
   const degraded = clusterReport?.degraded === true;
-  const firstResult = asRecord(resultItems[0]);
-  const evidence = asRecord(firstResult.evidence);
+
+  useEffect(() => {
+    if (resultItems.length === 0) {
+      setSelectedCaseResultId(null);
+      return;
+    }
+    setSelectedCaseResultId((current) => {
+      if (current && resultItems.some((item) => item.id === current)) {
+        return current;
+      }
+      const failed = resultItems.find((item) => item.outcome === "failed");
+      return failed?.id ?? resultItems[0]?.id ?? null;
+    });
+  }, [resultItems]);
+
+  const caseResultDetail = useQuery({
+    queryKey: ["case-results", selectedCaseResultId],
+    queryFn: () =>
+      api.get<ResourceEnvelope<CaseResultDetail>>(
+        "API-065",
+        `/api/v1/case-results/${selectedCaseResultId}`,
+      ),
+    enabled: Boolean(selectedCaseResultId),
+  });
+  const stepRuns = useQuery({
+    queryKey: ["case-results", selectedCaseResultId, "step-runs"],
+    queryFn: () =>
+      api.get<ListEnvelope<StepRunItem>>(
+        "API-066",
+        `/api/v1/case-results/${selectedCaseResultId}/step-runs`,
+      ),
+    enabled: Boolean(selectedCaseResultId),
+  });
+
+  const artifactMetaQueries = useQueries({
+    queries: (caseResultDetail.data?.data.artifact_ids ?? []).map((artifactId) => ({
+      queryKey: ["artifacts", artifactId],
+      queryFn: () =>
+        api.get<ResourceEnvelope<ArtifactMetadata>>("API-220", `/api/v1/artifacts/${artifactId}`),
+      enabled: Boolean(artifactId),
+    })),
+  });
+  const artifactsByKind = useMemo(() => {
+    const map = new Map<string, string>();
+    artifactMetaQueries.forEach((entry) => {
+      const kind = entry.data?.data.kind;
+      const id = entry.data?.data.id;
+      if (kind && id) map.set(kind, id);
+    });
+    return map;
+  }, [artifactMetaQueries]);
 
   const healApply = useMutation({
     mutationFn: async (input: {
@@ -440,7 +491,13 @@ export function TestRunDetailPage() {
                 </TableHeader>
                 <TableBody>
                   {resultItems.map((item) => (
-                    <TableRow key={item.id}>
+                    <TableRow
+                      key={item.id}
+                      className={
+                        item.id === selectedCaseResultId ? "cursor-pointer bg-muted/50" : "cursor-pointer"
+                      }
+                      onClick={() => setSelectedCaseResultId(item.id)}
+                    >
                       <TableCell className="font-mono text-xs">{item.test_case_id}</TableCell>
                       <TableCell>
                         <StatusBadge status={item.outcome} />
@@ -461,11 +518,16 @@ export function TestRunDetailPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <EvidenceViewer
-              screenshotUrl={typeof evidence.screenshot_url === "string" ? evidence.screenshot_url : undefined}
-              videoUrl={typeof evidence.video_url === "string" ? evidence.video_url : undefined}
-              traceAvailable={evidence.trace_available === true}
-            />
+            {!selectedCaseResultId ? (
+              <EmptyState compact title="未选用例结果" hint="点击上方结果行查看证据" />
+            ) : (
+              <EvidenceViewer
+                screenshotArtifactId={artifactsByKind.get("screenshot")}
+                videoArtifactId={artifactsByKind.get("video")}
+                traceArtifactId={artifactsByKind.get("trace")}
+                stepRuns={stepRuns.data?.data.items ?? []}
+              />
+            )}
             {source ? <StatusBadge status={source} /> : null}
           </CardContent>
         </Card>

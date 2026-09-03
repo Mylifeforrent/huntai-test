@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
-import type { ListEnvelope, ResourceEnvelope } from "@/api/types";
+import type { EvidencePreview, ListEnvelope, ResourceEnvelope } from "@/api/types";
 import { useSession } from "@/hooks/useSession";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +41,11 @@ export function CaseDetailPage() {
   const isWeb = caseType === "web";
   const steps = Array.isArray(data.steps) ? data.steps : [];
   const locators = Array.isArray(data.locator_health) ? data.locator_health : [];
-  const evidence = asRecord(data.evidence_preview);
+  const evidence = (data.evidence_preview ?? {
+    screenshot_artifact_ids: [],
+    video_artifact_ids: [],
+    trace_artifact_ids: [],
+  }) as EvidencePreview;
   const versionItems = versions.data?.data.items ?? [];
   const currentVersionId = typeof data.current_version_id === "string" ? data.current_version_id : "";
   const caseVersion = typeof data.version === "number" ? data.version : null;
@@ -146,9 +150,9 @@ export function CaseDetailPage() {
                   证据引用（artifact id）≠ 下载授权。截图/视频/Trace 须经制品代理，本页不把 object_key 当 URL。
                 </p>
                 <EvidenceViewer
-                  traceAvailable={
-                    Array.isArray(evidence.trace_artifact_ids) && evidence.trace_artifact_ids.length > 0
-                  }
+                  screenshotArtifactId={evidence.screenshot_artifact_ids[0]}
+                  videoArtifactId={evidence.video_artifact_ids[0]}
+                  traceArtifactId={evidence.trace_artifact_ids[0]}
                 />
               </CardContent>
             </Card>
