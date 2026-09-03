@@ -23,7 +23,9 @@ COMMAND_TYPE_REVOKE_TOKEN = "api_token.revoke"
 TOKEN_PREFIX_LITERAL = "ht_live_"
 TOKEN_PREFIX_DISPLAY_LEN = 16
 PASSWORD_HASHER = PasswordHasher()
-ALLOWED_ENV_REF_KEYS = frozenset({"GITHUB_WEBHOOK_SECRET"})
+ALLOWED_ENV_REF_KEYS = frozenset(
+    {"GITHUB_WEBHOOK_SECRET", "JENKINS_WEBHOOK_SECRET", "JENKINS_API_TOKEN"}
+)
 SECRET_PATTERN = re.compile(
     r"(password|secret|token|credential)",
     re.IGNORECASE,
@@ -91,8 +93,11 @@ def resolve_env_ref(settings: Settings, ref: str) -> str | None:
     if key not in ALLOWED_ENV_REF_KEYS:
         return None
     if key == "GITHUB_WEBHOOK_SECRET":
-        value = settings.github_webhook_secret
-        return value if value else None
+        return settings.github_webhook_secret or None
+    if key == "JENKINS_WEBHOOK_SECRET":
+        return settings.jenkins_webhook_secret or None
+    if key == "JENKINS_API_TOKEN":
+        return settings.jenkins_api_token or None
     return None
 
 
@@ -350,7 +355,7 @@ async def process_inbound_webhook(
     delivery_id: str | None,
     event_type: str | None,
     request_hash: str,
-) -> tuple[dict[str, Any], int]:
+) -> tuple[dict[str, Any], int, tuple[uuid.UUID, uuid.UUID] | None]:
     connector = await repo.get_connector_by_id(session, connector_id=connector_id)
     if connector is None:
         raise ValueError("not_found")
@@ -419,6 +424,7 @@ async def process_inbound_webhook(
                 "duplicate": True,
             },
             200,
+            None,
         )
     if existing is not None:
         existing.signature_ok = True
@@ -444,6 +450,17 @@ async def process_inbound_webhook(
                 request_hash=request_hash,
             ),
         )
+        from app.modules.run_orchestration import command_port as run_command
+
+        resume_run_id = await run_command.apply_ci_observation(
+            session,
+            organization_id=org_id,
+            connector_id=connector.id,
+            body=body,
+            observation_id=existing.id,
+            request_hash=request_hash,
+        )
+        resume = (org_id, resume_run_id) if resume_run_id is not None else None
         return (
             {
                 "accepted": True,
@@ -451,6 +468,7 @@ async def process_inbound_webhook(
                 "duplicate": False,
             },
             202,
+            resume,
         )
 
     observation = await repo.create_observation(
@@ -483,6 +501,17 @@ async def process_inbound_webhook(
             request_hash=request_hash,
         ),
     )
+    from app.modules.run_orchestration import command_port as run_command
+
+    resume_run_id = await run_command.apply_ci_observation(
+        session,
+        organization_id=org_id,
+        connector_id=connector.id,
+        body=body,
+        observation_id=observation.id,
+        request_hash=request_hash,
+    )
+    resume = (org_id, resume_run_id) if resume_run_id is not None else None
     return (
         {
             "accepted": True,
@@ -490,6 +519,7 @@ async def process_inbound_webhook(
             "duplicate": False,
         },
         202,
+        resume,
     )
 
 

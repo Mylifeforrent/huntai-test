@@ -398,6 +398,25 @@ async def get_import_source_for_caller(
     }
 
 
+def _validate_referenced_case_fields(
+    *,
+    case_type: str,
+    execution_mode: str,
+    script_ref: str | None,
+    job_binding: dict[str, Any] | None,
+) -> None:
+    if case_type == "referenced":
+        if script_ref and script_ref.strip():
+            raise ValueError("validation")
+        if job_binding is None or not isinstance(job_binding, dict):
+            raise ValueError("validation")
+        job_id = job_binding.get("job_id")
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("validation")
+        if execution_mode != "script":
+            raise ValueError("validation")
+
+
 async def create_test_case_draft_for_caller(
     session: AsyncSession,
     ctx: SessionContext,
@@ -422,6 +441,12 @@ async def create_test_case_draft_for_caller(
         raise ValueError("validation")
     if body.execution_mode not in VALID_EXECUTION_MODES:
         raise ValueError("validation")
+    _validate_referenced_case_fields(
+        case_type=body.case_type,
+        execution_mode=body.execution_mode,
+        script_ref=body.script,
+        job_binding=body.job_binding,
+    )
     priority = body.priority or "P2"
     if priority not in VALID_PRIORITIES:
         raise ValueError("validation")
@@ -583,6 +608,15 @@ async def patch_test_case_draft_for_caller(
         raise ValueError("state")
     if row.aggregate_version != body.expected_version:
         raise ValueError("version")
+
+    next_script = body.script if body.script is not None else row.script_ref
+    next_binding = body.job_binding if body.job_binding is not None else row.job_binding
+    _validate_referenced_case_fields(
+        case_type=row.case_type,
+        execution_mode=row.execution_mode,
+        script_ref=next_script,
+        job_binding=next_binding if isinstance(next_binding, dict) else None,
+    )
 
     if _content_has_restricted(body.drafts) or _content_has_restricted(body.script):
         raise ValueError("policy")

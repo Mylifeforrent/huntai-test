@@ -24,6 +24,8 @@ TEST_ENV: dict[str, str] = {
     "OIDC_REDIRECT_URI": "http://localhost:8000/api/v1/auth/oidc/callback",
     "OIDC_CLAIM_SUBJECT": "sub",
     "GITHUB_WEBHOOK_SECRET": "test-github-webhook-secret",
+    "JENKINS_WEBHOOK_SECRET": "test-jenkins-webhook-secret",
+    "JENKINS_API_TOKEN": "test-jenkins-api-token",
 }
 
 for _key, _value in TEST_ENV.items():

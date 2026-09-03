@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     oidc_claim_subject: str
 
     github_webhook_secret: str
+    jenkins_webhook_secret: str | None = None
+    jenkins_api_token: str | None = None
 
     test_run_heartbeat_timeout_seconds: int | None = None
 

@@ -602,10 +602,11 @@ async def cancel_test_run(
     reason: str | None,
     idempotency_key: str,
     request_hash: str,
-) -> tuple[dict[str, Any], int]:
+) -> tuple[dict[str, Any], int, uuid.UUID | None]:
     _ = reason
     org_id = ctx.organization.id
     now = datetime.now(UTC)
+    ci_collect_run_id: uuid.UUID | None = None
 
     existing = await repo.get_idempotency_record(
         session,
@@ -618,7 +619,7 @@ async def cancel_test_run(
             raise ValueError("idempotency_conflict")
         if existing.response_ref is not None:
             status_code = existing.response_ref.get("_http_status", 200)
-            return existing.response_ref["data"], int(status_code)
+            return existing.response_ref["data"], int(status_code), None
 
     run = await _get_visible_test_run(session, ctx, test_run_id=test_run_id, for_update=True)
     await _require_project_execute(session, ctx, project_id=run.project_id)
@@ -639,6 +640,11 @@ async def cancel_test_run(
         raise ValueError("state")
 
     if run.status in {"PENDING", "WAITING_APPROVAL", "WAITING_EXTERNAL"}:
+        if run.status == "WAITING_EXTERNAL" and run.execution_source == "external_ci":
+            summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+            ci = summary.get("ci")
+            if isinstance(ci, dict) and ci.get("trigger_state") == "triggered":
+                ci_collect_run_id = run.id
         run = await repo.update_test_run_cancel(
             session,
             run=run,
@@ -702,7 +708,7 @@ async def cancel_test_run(
         created_by=ctx.user.id,
         created_at=now,
     )
-    return data, http_status
+    return data, http_status, ci_collect_run_id
 
 
 async def reclaim_stale_active_runs(
@@ -772,6 +778,8 @@ async def get_execution_options_for_caller(
                 "lifecycle_status": item["lifecycle_status"],
                 "validity": item["validity"],
                 "execution_mode": item["execution_mode"],
+                "case_type": item.get("case_type"),
+                "job_id": item.get("job_id"),
                 "selectable": item["selectable"],
                 "unavailable_reason": item["unavailable_reason"],
             }

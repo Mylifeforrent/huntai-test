@@ -14,6 +14,19 @@ async def get_environment_for_start(
     organization_id: uuid.UUID,
     environment_id: uuid.UUID,
 ) -> dict[str, Any] | None:
+    return await get_environment_for_run(
+        session,
+        organization_id=organization_id,
+        environment_id=environment_id,
+    )
+
+
+async def get_environment_for_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    environment_id: uuid.UUID,
+) -> dict[str, Any] | None:
     env = await repo.get_environment(
         session,
         organization_id=organization_id,
@@ -29,9 +42,37 @@ async def get_environment_for_start(
         "scope_level": env.scope_level,
         "project_id": env.project_id,
         "name": env.name,
+        "endpoint": env.endpoint,
+        "credential_ref": env.credential_ref,
         "health_status": env.health_status,
         "capacity": env.capacity,
         "credential_present": bool(env.credential_ref and env.credential_ref.strip()),
+    }
+
+
+async def get_job_contract_for_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    environment_id: uuid.UUID,
+    job_id: str,
+) -> dict[str, Any] | None:
+    contract = await repo.get_job_contract(
+        session,
+        organization_id=organization_id,
+        execution_environment_id=environment_id,
+        job_id=job_id,
+    )
+    if contract is None:
+        return None
+    return {
+        "job_id": contract.job_id,
+        "params_schema_ref": contract.params_schema_ref,
+        "params_schema": contract.params_schema,
+        "artifact_manifest": contract.artifact_manifest,
+        "report_adapter": contract.report_adapter,
+        "supports_cancel": contract.supports_cancel,
+        "contract_version": contract.contract_version,
     }
 
 

@@ -32,6 +32,7 @@ from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
 from app.modules.integration_hub.service import authenticate_api_token_by_prefix
 from app.modules.run_orchestration import repository as repo
+from app.modules.run_orchestration.command_port import cancel_external_ci_with_collect
 from app.modules.run_orchestration.executor import run_test_run_background
 from app.modules.run_orchestration.service import (
     cancel_test_run,
@@ -257,6 +258,7 @@ async def api_063_cancel_test_run(
     request: Request,
     test_run_id: uuid.UUID,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     ctx: Annotated[SessionContext, Depends(require_session)],
 ) -> dict[str, Any]:
@@ -269,7 +271,7 @@ async def api_063_cancel_test_run(
         raise validation_failed(trace_id) from exc
     request_hash = repo.hash_request_body(raw)
     try:
-        payload, status_code = await cancel_test_run(
+        payload, status_code, ci_collect_run_id = await cancel_test_run(
             db,
             ctx,
             test_run_id=test_run_id,
@@ -282,6 +284,12 @@ async def api_063_cancel_test_run(
         await db.commit()
         _map_write_error(trace_id, exc)
     await db.commit()
+    if ci_collect_run_id is not None:
+        background_tasks.add_task(
+            cancel_external_ci_with_collect,
+            organization_id=ctx.organization.id,
+            test_run_id=ci_collect_run_id,
+        )
     response.status_code = status_code
     return {"data": payload}
 

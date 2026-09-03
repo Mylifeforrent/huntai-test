@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal, NoReturn
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -280,6 +280,7 @@ async def api_090_inbound_webhook(
     connector_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
+    background_tasks: BackgroundTasks,
 ) -> JSONResponse:
     trace_id = get_trace_id(request)
     body = await request.body()
@@ -288,7 +289,7 @@ async def api_090_inbound_webhook(
     event_type = request.headers.get("x-github-event")
     request_hash = repo.hash_request_body(body)
     try:
-        payload, status_code = await process_inbound_webhook(
+        payload, status_code, resume = await process_inbound_webhook(
             db,
             settings,
             connector_id=connector_id,
@@ -307,4 +308,13 @@ async def api_090_inbound_webhook(
             raise hmac_failed(trace_id) from exc
         raise validation_failed(trace_id) from exc
     await db.commit()
+    if resume is not None:
+        from app.modules.run_orchestration.command_port import resume_ci_run_after_observation
+
+        organization_id, run_id = resume
+        background_tasks.add_task(
+            resume_ci_run_after_observation,
+            organization_id=organization_id,
+            test_run_id=run_id,
+        )
     return JSONResponse(status_code=status_code, content={"data": payload})

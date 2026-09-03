@@ -16,6 +16,33 @@ HEAL_PATCH_WHITELIST = frozenset(
 )
 
 
+async def invalidate_case_for_missing_job(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    job_id: str,
+) -> None:
+    """Mark TestCase validity invalid when Jenkins job no longer exists (reversible)."""
+    _ = actor_user_id
+    case = await repo.get_test_case(
+        session,
+        organization_id=organization_id,
+        test_case_id=test_case_id,
+        for_update=True,
+    )
+    if case is None:
+        raise ValueError("not_found")
+    now = datetime.now(UTC)
+    case.validity = "invalid"
+    case.invalid_reason = f"jenkins_job_not_found:{job_id}"
+    case.invalidated_at = now
+    case.updated_at = now
+    case.aggregate_version += 1
+    await session.flush()
+
+
 async def apply_heal_after_approval(
     session: AsyncSession,
     *,

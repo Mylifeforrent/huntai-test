@@ -368,18 +368,71 @@ async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uu
             return
 
         if run.execution_source == "external_ci":
-            await repo.update_test_run_status(
-                session,
-                run=run,
-                new_status="VALIDATING",
-                updated_at=now,
-                result_summary={
-                    "dispatch": "deferred",
-                    "reason": "external_ci_trigger_owned_by_S-M1-05",
-                    "validated": True,
-                },
-            )
             await session.commit()
+            from app.modules.run_orchestration.external_ci_executor import (
+                execute_external_ci_run,
+                validate_external_ci_run,
+            )
+
+            async with factory() as ext_session:
+                run_ro = await repo.get_test_run(
+                    ext_session,
+                    organization_id=organization_id,
+                    test_run_id=test_run_id,
+                )
+                if run_ro is None or run_ro.status != "VALIDATING":
+                    await ext_session.commit()
+                    return
+                env_info_fresh = await execution_query.get_environment_for_start(
+                    ext_session,
+                    organization_id=organization_id,
+                    environment_id=run_ro.env_id,
+                )
+                if env_info_fresh is None:
+                    await ext_session.commit()
+                    return
+                case_ids_raw = run_ro.snapshot.get("case_ids", [])
+                case_ids_parsed = (
+                    [uuid.UUID(str(cid)) for cid in case_ids_raw]
+                    if isinstance(case_ids_raw, list)
+                    else []
+                )
+                cases_fresh = await test_assets_query.get_cases_for_run_validation(
+                    ext_session,
+                    organization_id=organization_id,
+                    project_id=run_ro.project_id,
+                    case_ids=case_ids_parsed,
+                )
+                ext_ok, ext_fail, contracts = await validate_external_ci_run(
+                    ext_session,
+                    run=run_ro,
+                    env_info=env_info_fresh,
+                    cases=cases_fresh,
+                )
+                if not ext_ok:
+                    run_locked = await repo.get_test_run(
+                        ext_session,
+                        organization_id=organization_id,
+                        test_run_id=test_run_id,
+                        for_update=True,
+                    )
+                    if run_locked is not None and run_locked.status == "VALIDATING":
+                        await repo.update_test_run_status(
+                            ext_session,
+                            run=run_locked,
+                            new_status="FAILED",
+                            updated_at=datetime.now(UTC),
+                            result_summary=ext_fail,
+                        )
+                    await ext_session.commit()
+                    return
+                await ext_session.commit()
+            await execute_external_ci_run(
+                organization_id=organization_id,
+                test_run_id=test_run_id,
+                contracts=contracts,
+                env_info=env_info_fresh,
+            )
             return
 
         if run.execution_source == "agent":

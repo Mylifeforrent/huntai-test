@@ -353,6 +353,41 @@ async def get_command_receipt(
     return result.scalar_one_or_none()
 
 
+async def find_external_ci_run_for_observation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    job_id: str,
+    build_number: int | None,
+) -> TestRun | None:
+    query = (
+        select(TestRun)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.execution_source == "external_ci",
+            TestRun.status.notin_(tuple(TERMINAL_STATUSES)),
+        )
+        .order_by(TestRun.updated_at.desc())
+        .limit(50)
+    )
+    result = await session.execute(query)
+    for run in result.scalars().all():
+        summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+        ci = summary.get("ci")
+        if not isinstance(ci, dict):
+            continue
+        if ci.get("job_id") != job_id:
+            continue
+        if build_number is not None and ci.get("build_number") is not None:
+            try:
+                if int(ci["build_number"]) != build_number:
+                    continue
+            except (TypeError, ValueError):  # fmt: skip
+                continue
+        return run
+    return None
+
+
 async def update_test_run_status(
     session: AsyncSession,
     *,

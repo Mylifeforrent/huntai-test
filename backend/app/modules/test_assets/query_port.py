@@ -115,7 +115,11 @@ async def list_cases_for_execution_options(
     )
     items: list[dict[str, Any]] = []
     for case in cases:
-        selectable = (
+        binding = case.job_binding
+        job_id: str | None = None
+        if isinstance(binding, dict) and isinstance(binding.get("job_id"), str):
+            job_id = binding["job_id"]
+        base_selectable = (
             case.lifecycle_status == "ACTIVE"
             and case.validity == "valid"
             and (
@@ -127,15 +131,27 @@ async def list_cases_for_execution_options(
                 )
             )
         )
+        selectable = base_selectable
         unavailable_reason: str | None = None
         if case.lifecycle_status != "ACTIVE":
             unavailable_reason = "not_active"
         elif case.validity != "valid":
             unavailable_reason = "invalid"
+        elif execution_source == "external_ci":
+            if case.case_type != "referenced":
+                selectable = False
+                unavailable_reason = "not_referenced"
+            elif not isinstance(binding, dict) or not job_id:
+                selectable = False
+                unavailable_reason = "missing_job_binding"
+        elif execution_source == "script" and case.case_type == "referenced":
+            selectable = False
+            unavailable_reason = "referenced_only_external_ci"
         elif (execution_source == "agent" and case.execution_mode != "agent") or (
             execution_source in {"script", "external_ci"} and case.execution_mode != "script"
         ):
             unavailable_reason = "mode_mismatch"
+            selectable = False
         items.append(
             {
                 "id": case.id,
@@ -143,6 +159,8 @@ async def list_cases_for_execution_options(
                 "lifecycle_status": case.lifecycle_status,
                 "validity": case.validity,
                 "execution_mode": case.execution_mode,
+                "case_type": case.case_type,
+                "job_id": job_id,
                 "selectable": selectable,
                 "unavailable_reason": unavailable_reason,
             }
