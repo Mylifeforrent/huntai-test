@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session_factory
 from app.modules.execution_registry import query_port as execution_query
+from app.modules.quality_gates.command_port import schedule_gate_evaluation
 from app.modules.results_evidence.command_port import (
     CaseResultWrite,
     StepRunWrite,
@@ -427,6 +428,10 @@ async def _execute_script_run(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )
+    await schedule_gate_evaluation(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
 
 
 async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uuid.UUID) -> None:
@@ -682,6 +687,10 @@ async def complete_stopping_background(
             await complete_stopping_run(session, run=run, now=now)
         await session.commit()
     await schedule_failure_triage(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    await schedule_gate_evaluation(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )

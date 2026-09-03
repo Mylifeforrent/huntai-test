@@ -430,3 +430,24 @@ async def get_latest_run_for_plan(
     if row is None:
         return None
     return {"id": row[0], "status": row[1]}
+
+
+async def cas_attach_gate_evaluation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    gate_evaluation_id: uuid.UUID,
+) -> bool:
+    run = await get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        for_update=True,
+    )
+    if run is None or run.gate_evaluation_id is not None:
+        return False
+    run.gate_evaluation_id = gate_evaluation_id
+    run.aggregate_version += 1
+    await session.flush()
+    return True

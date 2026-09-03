@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.modules.execution_registry import query_port as execution_query
+from app.modules.quality_gates.command_port import schedule_gate_evaluation
 from app.modules.results_evidence import repository as evidence_repo
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.results_evidence.command_port import (
@@ -811,6 +812,10 @@ async def execute_external_ci_run(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )
+    await schedule_gate_evaluation(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
 
 
 async def _contracts_for_run(
@@ -925,6 +930,10 @@ async def best_effort_collect_on_cancel(
         await session.commit()
 
     await schedule_failure_triage(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    await schedule_gate_evaluation(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )

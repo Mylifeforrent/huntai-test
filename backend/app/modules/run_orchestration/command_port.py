@@ -147,6 +147,21 @@ async def resume_ci_run_after_observation(
     )
 
 
+async def cas_attach_gate_evaluation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    gate_evaluation_id: uuid.UUID,
+) -> bool:
+    return await repo.cas_attach_gate_evaluation(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        gate_evaluation_id=gate_evaluation_id,
+    )
+
+
 async def cancel_external_ci_with_collect(
     *,
     organization_id: uuid.UUID,

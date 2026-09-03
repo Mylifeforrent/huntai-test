@@ -21,6 +21,7 @@ from app.modules.execution_registry import command_port as execution_command
 from app.modules.identity_tenancy import command_port as identity_command
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext, compute_reauth_required
+from app.modules.quality_gates import query_port as quality_gates_query
 from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.test_assets import command_port as test_assets_command
@@ -271,6 +272,41 @@ async def _validate_heal_apply_preview(
     return snapshot_ref
 
 
+async def _validate_gate_waiver_preview(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    target_object_type: str,
+    target_object_id: uuid.UUID,
+    payload: dict[str, Any],
+    project_id: uuid.UUID | None,
+) -> uuid.UUID:
+    if payload.get("confirm") is not True:
+        raise ValueError("validation")
+    evaluation: dict[str, Any] | None
+    if target_object_type == "gate_evaluation":
+        evaluation = await quality_gates_query.get_evaluation_pointer(
+            session,
+            organization_id=organization_id,
+            evaluation_id=target_object_id,
+        )
+    elif target_object_type == "test_run":
+        evaluation = await quality_gates_query.get_evaluation_for_test_run(
+            session,
+            organization_id=organization_id,
+            test_run_id=target_object_id,
+        )
+    else:
+        raise ValueError("validation")
+    if evaluation is None:
+        raise ValueError("state")
+    if project_id is not None:
+        run_project = evaluation.get("project_id")
+        if run_project is not None and uuid.UUID(str(run_project)) != project_id:
+            raise ValueError("not_found")
+    return uuid.UUID(str(evaluation["id"]))
+
+
 async def create_action_preview(
     session: AsyncSession,
     ctx: SessionContext,
@@ -319,6 +355,8 @@ async def create_action_preview(
         if role is None:
             raise ValueError("not_found")
         if role == "viewer":
+            raise ValueError("forbidden")
+        if action_type == "gate_waiver" and role not in {"owner", "admin"}:
             raise ValueError("forbidden")
     elif not await identity_query.caller_has_non_viewer_role(
         session, organization_id=org_id, user_id=user_id
@@ -412,6 +450,7 @@ async def create_action_preview(
         raise ValueError("state")
 
     heal_snapshot_ref: uuid.UUID | None = None
+    gate_evaluation_id: uuid.UUID | None = None
     if action_type == "heal_apply":
         if preview_input.target_object_type != "test_case":
             raise ValueError("validation")
@@ -441,6 +480,34 @@ async def create_action_preview(
                 raise ValueError("policy_deny") from exc
             raise
 
+    if action_type == "gate_waiver":
+        try:
+            gate_evaluation_id = await _validate_gate_waiver_preview(
+                session,
+                organization_id=org_id,
+                target_object_type=preview_input.target_object_type,
+                target_object_id=preview_input.target_object_id,
+                payload=preview_input.payload,
+                project_id=project_id,
+            )
+        except ValueError as exc:
+            if str(exc) == "state":
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=audit_base.organization_id,
+                        actor_user_id=audit_base.actor_user_id,
+                        action=audit_base.action,
+                        resource_type=audit_base.resource_type,
+                        resource_id=audit_base.resource_id,
+                        project_id=audit_base.project_id,
+                        request_hash=audit_base.request_hash,
+                        result="failed",
+                    ),
+                )
+                raise ValueError("state") from exc
+            raise
+
     param_hash = compute_param_hash(
         action_type=action_type,
         target_object_type=preview_input.target_object_type,
@@ -464,6 +531,8 @@ async def create_action_preview(
             "compensation_summary": "Rollback pointer via API-039",
             "none_declared": False,
         }
+    if action_type == "gate_waiver" and gate_evaluation_id is not None:
+        card_payload["gate_evaluation_id"] = str(gate_evaluation_id)
 
     approval_request_id: uuid.UUID | None = None
     if gate_result.gate == PolicyGate.REQUIRE_APPROVAL:
@@ -1038,6 +1107,66 @@ async def submit_approval_decision(
                     action="heal_apply",
                     resource_type="test_case",
                     resource_id=approval.target_object_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="failed",
+                ),
+            )
+
+    if decision == "approve" and approval.action_type == "gate_waiver":
+        evaluation_id = approval.target_object_id
+        from app.modules.quality_gates import command_port as quality_gates_command
+
+        try:
+            if approval.target_object_type == "test_run":
+                eval_ptr = await quality_gates_query.get_evaluation_for_test_run(
+                    session,
+                    organization_id=org_id,
+                    test_run_id=approval.target_object_id,
+                )
+                if eval_ptr is None:
+                    raise ValueError("state")
+                evaluation_id = uuid.UUID(str(eval_ptr["id"]))
+            attached = await quality_gates_command.attach_waiver(
+                session,
+                organization_id=org_id,
+                evaluation_id=evaluation_id,
+                approval_id=approval.id,
+            )
+            if not attached:
+                raise ValueError("state")
+            approval.status = "EXECUTED"
+            approval.execution_result = "ok"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="gate_waiver",
+                    resource_type="gate_evaluation",
+                    resource_id=evaluation_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="ok",
+                ),
+            )
+        except ValueError:
+            approval.status = "EXECUTED"
+            approval.execution_result = "failed"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="gate_waiver",
+                    resource_type="gate_evaluation",
+                    resource_id=evaluation_id,
                     project_id=approval.project_id,
                     request_hash=request_hash,
                     result="failed",

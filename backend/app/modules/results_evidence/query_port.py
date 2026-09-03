@@ -92,3 +92,17 @@ async def get_latest_locator_stale_cluster_for_test_case(
         "confidence": float(row.confidence),
         "fixes": list(row.fixes or []),
     }
+
+
+async def list_case_result_outcomes_for_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    rows = await repo.list_case_results_for_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    return [{"outcome": row.outcome, "is_partial": row.is_partial} for row in rows]

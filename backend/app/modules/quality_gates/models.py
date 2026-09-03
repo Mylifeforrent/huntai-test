@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, Index, Integer, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,6 +33,35 @@ class QualityGatePolicy(Base):
     mode: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     policy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class GateEvaluation(Base):
+    __tablename__ = "gate_evaluations"
+    __table_args__ = (
+        Index(
+            "ix_gate_evaluations_org_run_created",
+            "organization_id",
+            "test_run_id",
+            "created_at",
+        ),
+        Index("ix_gate_evaluations_org_result", "organization_id", "result"),
+        {"schema": "quality_gates"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    test_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    policy_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    policy_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    result: Mapped[str] = mapped_column(Text, nullable=False)
+    threshold_details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    check_run_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    waiver_approval_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    evidence_refs: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False
+    )
 
 
 class CommandIdempotencyRecord(Base):

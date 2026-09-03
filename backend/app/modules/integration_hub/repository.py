@@ -14,6 +14,7 @@ from app.modules.integration_hub.models import (
     Connector,
     ExternalObservation,
     InboxEvent,
+    ProjectCiTriggerConfig,
 )
 
 VALID_CONNECTOR_TYPES = frozenset({"jira", "github", "ci", "release"})
@@ -120,6 +121,64 @@ async def list_connectors(
         query = query.limit(limit)
     result = await session.execute(query)
     return list(result.scalars().all())
+
+
+async def get_ci_trigger_config(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    for_update: bool = False,
+) -> ProjectCiTriggerConfig | None:
+    query = select(ProjectCiTriggerConfig).where(
+        ProjectCiTriggerConfig.organization_id == organization_id,
+        ProjectCiTriggerConfig.project_id == project_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def upsert_ci_trigger_config(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    bindings: list[dict[str, Any]],
+    expected_version: int,
+    created_by: uuid.UUID | None,
+    now: datetime,
+) -> ProjectCiTriggerConfig:
+    row = await get_ci_trigger_config(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+        for_update=True,
+    )
+    if row is None:
+        if expected_version != 1:
+            raise ValueError("version")
+        row = ProjectCiTriggerConfig(
+            id=uuid.uuid4(),
+            organization_id=organization_id,
+            project_id=project_id,
+            created_at=now,
+            updated_at=now,
+            created_by=created_by,
+            aggregate_version=1,
+            bindings=bindings,
+        )
+        session.add(row)
+        await session.flush()
+        return row
+    if row.aggregate_version != expected_version:
+        raise ValueError("version")
+    row.bindings = bindings
+    row.aggregate_version += 1
+    row.updated_at = now
+    await session.flush()
+    return row
 
 
 async def create_connector(

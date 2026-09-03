@@ -27,6 +27,15 @@ class RunClusteringContext(TypedDict):
     result_summary: dict[str, Any] | None
 
 
+class RunGateContext(TypedDict):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str
+    execution_source: str
+    result_summary: dict[str, Any] | None
+    gate_evaluation_id: uuid.UUID | None
+
+
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
@@ -95,6 +104,29 @@ async def get_run_clustering_context(
         "status": run.status,
         "created_by": run.created_by,
         "result_summary": dict(run.result_summary) if run.result_summary else None,
+    }
+
+
+async def get_run_for_gate(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> RunGateContext | None:
+    run = await repo.get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    if run is None:
+        return None
+    return {
+        "id": run.id,
+        "project_id": run.project_id,
+        "status": run.status,
+        "execution_source": run.execution_source,
+        "result_summary": dict(run.result_summary) if run.result_summary else None,
+        "gate_evaluation_id": run.gate_evaluation_id,
     }
 
 
