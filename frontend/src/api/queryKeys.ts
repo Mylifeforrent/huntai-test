@@ -21,6 +21,7 @@ export const queryKeys = {
   approval: (id: string) => ["approval-requests", id] as const,
   gatePolicies: (params: Record<string, string>) => ["quality-gate-policies", params] as const,
   gateEvaluations: (params: Record<string, string>) => ["gate-evaluations", params] as const,
+  gateEvaluationDetail: (id: string) => ["gate-evaluations", id] as const,
   environments: (params: Record<string, string>) => ["execution-environments", params] as const,
   executionOptions: (projectId: string) => ["execution-options", projectId] as const,
   evidence: (params: Record<string, string>) => ["evidence-objects", params] as const,
