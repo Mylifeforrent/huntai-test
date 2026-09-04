@@ -6,9 +6,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.integration_hub import query_port as integration_query
+from app.modules.integration_hub import repository as repo
 from app.modules.integration_hub.jira_write_stub import (
     derive_external_request_id,
     sync_jira_write_stub,
@@ -16,6 +18,51 @@ from app.modules.integration_hub.jira_write_stub import (
 from app.modules.results_evidence import command_port as evidence_command
 from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
+
+POLL_SOURCE = "poll"
+
+
+async def record_poll_observation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    job_id: str,
+    build_number: int,
+    event_kind: str,
+    payload_ref: str | None = None,
+) -> None:
+    connector = await integration_query.get_ci_connector(
+        session,
+        organization_id=organization_id,
+    )
+    if connector is None:
+        return
+    connector_id = connector["id"]
+    assert isinstance(connector_id, uuid.UUID)
+    observation_key = f"poll:{connector_id}:{job_id}:{build_number}:{event_kind}"
+    existing = await repo.get_observation_by_key(
+        session,
+        organization_id=organization_id,
+        source=POLL_SOURCE,
+        observation_key=observation_key,
+    )
+    if existing is not None:
+        return
+    now = datetime.now(UTC)
+    try:
+        await repo.create_observation(
+            session,
+            organization_id=organization_id,
+            connector_id=connector_id,
+            source=POLL_SOURCE,
+            observation_key=observation_key,
+            payload_ref=payload_ref,
+            signature_ok=True,
+            observed_at=now,
+            data_classification="Internal",
+        )
+    except IntegrityError:
+        return
 
 
 async def execute_jira_write_after_approval(
@@ -132,4 +179,4 @@ async def execute_jira_write_after_approval(
     }
 
 
-__all__ = ["execute_jira_write_after_approval"]
+__all__ = ["execute_jira_write_after_approval", "record_poll_observation"]

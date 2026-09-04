@@ -243,6 +243,60 @@ async def get_case_result(
     return result.scalar_one_or_none()
 
 
+async def get_case_result_by_attempt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    attempt_seq: int,
+) -> CaseResult | None:
+    result = await session.execute(
+        select(CaseResult).where(
+            CaseResult.organization_id == organization_id,
+            CaseResult.test_run_id == test_run_id,
+            CaseResult.test_case_id == test_case_id,
+            CaseResult.attempt_seq == attempt_seq,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_case_result_partial(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> bool:
+    row = await get_case_result(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+    if row is None:
+        return False
+    row.is_partial = True
+    await session.flush()
+    return True
+
+
+async def artifact_key_exists(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    object_key: str,
+) -> bool:
+    result = await session.execute(
+        select(Artifact.id)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.object_key == object_key,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def list_step_runs_for_case_result(
     session: AsyncSession,
     *,

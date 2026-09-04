@@ -46,10 +46,29 @@ class Settings(BaseSettings):
 
     test_run_heartbeat_timeout_seconds: int | None = None
     artifact_root: str
+    ci_log_chunk_bytes: int | None = None
+    ci_log_max_total_bytes: int | None = None
+    report_parse_timeout_seconds: int | None = None
+    report_parse_batch_rows: int | None = None
 
     @field_validator("test_run_heartbeat_timeout_seconds", mode="before")
     @classmethod
     def validate_heartbeat_timeout(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
+
+    @field_validator(
+        "ci_log_chunk_bytes",
+        "ci_log_max_total_bytes",
+        "report_parse_timeout_seconds",
+        "report_parse_batch_rows",
+        mode="before",
+    )
+    @classmethod
+    def validate_optional_int(cls, value: object) -> object:
         if value is None:
             return None
         if isinstance(value, str) and value.strip() == "":

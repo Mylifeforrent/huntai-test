@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -31,6 +32,14 @@ class CaseResult(Base):
             name="uq_case_results_org_run_case_attempt",
         ),
         Index("ix_case_results_org_test_run", "organization_id", "test_run_id"),
+        Index(
+            "ix_case_results_org_run_chunk_key",
+            "organization_id",
+            "test_run_id",
+            "chunk_key",
+            unique=True,
+            postgresql_where=text("chunk_key IS NOT NULL"),
+        ),
         {"schema": "results_evidence"},
     )
 

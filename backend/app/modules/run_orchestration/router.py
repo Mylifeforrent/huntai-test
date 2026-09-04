@@ -381,6 +381,13 @@ async def _test_run_sse_events(
                 progress = 10 if status == "PENDING" else 30 if status == "VALIDATING" else 70
                 if status in {"SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT"}:
                     progress = 100
+                summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+                ci = summary.get("ci")
+                hint = status.lower()
+                if isinstance(ci, dict):
+                    report_parse = ci.get("report_parse")
+                    if isinstance(report_parse, dict) and report_parse.get("status") == "parsing":
+                        hint = "report_parsing"
                 await session.commit()
             seq += 1
             now = datetime.now(UTC).isoformat()
@@ -394,7 +401,7 @@ async def _test_run_sse_events(
                         "resource_type": "test_run",
                         "resource_id": str(test_run_id),
                         "progress_percent": progress,
-                        "hint": status.lower(),
+                        "hint": hint,
                         "occurred_at": now,
                     }
                 ),

@@ -141,6 +141,76 @@ async def append_step_run(
     return row.id
 
 
+async def mark_case_result_partial(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> bool:
+    return await repo.mark_case_result_partial(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+
+
+async def find_case_result_id_by_attempt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    attempt_seq: int,
+) -> uuid.UUID | None:
+    row = await repo.get_case_result_by_attempt(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        test_case_id=test_case_id,
+        attempt_seq=attempt_seq,
+    )
+    return None if row is None else row.id
+
+
+async def artifact_object_key_exists(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    object_key: str,
+) -> bool:
+    return await repo.artifact_key_exists(
+        session,
+        organization_id=organization_id,
+        object_key=object_key,
+    )
+
+
+async def append_ci_report_evidence(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    claim: str,
+    source_object: dict[str, Any],
+    content_ref: str,
+    subject_id: uuid.UUID,
+) -> uuid.UUID:
+    row = await repo.insert_evidence_object(
+        session,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        claim=claim,
+        source_object=source_object,
+        content_ref=content_ref,
+        subject_type="case_result",
+        subject_id=subject_id,
+        data_classification="Internal",
+    )
+    return row.id
+
+
 def _clustering_state(result_summary: dict[str, Any] | None) -> dict[str, Any] | None:
     if not result_summary:
         return None
@@ -504,8 +574,12 @@ __all__ = [
     "StepRunWrite",
     "append_artifact",
     "append_case_result",
+    "append_ci_report_evidence",
     "append_jira_issue_evidence",
     "append_step_run",
+    "artifact_object_key_exists",
+    "find_case_result_id_by_attempt",
+    "mark_case_result_partial",
     "prepare_failure_triage",
     "run_failure_triage_background",
     "schedule_failure_triage",
