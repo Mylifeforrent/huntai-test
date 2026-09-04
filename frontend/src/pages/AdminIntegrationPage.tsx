@@ -173,6 +173,9 @@ export function AdminIntegrationPage() {
                   <TableRow>
                     <TableHead>投递 ID</TableHead>
                     <TableHead>来源</TableHead>
+                    <TableHead>observation_key</TableHead>
+                    <TableHead>accepted</TableHead>
+                    <TableHead>data_classification</TableHead>
                     <TableHead>验签</TableHead>
                     <TableHead>时间</TableHead>
                   </TableRow>
@@ -182,6 +185,11 @@ export function AdminIntegrationPage() {
                     <TableRow key={String(item.id ?? index)}>
                       <TableCell className="font-mono text-xs">{String(item.id ?? "")}</TableCell>
                       <TableCell className="text-xs">{String(item.source ?? "")}</TableCell>
+                      <TableCell className="max-w-[12rem] truncate font-mono text-xs">
+                        {String(item.observation_key ?? "")}
+                      </TableCell>
+                      <TableCell className="text-xs">{String(item.accepted ?? item.signature_ok ?? "")}</TableCell>
+                      <TableCell className="text-xs">{String(item.data_classification ?? "")}</TableCell>
                       <TableCell>
                         <StatusBadge status={item.signature_ok === true ? "SUCCEEDED" : "FAILED"} />
                       </TableCell>

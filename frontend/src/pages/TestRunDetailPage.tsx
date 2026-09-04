@@ -379,6 +379,24 @@ export function TestRunDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <RunProgressBar status={status} source={source} />
+            {run?.execution_source_badge?.normalized_from_external_ci ? (
+              <StatusBadge status="external_ci" />
+            ) : null}
+            {typeof run?.result_summary?.ci === "object" &&
+            run.result_summary.ci !== null &&
+            typeof (run.result_summary.ci as Record<string, unknown>).report_parse === "object" ? (
+              <p className="text-xs text-muted-foreground">
+                报告解析进度：{" "}
+                {JSON.stringify((run.result_summary.ci as Record<string, unknown>).report_parse)}
+              </p>
+            ) : null}
+            {typeof run?.result_summary?.ci === "object" &&
+            run.result_summary.ci !== null &&
+            (run.result_summary.ci as Record<string, unknown>).reason ? (
+              <p className="text-xs text-destructive">
+                CI 采集失败：{String((run.result_summary.ci as Record<string, unknown>).reason)}
+              </p>
+            ) : null}
             {sseHint ? (
               <p className="text-xs text-muted-foreground">SSE 提示（非终态）：{sseHint}。权威状态以 GET API-061 为准。</p>
             ) : null}
@@ -534,6 +552,7 @@ export function TestRunDetailPage() {
                   <TableRow>
                     <TableHead>Case</TableHead>
                     <TableHead>结果</TableHead>
+                    <TableHead>Partial</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -548,6 +567,9 @@ export function TestRunDetailPage() {
                       <TableCell className="font-mono text-xs">{item.test_case_id}</TableCell>
                       <TableCell>
                         <StatusBadge status={item.outcome} />
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {item.is_partial ? "partial" : "—"}
                       </TableCell>
                     </TableRow>
                   ))}

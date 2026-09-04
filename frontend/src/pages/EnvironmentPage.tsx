@@ -12,8 +12,10 @@ import type {
   JobContractListItem,
   JobParamsSchema,
   ListEnvelope,
+  ReportAdapter,
   ResourceEnvelope,
 } from "@/api/types";
+import { REPORT_ADAPTERS } from "@/api/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,6 +49,7 @@ export function EnvironmentPage() {
   const [endpoint, setEndpoint] = useState("");
   const [adminProjectId, setAdminProjectId] = useState("");
   const [jobId, setJobId] = useState("");
+  const [reportAdapter, setReportAdapter] = useState<ReportAdapter>("junit");
   const [jobSchemaJson, setJobSchemaJson] = useState('{"type":"object","properties":{}}');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
@@ -143,7 +146,7 @@ export function EnvironmentPage() {
             job_id: jobId.trim(),
             supports_cancel: true,
             contract_version: 1,
-            report_adapter: envType === "external_ci" ? "junit" : undefined,
+            report_adapter: envType === "external_ci" ? reportAdapter : undefined,
             schema,
           },
         ];
@@ -407,15 +410,33 @@ export function EnvironmentPage() {
             <Input id="job-id" value={jobId} onChange={(e) => setJobId(e.target.value)} />
           </div>
           {jobId.trim() ? (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="job-schema">Job Schema JSON</Label>
-              <textarea
-                id="job-schema"
-                className="min-h-24 rounded-md border border-input bg-background p-2 font-mono text-xs"
-                value={jobSchemaJson}
-                onChange={(e) => setJobSchemaJson(e.target.value)}
-              />
-            </div>
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="report-adapter">报告适配器</Label>
+                <select
+                  id="report-adapter"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  value={reportAdapter}
+                  onChange={(e) => setReportAdapter(e.target.value as ReportAdapter)}
+                  disabled={envType !== "external_ci"}
+                >
+                  {REPORT_ADAPTERS.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="job-schema">Job Schema JSON</Label>
+                <textarea
+                  id="job-schema"
+                  className="min-h-24 rounded-md border border-input bg-background p-2 font-mono text-xs"
+                  value={jobSchemaJson}
+                  onChange={(e) => setJobSchemaJson(e.target.value)}
+                />
+              </div>
+            </>
           ) : null}
           <Button
             onClick={() => register.mutate()}

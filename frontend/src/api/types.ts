@@ -38,6 +38,9 @@ export type ExecutionResult = (typeof EXECUTION_RESULTS)[number];
 export const ENVIRONMENT_STATUSES = ["PENDING_APPROVAL", "ACTIVE", "DEGRADED", "DISABLED"] as const;
 export type EnvironmentStatus = (typeof ENVIRONMENT_STATUSES)[number];
 
+export const REPORT_ADAPTERS = ["junit", "allure", "playwright", "pytest"] as const;
+export type ReportAdapter = (typeof REPORT_ADAPTERS)[number];
+
 export const RELEASE_STATUSES = [
   "DRAFT",
   "PENDING_CONFIRM",
