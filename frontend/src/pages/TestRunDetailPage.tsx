@@ -29,6 +29,7 @@ import { ClusterCard } from "@/components/domain/ClusterCard";
 import { EvidenceViewer } from "@/components/domain/EvidenceViewer";
 import { AiDegradeBanner } from "@/components/domain/AiDegradeBanner";
 import { StatusBadge } from "@/components/domain/StatusBadge";
+import { useSession } from "@/hooks/useSession";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,10 +44,12 @@ export function TestRunDetailPage() {
   const { runId = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const session = useSession();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [signalSent, setSignalSent] = useState(false);
   const [cancelError, setCancelError] = useState<unknown>(null);
   const [healError, setHealError] = useState<unknown>(null);
+  const [jiraError, setJiraError] = useState<unknown>(null);
   const [correctError, setCorrectError] = useState<unknown>(null);
   const [sseHint, setSseHint] = useState<string | null>(null);
   const [selectedCaseResultId, setSelectedCaseResultId] = useState<string | null>(null);
@@ -112,6 +115,8 @@ export function TestRunDetailPage() {
 
   const run = detail.data?.data;
   const status = run?.status ?? "";
+  const projectRole = session.me?.memberships?.find((item) => item.project_id === run?.project_id)?.role;
+  const canCreateJira = status === "FAILED" && projectRole !== "viewer";
   const source = run?.execution_source;
   const version = run?.version;
   const clusterReport = clusters.data?.data;
@@ -245,6 +250,36 @@ export function TestRunDetailPage() {
       }
     },
     onError: (error) => setHealError(error),
+  });
+
+  const jiraWrite = useMutation({
+    mutationFn: async (input: {
+      clusterId: string;
+      description: string;
+      reproSteps: string;
+      evidenceIds: string[];
+      jiraProject?: string;
+    }) => {
+      return api.post<ResourceEnvelope<ActionPreview>>("API-120", "/api/v1/action-previews", {
+        action_type: "jira_write",
+        project_id: run?.project_id,
+        target_object_type: "failure_cluster",
+        target_object_id: input.clusterId,
+        payload: {
+          description: input.description,
+          repro_steps: input.reproSteps,
+          jira_project: input.jiraProject,
+          evidence_ids: input.evidenceIds,
+        },
+      });
+    },
+    onMutate: () => setJiraError(null),
+    onSuccess: (payload) => {
+      if (payload.data.gate === "REQUIRE_APPROVAL" && payload.data.approval_request_id) {
+        navigate(`/approvals?highlight=${payload.data.approval_request_id}`);
+      }
+    },
+    onError: (error) => setJiraError(error),
   });
 
   const correctCluster = useMutation({
@@ -404,6 +439,7 @@ export function TestRunDetailPage() {
                     fixes: detailRow?.fixes_preview,
                     evidenceRefs: item.evidence_refs,
                     failureRefs: item.failure_refs,
+                    jiraIssue: detailRow?.jira_issue ?? item.jira_issue,
                     correctionHistory: detailRow?.correction_history,
                     similarItems: similarById.get(item.id),
                   }}
@@ -418,6 +454,16 @@ export function TestRunDetailPage() {
                     });
                   }}
                   applyPending={healApply.isPending}
+                  jiraPending={jiraWrite.isPending}
+                  showJiraButton={canCreateJira && !item.jira_issue && !detailRow?.jira_issue}
+                  onCreateJira={() => {
+                    jiraWrite.mutate({
+                      clusterId: item.id,
+                      description: item.root_cause ?? "失败聚类缺陷",
+                      reproSteps: `TestRun ${runId} · cluster ${item.id}`,
+                      evidenceIds: item.evidence_refs ?? [],
+                    });
+                  }}
                   onApply={(fix) => {
                     if (!linkedCaseId) {
                       setHealError(new Error("缺少目标用例"));
@@ -463,6 +509,7 @@ export function TestRunDetailPage() {
               )}
             </div>
             <CommandFeedback error={healError} apis={PAGE_APIS.P09} action="heal_apply Preview（API-120）" />
+            <CommandFeedback error={jiraError} apis={PAGE_APIS.P09} action="jira_write Preview（API-120）" />
             <CommandFeedback error={correctError} apis={PAGE_APIS.P09} action="人工修正（API-132）" />
           </CardContent>
         </Card>

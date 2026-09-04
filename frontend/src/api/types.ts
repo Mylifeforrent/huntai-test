@@ -215,6 +215,7 @@ export interface FailureClusterListItem {
   evidence_refs: string[];
   failure_refs: string[];
   created_at?: string;
+  jira_issue?: { key: string; external_request_id?: string };
 }
 
 export interface FailureClusterFixPreview {

@@ -539,4 +539,84 @@ describe("TestRunDetailPage", () => {
     await flush();
     expect(container.textContent).toContain("聚类生成中");
   });
+
+  it("posts jira_write preview on failed run and hides button for viewer role", async () => {
+    const failedRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: failedRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [{ id: "case-result-1", test_case_id: "case-1", outcome: "failed" }] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [
+              {
+                id: "cluster-1",
+                test_run_id: "run-1",
+                category: "assertion_real_bug",
+                root_cause: "status mismatch",
+                confidence: 0.85,
+                blocking_judgment: "blocker",
+                evidence_refs: ["ev-1"],
+                failure_refs: ["case-result-1"],
+              },
+            ],
+            unclustered_refs: [],
+            generation_status: "ready",
+            degraded: false,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      if (apiId === "API-131") {
+        return Promise.resolve({
+          data: {
+            id: "cluster-1",
+            test_run_id: "run-1",
+            category: "assertion_real_bug",
+            confidence: 0.85,
+            blocking_judgment: "blocker",
+            evidence_refs: ["ev-1"],
+            failure_refs: ["case-result-1"],
+            correction_history: [],
+          },
+        });
+      }
+      if (apiId === "API-133") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    apiPost.mockResolvedValue({
+      data: { gate: "REQUIRE_APPROVAL", approval_request_id: "apr-jira" },
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    const jiraButton = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("一键创建 Jira 缺陷"),
+    );
+    expect(jiraButton).toBeTruthy();
+    await act(async () => {
+      jiraButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(apiPost).toHaveBeenCalledWith(
+      "API-120",
+      "/api/v1/action-previews",
+      expect.objectContaining({
+        action_type: "jira_write",
+        target_object_type: "failure_cluster",
+        target_object_id: "cluster-1",
+      }),
+    );
+  });
 });

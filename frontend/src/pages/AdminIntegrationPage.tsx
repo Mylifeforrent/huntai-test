@@ -149,7 +149,7 @@ export function AdminIntegrationPage() {
                             {item.outbound_write_enabled === true ? <Badge variant="success">可写</Badge> : <Badge variant="outline">只读</Badge>}
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            credential_present={String(item.credential_present ?? false)} · secret 永不返回
+                            credential_present={String(item.credential_present ?? false)} · secret 永不返回 · 出站写入须审批放行
                           </p>
                         </div>
                         <Button size="sm" variant="outline" onClick={() => setSelectedConnector(id)}>

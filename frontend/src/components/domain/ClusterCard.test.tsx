@@ -95,6 +95,45 @@ describe("ClusterCard", () => {
     expect(onCorrect).toHaveBeenCalled();
   });
 
+  it("shows jira button and invokes handler when allowed", () => {
+    const onCreateJira = vi.fn();
+    const container = mount(
+      <ClusterCard
+        cluster={{
+          id: "c1",
+          category: "assertion_real_bug",
+          confidence: 0.85,
+          blocking: "blocker",
+        }}
+        showJiraButton
+        onCreateJira={onCreateJira}
+      />,
+    );
+    const button = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("一键创建 Jira 缺陷"),
+    );
+    expect(button).toBeTruthy();
+    act(() => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onCreateJira).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides jira button when showJiraButton is false", () => {
+    const container = mount(
+      <ClusterCard
+        cluster={{
+          id: "c1",
+          category: "unknown",
+          confidence: 0.3,
+          blocking: "uncertain",
+        }}
+        showJiraButton={false}
+      />,
+    );
+    expect(container.textContent).not.toContain("一键创建 Jira 缺陷");
+  });
+
   it("renders empty similar list copy", () => {
     const container = mount(
       <ClusterCard

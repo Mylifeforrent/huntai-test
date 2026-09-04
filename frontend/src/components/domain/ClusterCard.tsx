@@ -34,6 +34,7 @@ export interface ClusterCardModel {
   fixes?: FailureClusterFixPreview[];
   evidenceRefs?: string[];
   failureRefs?: string[];
+  jiraIssue?: { key: string; external_request_id?: string };
   correctionHistory?: CorrectionHistoryItem[];
   similarItems?: SimilarFailureClusterItem[];
 }
@@ -42,14 +43,20 @@ export function ClusterCard({
   cluster,
   onCorrect,
   onApply,
+  onCreateJira,
   applyPending,
   correctPending,
+  jiraPending,
+  showJiraButton,
 }: {
   cluster: ClusterCardModel;
   onCorrect?: (next: { category: string; blocking: string }) => void;
   onApply?: (fix: FailureClusterFixPreview) => void;
+  onCreateJira?: () => void;
   applyPending?: boolean;
   correctPending?: boolean;
+  jiraPending?: boolean;
+  showJiraButton?: boolean;
 }) {
   const [categoryDraft, setCategoryDraft] = useState("");
   const [blockingDraft, setBlockingDraft] = useState("");
@@ -110,6 +117,11 @@ export function ClusterCard({
             ))}
           </div>
         ) : null}
+        {cluster.jiraIssue ? (
+          <p className="text-xs text-muted-foreground">
+            Jira 缺陷：<span className="font-mono text-foreground">{cluster.jiraIssue.key}</span>
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Input
             placeholder="人工修正类别"
@@ -134,6 +146,11 @@ export function ClusterCard({
           {applyVisible && bestFix ? (
             <Button size="sm" disabled={applyPending} onClick={() => onApply?.(bestFix)}>
               可应用（须审批）
+            </Button>
+          ) : null}
+          {showJiraButton ? (
+            <Button size="sm" variant="secondary" disabled={jiraPending} onClick={() => onCreateJira?.()}>
+              一键创建 Jira 缺陷
             </Button>
           ) : null}
         </div>
