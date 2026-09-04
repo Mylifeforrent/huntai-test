@@ -499,6 +499,63 @@ async def list_evidence_objects_for_subjects(
     return list(result.scalars().all())
 
 
+async def list_evidence_objects_by_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    evidence_ids: list[uuid.UUID],
+) -> list[EvidenceObject]:
+    if not evidence_ids:
+        return []
+    result = await session.execute(
+        select(EvidenceObject).where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.id.in_(evidence_ids),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_latest_jira_evidence_for_subject(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    subject_type: str,
+    subject_id: uuid.UUID,
+) -> EvidenceObject | None:
+    result = await session.execute(
+        select(EvidenceObject)
+        .where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.subject_type == subject_type,
+            EvidenceObject.subject_id == subject_id,
+            EvidenceObject.source_object["connector"].as_string() == "jira",
+        )
+        .order_by(EvidenceObject.created_at.desc(), EvidenceObject.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_jira_evidence_by_external_request_id(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    external_request_id: str,
+) -> EvidenceObject | None:
+    result = await session.execute(
+        select(EvidenceObject)
+        .where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.source_object["connector"].as_string() == "jira",
+            EvidenceObject.source_object["external_request_id"].as_string() == external_request_id,
+        )
+        .order_by(EvidenceObject.created_at.desc(), EvidenceObject.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_failure_cluster_corrections(
     session: AsyncSession,
     *,

@@ -257,6 +257,47 @@ async def _create_evidence_pool_for_failed_cases(
     return evidence_by_case
 
 
+async def append_jira_issue_evidence(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    subject_type: str,
+    subject_id: uuid.UUID,
+    issue_key: str,
+    external_request_id: str,
+    evidence_ids: list[uuid.UUID],
+    approval_id: uuid.UUID,
+    bound_hash: str,
+) -> uuid.UUID:
+    claim_parts = [f"Jira defect {issue_key}"]
+    if evidence_ids:
+        claim_parts.append(f"evidence_refs={len(evidence_ids)}")
+    row = await repo.insert_evidence_object(
+        session,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        claim=" ".join(claim_parts),
+        source_object={
+            "connector": "jira",
+            "resource": issue_key,
+            "version": "1",
+            "timestamp": created_at.isoformat(),
+            "external_request_id": external_request_id,
+            "approval_id": str(approval_id),
+            "bound_hash": bound_hash,
+            "evidence_ids": [str(item) for item in evidence_ids],
+        },
+        content_ref=None,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        data_classification="Internal",
+    )
+    return row.id
+
+
 def _merge_cluster_evidence_refs(
     draft_evidence_refs: list[uuid.UUID],
     failure_refs: list[uuid.UUID],
@@ -463,6 +504,7 @@ __all__ = [
     "StepRunWrite",
     "append_artifact",
     "append_case_result",
+    "append_jira_issue_evidence",
     "append_step_run",
     "prepare_failure_triage",
     "run_failure_triage_background",

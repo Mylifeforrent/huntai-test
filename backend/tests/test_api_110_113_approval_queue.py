@@ -18,23 +18,32 @@ from app.modules.identity_tenancy.models import (
 )
 from tests.helpers import login_as
 from tests.test_api_120_action_previews import (
+    _jira_preview_payload,
     _preview_body,
     _seed_admin_peer,
+    _seed_jira_preview_target,
     _seed_viewer,
 )
 
 
 async def _create_pending_approval(
     client: AsyncClient,
+    db_session: AsyncSession,
+    seeded_identity: dict[str, object],
     *,
     project_id: uuid.UUID,
     idempotency_suffix: str = "default",
 ) -> dict[str, object]:
+    cluster_id, cluster = await _seed_jira_preview_target(client, db_session, seeded_identity)
     key = str(uuid.uuid4())
     response = await client.post(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": key},
-        json=_preview_body(project_id=project_id),
+        json=_preview_body(
+            project_id=project_id,
+            target_id=cluster_id,
+            payload=_jira_preview_payload(cluster),
+        ),
     )
     assert response.status_code == 200
     data = response.json()["data"]
@@ -71,15 +80,16 @@ async def test_api_110_111_after_preview_pending_with_nine_card_keys(
     await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
 
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
     assert approval_id
 
     list_resp = await client.get("/api/v1/approval-requests", params={"perspective": "all"})
     assert list_resp.status_code == 200
     items = list_resp.json()["data"]["items"]
-    assert len(items) == 1
-    item = items[0]
+    item = next(row for row in items if row["id"] == approval_id)
     assert item["status"] == "PENDING"
     assert item["param_hash"]
     assert item["version"] >= 1
@@ -94,7 +104,7 @@ async def test_api_110_111_after_preview_pending_with_nine_card_keys(
 
 
 @pytest.mark.asyncio
-async def test_api_112_peer_admin_approve_execution_result_null(
+async def test_api_112_peer_admin_approve_without_connector_executed_failed(
     client: AsyncClient,
     seeded_identity: dict[str, object],
     db_session: AsyncSession,
@@ -107,7 +117,9 @@ async def test_api_112_peer_admin_approve_execution_result_null(
     assert isinstance(project_id, uuid.UUID)
     peer_id = await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
 
     await login_as(client, idp_subject="admin-peer-120")
@@ -121,15 +133,15 @@ async def test_api_112_peer_admin_approve_execution_result_null(
     )
     assert decision.status_code == 200
     data = decision.json()["data"]
-    assert data["status"] == "APPROVED"
-    assert data.get("execution_result") is None
+    assert data["status"] == "EXECUTED"
+    assert data.get("execution_result") == "failed"
 
     result = await db_session.execute(
         select(ApprovalRequest).where(ApprovalRequest.id == uuid.UUID(str(approval_id)))
     )
     row = result.scalar_one()
-    assert row.status == "APPROVED"
-    assert row.execution_result is None
+    assert row.status == "EXECUTED"
+    assert row.execution_result == "failed"
     assert row.approver_id == peer_id
 
 
@@ -147,7 +159,9 @@ async def test_api_112_initiator_approve_four_eyes(
     assert isinstance(project_id, uuid.UUID)
     await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
     detail = await client.get(f"/api/v1/approval-requests/{approval_id}")
     version = detail.json()["data"]["version"]
@@ -179,7 +193,9 @@ async def test_api_112_peer_reject_with_reason(
     assert isinstance(project_id, uuid.UUID)
     await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
 
     await login_as(client, idp_subject="admin-peer-120")
@@ -209,7 +225,9 @@ async def test_api_112_viewer_cannot_decide(
     await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await _seed_viewer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
 
     await login_as(client, idp_subject="viewer-120")
@@ -237,7 +255,9 @@ async def test_api_111_cross_org_not_found(
     assert isinstance(project_id, uuid.UUID)
     await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
 
     now = datetime.now(UTC)
@@ -323,7 +343,9 @@ async def test_api_113_resubmit_from_rejected_creates_new_pending(
     assert isinstance(project_id, uuid.UUID)
     await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
     old_hash = preview["param_hash"]
 
@@ -371,7 +393,9 @@ async def test_api_113_resubmit_from_pending_withdraws_origin(
         project_id=project_id,
     )
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
 
     resubmit = await client.post(
@@ -405,7 +429,9 @@ async def test_api_121_get_preview_and_unknown_404(
         project_id=project_id,
     )
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     preview_id = preview["preview_id"]
 
     get_resp = await client.get(f"/api/v1/action-previews/{preview_id}")
@@ -433,7 +459,9 @@ async def test_api_110_lazy_expire_pending(
         project_id=project_id,
     )
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = uuid.UUID(str(preview["approval_request_id"]))
     past = datetime.now(UTC) - timedelta(seconds=10)
     await db_session.execute(
@@ -473,7 +501,9 @@ async def test_api_112_param_hash_mismatch_invalidates(
         project_id=project_id,
     )
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = uuid.UUID(str(preview["approval_request_id"]))
 
     await db_session.execute(
@@ -515,7 +545,9 @@ async def test_api_112_expected_version_mismatch(
         project_id=project_id,
     )
     await login_as(client)
-    preview = await _create_pending_approval(client, project_id=project_id)
+    preview = await _create_pending_approval(
+        client, db_session, seeded_identity, project_id=project_id
+    )
     approval_id = preview["approval_request_id"]
 
     await login_as(client, idp_subject="admin-peer-120")

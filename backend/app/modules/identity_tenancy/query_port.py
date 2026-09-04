@@ -163,6 +163,25 @@ async def caller_is_owner_or_admin(
     return result.first() is not None
 
 
+async def get_project_jira_project_key(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> str | None:
+    result = await session.execute(
+        select(Project.jira_project_key).where(
+            Project.organization_id == organization_id,
+            Project.id == project_id,
+        )
+    )
+    key = result.scalar_one_or_none()
+    if key is None:
+        return None
+    stripped = str(key).strip()
+    return stripped or None
+
+
 async def caller_is_owner(
     session: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID
 ) -> bool:

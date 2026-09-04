@@ -497,11 +497,14 @@ async def test_non_restore_approve_stays_approved(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": str(uuid.uuid4())},
         json={
-            "action_type": "jira_write",
+            "action_type": "agent_tool_action",
             "project_id": str(project_id),
-            "target_object_type": "failure_cluster",
+            "target_object_type": "test_run",
             "target_object_id": str(uuid.uuid4()),
-            "payload": {"summary": "test"},
+            "payload": {
+                "declared_side_effect_level": "L2",
+                "tool_name": "noop",
+            },
         },
     )
     assert preview.status_code == 200

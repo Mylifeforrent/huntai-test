@@ -18,6 +18,10 @@ class AuditAppendInput:
     project_id: uuid.UUID | None = None
     result: str | None = None
     request_hash: str | None = None
+    external_request_id: str | None = None
+    approval_id: uuid.UUID | None = None
+    approval_bound_hash: str | None = None
+    evidence_refs: list[uuid.UUID] | None = None
 
 
 @dataclass(frozen=True)
@@ -51,13 +55,13 @@ async def append_audit_event(session: AsyncSession, event: AuditAppendInput) -> 
         resource_id=event.resource_id,
         request_hash=event.request_hash,
         response_hash=None,
-        approval_id=None,
+        approval_id=event.approval_id,
         approval_decision=None,
-        approval_bound_hash=None,
+        approval_bound_hash=event.approval_bound_hash,
         data_classification="Internal",
-        external_request_id=None,
+        external_request_id=event.external_request_id,
         result=event.result,
-        evidence_refs=None,
+        evidence_refs=event.evidence_refs,
         cost=None,
         latency_ms=None,
         payload_ref=None,

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
+from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence import repository as repo
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.results_evidence.models import FailureCluster
@@ -66,9 +67,13 @@ def _clustering_projection(result_summary: dict[str, Any] | None) -> dict[str, A
     }
 
 
-def _serialize_list_item(row: FailureCluster) -> dict[str, Any]:
+def _serialize_list_item(
+    row: FailureCluster,
+    *,
+    jira_issue: dict[str, str] | None = None,
+) -> dict[str, Any]:
     confidence = float(row.confidence)
-    return {
+    payload: dict[str, Any] = {
         "id": str(row.id),
         "test_run_id": str(row.test_run_id),
         "category": row.category,
@@ -79,6 +84,9 @@ def _serialize_list_item(row: FailureCluster) -> dict[str, Any]:
         "failure_refs": [str(item) for item in row.failure_refs],
         "created_at": _iso(row.created_at),
     }
+    if jira_issue is not None:
+        payload["jira_issue"] = jira_issue
+    return payload
 
 
 def _fixes_preview(row: FailureCluster) -> list[dict[str, Any]]:
@@ -215,7 +223,18 @@ async def list_failure_clusters_for_caller(
     )
     return {
         "test_run_id": str(test_run_id),
-        "items": [_serialize_list_item(row) for row in rows],
+        "items": [
+            _serialize_list_item(
+                row,
+                jira_issue=await evidence_query.get_latest_jira_issue_for_subject(
+                    session,
+                    organization_id=ctx.organization.id,
+                    subject_type="failure_cluster",
+                    subject_id=row.id,
+                ),
+            )
+            for row in rows
+        ],
         "unclustered_refs": unclustered_refs,
         "generation_status": projection["generation_status"],
         "degraded": projection["degraded"],
@@ -256,8 +275,12 @@ async def _require_cluster_session_write(
     return row, run["project_id"]
 
 
-def _serialize_cluster_detail(row: FailureCluster) -> dict[str, Any]:
-    payload = _serialize_list_item(row)
+def _serialize_cluster_detail(
+    row: FailureCluster,
+    *,
+    jira_issue: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    payload = _serialize_list_item(row, jira_issue=jira_issue)
     payload["correction_history"] = list(row.correction_history or [])
     payload["fixes_preview"] = _fixes_preview(row)
     if row.unclustered_refs:
@@ -492,4 +515,10 @@ async def get_failure_cluster_for_caller(
         ctx,
         failure_cluster_id=failure_cluster_id,
     )
-    return _serialize_cluster_detail(row)
+    jira_issue = await evidence_query.get_latest_jira_issue_for_subject(
+        session,
+        organization_id=ctx.organization.id,
+        subject_type="failure_cluster",
+        subject_id=row.id,
+    )
+    return _serialize_cluster_detail(row, jira_issue=jira_issue)

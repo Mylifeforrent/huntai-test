@@ -12,6 +12,123 @@ from app.modules.results_evidence import repository as repo
 from app.modules.results_evidence.models import CaseResult, FailureCluster
 
 
+async def get_failure_cluster_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    failure_cluster_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    row = await repo.get_failure_cluster(
+        session,
+        organization_id=organization_id,
+        failure_cluster_id=failure_cluster_id,
+    )
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "test_run_id": row.test_run_id,
+        "evidence_refs": list(row.evidence_refs or []),
+        "failure_refs": list(row.failure_refs or []),
+    }
+
+
+async def get_case_result_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    row = await repo.get_case_result(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "test_run_id": row.test_run_id,
+        "test_case_id": row.test_case_id,
+    }
+
+
+async def get_evidence_classifications(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    evidence_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, str]:
+    rows = await repo.list_evidence_objects_by_ids(
+        session,
+        organization_id=organization_id,
+        evidence_ids=evidence_ids,
+    )
+    return {row.id: row.data_classification for row in rows}
+
+
+async def list_evidence_subject_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    evidence_ids: list[uuid.UUID],
+) -> list[tuple[uuid.UUID, str, uuid.UUID]]:
+    rows = await repo.list_evidence_objects_by_ids(
+        session,
+        organization_id=organization_id,
+        evidence_ids=evidence_ids,
+    )
+    return [(row.id, row.subject_type, row.subject_id) for row in rows]
+
+
+def _jira_issue_projection(row: Any) -> dict[str, str] | None:
+    source = row.source_object if isinstance(row.source_object, dict) else {}
+    if source.get("connector") != "jira":
+        return None
+    resource = source.get("resource")
+    if not isinstance(resource, str) or not resource.strip():
+        return None
+    external_request_id = source.get("external_request_id")
+    payload: dict[str, str] = {"key": resource}
+    if isinstance(external_request_id, str) and external_request_id.strip():
+        payload["external_request_id"] = external_request_id
+    return payload
+
+
+async def get_latest_jira_issue_for_subject(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    subject_type: str,
+    subject_id: uuid.UUID,
+) -> dict[str, str] | None:
+    row = await repo.get_latest_jira_evidence_for_subject(
+        session,
+        organization_id=organization_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+    )
+    if row is None:
+        return None
+    return _jira_issue_projection(row)
+
+
+async def get_jira_issue_by_external_request_id(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    external_request_id: str,
+) -> dict[str, str] | None:
+    row = await repo.get_jira_evidence_by_external_request_id(
+        session,
+        organization_id=organization_id,
+        external_request_id=external_request_id,
+    )
+    if row is None:
+        return None
+    return _jira_issue_projection(row)
+
+
 async def get_failure_cluster_confidence(
     session: AsyncSession,
     *,
