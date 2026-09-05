@@ -137,7 +137,10 @@ export const PAGE_APIS = {
   P19: [{ id: "API-194", method: "GET", path: "/api/v1/skills", summary: "技能列表" }],
   P20: [
     { id: "API-026", method: "GET", path: "/api/v1/evidence-objects", summary: "证据检索" },
+    { id: "API-027", method: "GET", path: "/api/v1/evidence-objects/{evidence_object_id}", summary: "证据详情" },
     { id: "API-028", method: "POST", path: "/api/v1/evidence-objects/export-packages", summary: "证据包导出" },
+    { id: "API-212", method: "GET", path: "/api/v1/command-receipts/{receipt_id}/events", summary: "导出打包进度 SSE" },
+    { id: "API-223", method: "GET", path: "/api/v1/export-packages/{receipt_id}/content", summary: "导出包代理下载" },
   ],
   P21: [{ id: "API-183", method: "GET", path: "/api/v1/ai/cost-dashboard", summary: "AI 成本看板" }],
   P22: [
