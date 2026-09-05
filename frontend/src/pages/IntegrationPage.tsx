@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
@@ -12,15 +12,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
-import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
+import { CommandFeedback } from "@/components/domain/PageState";
+
+type CiBindingsResponse = {
+  project_id: string;
+  version: number;
+  bindings: Array<{
+    repository: string;
+    ref_pattern: string;
+    test_plan_id: string;
+    connector_id?: string;
+  }>;
+};
 
 export function IntegrationPage() {
   const { projectId = "" } = useParams();
-  const [bindTried, setBindTried] = useState(false);
-  const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("");
+  const queryClient = useQueryClient();
+  const [repository, setRepository] = useState("");
+  const [refPattern, setRefPattern] = useState("");
   const [planId, setPlanId] = useState("");
-  const [event, setEvent] = useState("push");
+  const [expectedVersion, setExpectedVersion] = useState(1);
+  const [saveError, setSaveError] = useState<unknown>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const connectors = useQuery({
     queryKey: queryKeys.connectors({ scope: "project", projectId }),
@@ -29,17 +42,33 @@ export function IntegrationPage() {
   });
   const items = connectors.data?.data.items ?? [];
 
-  function saveBinding() {
-    setBindTried(true);
-    void api
-      .put("API-167", `/api/v1/projects/${projectId}/ci-trigger-bindings`, {
-        repo,
-        branch,
-        test_plan_id: planId,
-        event,
-      })
-      .catch(() => undefined);
-  }
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.put<{ data: CiBindingsResponse }>(
+        "API-167",
+        `/api/v1/projects/${projectId}/ci-trigger-bindings`,
+        {
+          expected_version: expectedVersion,
+          bindings: [
+            {
+              repository,
+              ref_pattern: refPattern,
+              test_plan_id: planId,
+            },
+          ],
+        },
+      ),
+    onSuccess: (response) => {
+      setSaveError(null);
+      setSaveSuccess(true);
+      setExpectedVersion(response.data.version);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.connectors({ scope: "project", projectId }) });
+    },
+    onError: (error: unknown) => {
+      setSaveSuccess(false);
+      setSaveError(error);
+    },
+  });
 
   return (
     <>
@@ -82,26 +111,29 @@ export function IntegrationPage() {
         <CardContent className="flex max-w-lg flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="repo">GitHub 仓库</Label>
-            <Input id="repo" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="org/repo" />
+            <Input id="repo" value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="org/repo" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="branch">分支</Label>
-            <Input id="branch" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
+            <Label htmlFor="ref">分支 / ref 模式</Label>
+            <Input id="ref" value={refPattern} onChange={(e) => setRefPattern(e.target.value)} placeholder="main" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="plan">测试计划 ID</Label>
             <Input id="plan" value={planId} onChange={(e) => setPlanId(e.target.value)} />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="event">触发事件</Label>
-            <Input id="event" value={event} onChange={(e) => setEvent(e.target.value)} placeholder="push / pull_request" />
-          </div>
-          <Button onClick={saveBinding} disabled={!projectId}>
+          <Button onClick={() => saveMutation.mutate()} disabled={!projectId || saveMutation.isPending}>
             保存绑定（API-167）
           </Button>
+          {saveSuccess ? (
+            <Alert>
+              <AlertDescription>绑定已保存（version={expectedVersion}）。本操作不会创建 TestRun。</AlertDescription>
+            </Alert>
+          ) : null}
+          {saveError ? (
+            <CommandFeedback error={saveError} apis={PAGE_APIS.P03} action="CI 触发绑定" />
+          ) : null}
         </CardContent>
       </Card>
-      {bindTried ? <UndevelopedCallout apis={PAGE_APIS.P03} action="CI 触发绑定" /> : null}
     </>
   );
 }

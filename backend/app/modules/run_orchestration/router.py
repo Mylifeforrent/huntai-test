@@ -21,6 +21,7 @@ from app.core.errors import (
     idempotency_conflict,
     not_found,
     precondition_failed,
+    schema_validation_failed,
     token_cannot_approve,
     token_project_forbidden,
     token_revoked,
@@ -36,6 +37,7 @@ from app.modules.run_orchestration.command_port import cancel_external_ci_with_c
 from app.modules.run_orchestration.executor import run_test_run_background
 from app.modules.run_orchestration.service import (
     cancel_test_run,
+    create_script_draft_for_caller,
     get_command_receipt_for_caller,
     get_execution_options_for_caller,
     get_test_run_for_auth,
@@ -108,6 +110,8 @@ def _map_write_error(trace_id: str, exc: ValueError) -> NoReturn:
         raise version_conflict(trace_id) from exc
     if code == "idempotency_conflict":
         raise idempotency_conflict(trace_id) from exc
+    if code == "schema":
+        raise schema_validation_failed(trace_id) from exc
     raise validation_failed(trace_id) from exc
 
 
@@ -317,6 +321,46 @@ async def api_069_execution_options(
     return {"data": payload}
 
 
+class ScriptDraftFromRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_run_version: int | None = Field(default=None, ge=1)
+    title: str | None = None
+
+
+@router.post("/test-runs/{test_run_id}/script-drafts")
+async def api_068_create_script_draft(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(ScriptDraftFromRun, raw, trace_id)
+    assert isinstance(body, ScriptDraftFromRun)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await create_script_draft_for_caller(
+            db,
+            ctx,
+            test_run_id=test_run_id,
+            expected_run_version=body.expected_run_version,
+            title=body.title,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
 @router.get("/command-receipts/{receipt_id}")
 async def api_071_get_command_receipt(
     request: Request,
@@ -338,6 +382,103 @@ async def api_071_get_command_receipt(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": payload}
+
+
+async def _command_receipt_sse_events(
+    *,
+    request: Request,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+) -> Any:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from app.core.db import get_session_factory
+
+    factory = get_session_factory()
+    seq = 0
+    try:
+        while True:
+            if await request.is_disconnected():
+                break
+            async with factory() as session:
+                try:
+                    receipt = await get_command_receipt_for_caller(
+                        session,
+                        organization_id=organization_id,
+                        user_id=user_id,
+                        receipt_id=receipt_id,
+                    )
+                except ValueError:
+                    await session.commit()
+                    break
+                status = receipt["status"]
+                await session.commit()
+            seq += 1
+            now = datetime.now(UTC).isoformat()
+            if status in {"accepted", "running"}:
+                yield {
+                    "event": "progress",
+                    "id": str(seq),
+                    "data": json.dumps(
+                        {
+                            "id": str(seq),
+                            "type": "progress",
+                            "resource_type": "command_receipt",
+                            "resource_id": str(receipt_id),
+                            "hint": status,
+                            "occurred_at": now,
+                        }
+                    ),
+                }
+            else:
+                yield {
+                    "event": "resource_changed",
+                    "id": str(seq),
+                    "data": json.dumps(
+                        {
+                            "id": str(seq),
+                            "type": "resource_changed",
+                            "resource_type": "command_receipt",
+                            "resource_id": str(receipt_id),
+                            "hint": "status_may_have_changed",
+                            "occurred_at": now,
+                        }
+                    ),
+                }
+                break
+            await asyncio.sleep(0.2)
+    except asyncio.CancelledError:
+        return
+
+
+@router.get("/command-receipts/{receipt_id}/events")
+async def api_212_command_receipt_events(
+    request: Request,
+    receipt_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> EventSourceResponse:
+    trace_id = get_trace_id(request)
+    try:
+        await get_command_receipt_for_caller(
+            db,
+            organization_id=ctx.organization.id,
+            user_id=ctx.user.id,
+            receipt_id=receipt_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return EventSourceResponse(
+        _command_receipt_sse_events(
+            request=request,
+            organization_id=ctx.organization.id,
+            user_id=ctx.user.id,
+            receipt_id=receipt_id,
+        )
+    )
 
 
 async def _test_run_sse_events(
@@ -381,6 +522,13 @@ async def _test_run_sse_events(
                 progress = 10 if status == "PENDING" else 30 if status == "VALIDATING" else 70
                 if status in {"SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT"}:
                     progress = 100
+                summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+                ci = summary.get("ci")
+                hint = status.lower()
+                if isinstance(ci, dict):
+                    report_parse = ci.get("report_parse")
+                    if isinstance(report_parse, dict) and report_parse.get("status") == "parsing":
+                        hint = "report_parsing"
                 await session.commit()
             seq += 1
             now = datetime.now(UTC).isoformat()
@@ -394,7 +542,7 @@ async def _test_run_sse_events(
                         "resource_type": "test_run",
                         "resource_id": str(test_run_id),
                         "progress_percent": progress,
-                        "hint": status.lower(),
+                        "hint": hint,
                         "occurred_at": now,
                     }
                 ),

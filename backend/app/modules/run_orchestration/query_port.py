@@ -27,6 +27,15 @@ class RunClusteringContext(TypedDict):
     result_summary: dict[str, Any] | None
 
 
+class RunGateContext(TypedDict):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str
+    execution_source: str
+    result_summary: dict[str, Any] | None
+    gate_evaluation_id: uuid.UUID | None
+
+
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
@@ -58,6 +67,68 @@ def _serialize_workbench_run(run: TestRun, *, now: datetime) -> dict[str, Any]:
     if run.last_heartbeat_at is not None and run.status not in WAITING_STATUSES:
         payload["last_heartbeat_at"] = _iso(run.last_heartbeat_at)
     return payload
+
+
+class CommandReceiptPointer(TypedDict):
+    id: uuid.UUID
+    command_type: str
+    status: str
+    resource_type: str
+    resource_id: uuid.UUID
+    project_id: uuid.UUID
+    created_by: uuid.UUID | None
+
+
+async def get_command_receipt_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+) -> CommandReceiptPointer | None:
+    receipt = await repo.get_command_receipt(
+        session,
+        organization_id=organization_id,
+        receipt_id=receipt_id,
+    )
+    if receipt is None:
+        return None
+    return {
+        "id": receipt.id,
+        "command_type": receipt.command_type,
+        "status": receipt.status,
+        "resource_type": receipt.resource_type,
+        "resource_id": receipt.resource_id,
+        "project_id": receipt.project_id,
+        "created_by": receipt.created_by,
+    }
+
+
+class AgentRunPointer(TypedDict):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str
+    execution_source: str
+
+
+async def get_agent_run_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> AgentRunPointer | None:
+    scope = await repo.get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    if scope is None:
+        return None
+    return {
+        "id": scope.id,
+        "project_id": scope.project_id,
+        "status": scope.status,
+        "execution_source": scope.execution_source,
+    }
 
 
 async def get_run_scope(
@@ -95,6 +166,29 @@ async def get_run_clustering_context(
         "status": run.status,
         "created_by": run.created_by,
         "result_summary": dict(run.result_summary) if run.result_summary else None,
+    }
+
+
+async def get_run_for_gate(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> RunGateContext | None:
+    run = await repo.get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    if run is None:
+        return None
+    return {
+        "id": run.id,
+        "project_id": run.project_id,
+        "status": run.status,
+        "execution_source": run.execution_source,
+        "result_summary": dict(run.result_summary) if run.result_summary else None,
+        "gate_evaluation_id": run.gate_evaluation_id,
     }
 
 

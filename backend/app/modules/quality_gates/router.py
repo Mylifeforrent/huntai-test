@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -17,6 +18,11 @@ from app.core.errors import (
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
 from app.modules.quality_gates import repository as repo
+from app.modules.quality_gates.evaluation_service import (
+    get_evaluation_for_caller,
+    get_run_gate_evaluation_projection,
+    list_evaluations_for_caller,
+)
 from app.modules.quality_gates.service import (
     PolicyCreateInput,
     PolicyPatchInput,
@@ -215,3 +221,71 @@ async def api_143_patch_policy(
         _map_write_error(trace_id, exc)
     await db.commit()
     return payload
+
+
+@router.get("/gate-evaluations")
+async def api_144_list_gate_evaluations(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    project_id: Annotated[uuid.UUID | None, Query()] = None,
+    test_run_id: Annotated[uuid.UUID | None, Query()] = None,
+    result: Annotated[str | None, Query()] = None,
+    created_from: Annotated[datetime | None, Query()] = None,
+    created_to: Annotated[datetime | None, Query()] = None,
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_evaluations_for_caller(
+            db,
+            ctx,
+            project_id=project_id,
+            test_run_id=test_run_id,
+            result=result,
+            created_from=created_from,
+            created_to=created_to,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/gate-evaluations/{gate_evaluation_id}")
+async def api_145_get_gate_evaluation(
+    request: Request,
+    gate_evaluation_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_evaluation_for_caller(db, ctx, evaluation_id=gate_evaluation_id)
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.get("/test-runs/{test_run_id}/gate-evaluation")
+async def api_146_get_run_gate_evaluation(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_run_gate_evaluation_projection(
+            db,
+            ctx,
+            test_run_id=test_run_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}

@@ -2,16 +2,29 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, NoReturn
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import SessionOrToken, require_session, require_session_or_token_read
 from app.core.db import get_db_session
-from app.core.errors import forbidden, idempotency_conflict, not_found, validation_failed
+from app.core.errors import (
+    file_validation_failed,
+    forbidden,
+    idempotency_conflict,
+    not_found,
+    policy_deny,
+    precondition_failed,
+    validation_failed,
+)
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
+from app.modules.results_evidence import evidence_service, trajectory_service
 from app.modules.results_evidence import repository as repo
+from app.modules.results_evidence.artifacts_service import (
+    get_artifact_metadata_for_caller,
+    read_artifact_content_for_caller,
+)
 from app.modules.results_evidence.case_results_service import (
     get_case_result_for_caller,
     list_case_results_for_caller,
@@ -157,6 +170,228 @@ async def api_025_get_audit_event(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": payload}
+
+
+def _map_artifact_error(trace_id: str, exc: ValueError) -> NoReturn:
+    code = str(exc)
+    if code == "not_found":
+        raise not_found(trace_id) from exc
+    if code == "policy_deny":
+        raise policy_deny(trace_id) from exc
+    if code == "not_ready":
+        raise precondition_failed(trace_id) from exc
+    if code == "checksum_mismatch":
+        raise file_validation_failed(trace_id) from exc
+    raise validation_failed(trace_id) from exc
+
+
+@router.get("/artifacts/{artifact_id}")
+async def api_220_get_artifact(
+    request: Request,
+    artifact_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_artifact_metadata_for_caller(
+            db,
+            ctx,
+            artifact_id=artifact_id,
+        )
+    except ValueError as exc:
+        _map_artifact_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.get("/artifacts/{artifact_id}/content")
+async def api_221_get_artifact_content(
+    request: Request,
+    artifact_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> Response:
+    trace_id = get_trace_id(request)
+    try:
+        data, mime_type, filename = await read_artifact_content_for_caller(
+            db,
+            ctx,
+            artifact_id=artifact_id,
+        )
+    except ValueError as exc:
+        _map_artifact_error(trace_id, exc)
+    await db.commit()
+    return Response(
+        content=data,
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class EvidenceExportCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["zip", "md", "json"]
+    subject_type: str | None = None
+    subject_id: uuid.UUID | None = None
+    evidence_object_ids: list[uuid.UUID] | None = None
+    project_id: uuid.UUID | None = None
+
+
+def _map_evidence_error(trace_id: str, exc: ValueError) -> NoReturn:
+    code = str(exc)
+    if code == "forbidden":
+        raise forbidden(trace_id) from exc
+    if code == "not_found":
+        raise not_found(trace_id) from exc
+    if code == "policy_deny":
+        raise policy_deny(trace_id) from exc
+    if code == "not_ready":
+        raise precondition_failed(trace_id) from exc
+    if code == "checksum_mismatch":
+        raise file_validation_failed(trace_id) from exc
+    if code == "idempotency_conflict":
+        raise idempotency_conflict(trace_id) from exc
+    if code in {"validation", "invalid_cursor"}:
+        raise validation_failed(trace_id) from exc
+    raise validation_failed(trace_id) from exc
+
+
+@router.get("/test-runs/{test_run_id}/trajectory")
+async def api_067_get_trajectory(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await trajectory_service.get_trajectory_for_caller(
+            db,
+            ctx,
+            test_run_id=test_run_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.get("/evidence-objects")
+async def api_026_list_evidence_objects(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+    subject_type: Annotated[str | None, Query()] = None,
+    subject_id: Annotated[str | None, Query()] = None,
+    created_from: Annotated[str | None, Query()] = None,
+    created_to: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await evidence_service.list_evidence_for_caller(
+            db,
+            ctx,
+            subject_type=subject_type,
+            subject_id=_parse_uuid(subject_id, trace_id),
+            created_from=_parse_datetime(created_from, trace_id),
+            created_to=_parse_datetime(created_to, trace_id),
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_evidence_error(trace_id, exc)
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/evidence-objects/{evidence_object_id}")
+async def api_027_get_evidence_object(
+    request: Request,
+    evidence_object_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await evidence_service.get_evidence_object_for_caller(
+            db,
+            ctx,
+            evidence_object_id=evidence_object_id,
+        )
+    except ValueError as exc:
+        _map_evidence_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.post("/evidence-objects/export-packages")
+async def api_028_create_export_package(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(EvidenceExportCreate, raw, trace_id)
+    assert isinstance(body, EvidenceExportCreate)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload, evidence_ids = await evidence_service.create_export_for_caller(
+            db,
+            ctx,
+            export_format=body.format,
+            evidence_object_ids=body.evidence_object_ids,
+            subject_type=body.subject_type,
+            subject_id=body.subject_id,
+            project_id=body.project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_evidence_error(trace_id, exc)
+    await db.commit()
+    if evidence_ids:
+        background_tasks.add_task(
+            evidence_service.run_export_packaging,
+            organization_id=ctx.organization.id,
+            receipt_id=uuid.UUID(payload["id"]),
+            evidence_ids=evidence_ids,
+            export_format=body.format,
+            created_by=ctx.user.id,
+        )
+    response.status_code = 202
+    return {"data": payload}
+
+
+@router.get("/export-packages/{receipt_id}/content")
+async def api_223_get_export_package_content(
+    request: Request,
+    receipt_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> Response:
+    trace_id = get_trace_id(request)
+    try:
+        data, mime_type, filename = await evidence_service.read_export_content_for_caller(
+            db,
+            ctx,
+            receipt_id=receipt_id,
+        )
+    except ValueError as exc:
+        _map_evidence_error(trace_id, exc)
+    await db.commit()
+    return Response(
+        content=data,
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/test-runs/{test_run_id}/case-results")

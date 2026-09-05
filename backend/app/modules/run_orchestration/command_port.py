@@ -12,6 +12,52 @@ from app.modules.results_evidence.audit_port import AuditAppendInput, append_aud
 from app.modules.run_orchestration import repository as repo
 
 
+async def create_command_receipt_for_command(
+    session: AsyncSession,
+    *,
+    receipt_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    command_type: str,
+    status: str,
+    resource_type: str,
+    resource_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> None:
+    """Persist a command receipt in the caller's transaction (cross-module entry)."""
+    await repo.create_command_receipt(
+        session,
+        receipt_id=receipt_id,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        command_type=command_type,
+        status=status,
+        accepted_at=created_at,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        project_id=project_id,
+    )
+
+
+async def update_command_receipt_status(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+    status: str,
+) -> None:
+    updated = await repo.update_command_receipt_status(
+        session,
+        organization_id=organization_id,
+        receipt_id=receipt_id,
+        status=status,
+    )
+    if updated is None:
+        raise ValueError("not_found")
+
+
 async def merge_clustering_projection(
     session: AsyncSession,
     *,
@@ -144,6 +190,21 @@ async def resume_ci_run_after_observation(
     await resume_external_ci_run(
         organization_id=organization_id,
         test_run_id=test_run_id,
+    )
+
+
+async def cas_attach_gate_evaluation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    gate_evaluation_id: uuid.UUID,
+) -> bool:
+    return await repo.cas_attach_gate_evaluation(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        gate_evaluation_id=gate_evaluation_id,
     )
 
 

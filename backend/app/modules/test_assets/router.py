@@ -34,7 +34,9 @@ from app.modules.test_assets.service import (
     create_test_plan_for_caller,
     get_import_source_for_caller,
     get_test_case_for_caller,
+    get_test_case_version_snapshot_for_caller,
     get_test_plan_for_caller,
+    list_test_case_versions_for_caller,
     list_test_cases_for_caller,
     list_test_plans_for_caller,
     patch_test_case_draft_for_caller,
@@ -243,6 +245,52 @@ async def api_031_get_test_case(
     trace_id = get_trace_id(request)
     try:
         payload = await get_test_case_for_caller(db, ctx, test_case_id=test_case_id)
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.get("/test-cases/{test_case_id}/versions")
+async def api_037_list_test_case_versions(
+    request: Request,
+    test_case_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query()] = None,
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_test_case_versions_for_caller(
+            db,
+            ctx,
+            test_case_id=test_case_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/test-cases/{test_case_id}/versions/{version_id}")
+async def api_038_get_test_case_version(
+    request: Request,
+    test_case_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await get_test_case_version_snapshot_for_caller(
+            db,
+            ctx,
+            test_case_id=test_case_id,
+            version_id=version_id,
+        )
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     await db.commit()

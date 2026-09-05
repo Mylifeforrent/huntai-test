@@ -15,6 +15,7 @@ import type {
 const apiGet = vi.fn();
 const apiPost = vi.fn();
 const apiPatch = vi.fn();
+const apiGetBlob = vi.fn();
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -23,6 +24,7 @@ vi.mock("@/api/client", () => ({
     put: vi.fn(),
     patch: (...args: unknown[]) => apiPatch(...args),
     delete: vi.fn(),
+    getBlob: (...args: unknown[]) => apiGetBlob(...args),
   },
 }));
 
@@ -145,6 +147,8 @@ beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
   apiPatch.mockReset();
+  apiGetBlob.mockReset();
+  apiGetBlob.mockResolvedValue(new Blob(["bytes"], { type: "image/png" }));
   apiGet.mockImplementation((apiId: string) => {
     if (apiId === "API-061") {
       return Promise.resolve({ data: pendingRun } satisfies ResourceEnvelope<TestRunDetail>);
@@ -425,6 +429,88 @@ describe("TestRunDetailPage", () => {
     );
   });
 
+  it("loads case result detail, step runs, and artifact metadata", async () => {
+    apiGet.mockImplementation((apiId: string, path?: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: { ...pendingRun, status: "FAILED" } });
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "case-result-1",
+                test_run_id: "run-1",
+                test_case_id: "case-1",
+                outcome: "failed",
+                attempt_seq: 1,
+                is_late: false,
+                is_partial: false,
+                data_classification: "Internal",
+              },
+            ],
+          },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      if (apiId === "API-065") {
+        return Promise.resolve({
+          data: {
+            id: "case-result-1",
+            artifact_ids: ["artifact-trace-1"],
+          },
+        });
+      }
+      if (apiId === "API-066") {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "step-1",
+                case_result_id: "case-result-1",
+                step_index: 0,
+                is_incomplete: false,
+                observation_ref: "org/key/trace.zip",
+              },
+            ],
+          },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      if (apiId === "API-220") {
+        return Promise.resolve({
+          data: {
+            id: path?.split("/").pop(),
+            kind: "trace",
+            object_key: "org/key/trace.zip",
+            content_access: {
+              mode: "app_proxy",
+              content_path: "/api/v1/artifacts/artifact-trace-1/content",
+            },
+          },
+        });
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [],
+            unclustered_refs: [],
+            generation_status: "ready",
+            degraded: false,
+          },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    mount(<TestRunDetailPage />);
+    await flush();
+    expect(apiGet).toHaveBeenCalledWith("API-065", "/api/v1/case-results/case-result-1");
+    expect(apiGet).toHaveBeenCalledWith("API-066", "/api/v1/case-results/case-result-1/step-runs");
+    expect(apiGet).toHaveBeenCalledWith("API-220", "/api/v1/artifacts/artifact-trace-1");
+    expect(apiGetBlob).toHaveBeenCalled();
+  });
+
   it("shows pending clustering banner", async () => {
     apiGet.mockImplementation((apiId: string) => {
       if (apiId === "API-061") {
@@ -452,5 +538,85 @@ describe("TestRunDetailPage", () => {
     const container = mount(<TestRunDetailPage />);
     await flush();
     expect(container.textContent).toContain("聚类生成中");
+  });
+
+  it("posts jira_write preview on failed run and hides button for viewer role", async () => {
+    const failedRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: failedRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [{ id: "case-result-1", test_case_id: "case-1", outcome: "failed" }] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [
+              {
+                id: "cluster-1",
+                test_run_id: "run-1",
+                category: "assertion_real_bug",
+                root_cause: "status mismatch",
+                confidence: 0.85,
+                blocking_judgment: "blocker",
+                evidence_refs: ["ev-1"],
+                failure_refs: ["case-result-1"],
+              },
+            ],
+            unclustered_refs: [],
+            generation_status: "ready",
+            degraded: false,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      if (apiId === "API-131") {
+        return Promise.resolve({
+          data: {
+            id: "cluster-1",
+            test_run_id: "run-1",
+            category: "assertion_real_bug",
+            confidence: 0.85,
+            blocking_judgment: "blocker",
+            evidence_refs: ["ev-1"],
+            failure_refs: ["case-result-1"],
+            correction_history: [],
+          },
+        });
+      }
+      if (apiId === "API-133") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    apiPost.mockResolvedValue({
+      data: { gate: "REQUIRE_APPROVAL", approval_request_id: "apr-jira" },
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    const jiraButton = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("一键创建 Jira 缺陷"),
+    );
+    expect(jiraButton).toBeTruthy();
+    await act(async () => {
+      jiraButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(apiPost).toHaveBeenCalledWith(
+      "API-120",
+      "/api/v1/action-previews",
+      expect.objectContaining({
+        action_type: "jira_write",
+        target_object_type: "failure_cluster",
+        target_object_id: "cluster-1",
+      }),
+    );
   });
 });

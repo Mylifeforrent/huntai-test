@@ -6,6 +6,8 @@ import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
 import type {
   ActionPreview,
+  ArtifactMetadata,
+  CaseResultDetail,
   CaseResultListItem,
   FailureClusterDetail,
   FailureClusterFixPreview,
@@ -13,6 +15,7 @@ import type {
   ListEnvelope,
   ResourceEnvelope,
   SimilarFailureClusterItem,
+  StepRunItem,
   TestRunCancelResult,
   TestRunDetail,
 } from "@/api/types";
@@ -26,6 +29,7 @@ import { ClusterCard } from "@/components/domain/ClusterCard";
 import { EvidenceViewer } from "@/components/domain/EvidenceViewer";
 import { AiDegradeBanner } from "@/components/domain/AiDegradeBanner";
 import { StatusBadge } from "@/components/domain/StatusBadge";
+import { useSession } from "@/hooks/useSession";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,18 +40,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { asRecord } from "@/lib/utils";
-
 export function TestRunDetailPage() {
   const { runId = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const session = useSession();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [signalSent, setSignalSent] = useState(false);
   const [cancelError, setCancelError] = useState<unknown>(null);
   const [healError, setHealError] = useState<unknown>(null);
+  const [jiraError, setJiraError] = useState<unknown>(null);
   const [correctError, setCorrectError] = useState<unknown>(null);
   const [sseHint, setSseHint] = useState<string | null>(null);
+  const [selectedCaseResultId, setSelectedCaseResultId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!runId) {
@@ -110,6 +115,8 @@ export function TestRunDetailPage() {
 
   const run = detail.data?.data;
   const status = run?.status ?? "";
+  const projectRole = session.me?.memberships?.find((item) => item.project_id === run?.project_id)?.role;
+  const canCreateJira = status === "FAILED" && projectRole !== "viewer";
   const source = run?.execution_source;
   const version = run?.version;
   const clusterReport = clusters.data?.data;
@@ -162,8 +169,57 @@ export function TestRunDetailPage() {
   const resultItems = results.data?.data.items ?? [];
   const unclustered = clusterReport?.unclustered_refs ?? [];
   const degraded = clusterReport?.degraded === true;
-  const firstResult = asRecord(resultItems[0]);
-  const evidence = asRecord(firstResult.evidence);
+
+  useEffect(() => {
+    if (resultItems.length === 0) {
+      setSelectedCaseResultId(null);
+      return;
+    }
+    setSelectedCaseResultId((current) => {
+      if (current && resultItems.some((item) => item.id === current)) {
+        return current;
+      }
+      const failed = resultItems.find((item) => item.outcome === "failed");
+      return failed?.id ?? resultItems[0]?.id ?? null;
+    });
+  }, [resultItems]);
+
+  const caseResultDetail = useQuery({
+    queryKey: ["case-results", selectedCaseResultId],
+    queryFn: () =>
+      api.get<ResourceEnvelope<CaseResultDetail>>(
+        "API-065",
+        `/api/v1/case-results/${selectedCaseResultId}`,
+      ),
+    enabled: Boolean(selectedCaseResultId),
+  });
+  const stepRuns = useQuery({
+    queryKey: ["case-results", selectedCaseResultId, "step-runs"],
+    queryFn: () =>
+      api.get<ListEnvelope<StepRunItem>>(
+        "API-066",
+        `/api/v1/case-results/${selectedCaseResultId}/step-runs`,
+      ),
+    enabled: Boolean(selectedCaseResultId),
+  });
+
+  const artifactMetaQueries = useQueries({
+    queries: (caseResultDetail.data?.data.artifact_ids ?? []).map((artifactId) => ({
+      queryKey: ["artifacts", artifactId],
+      queryFn: () =>
+        api.get<ResourceEnvelope<ArtifactMetadata>>("API-220", `/api/v1/artifacts/${artifactId}`),
+      enabled: Boolean(artifactId),
+    })),
+  });
+  const artifactsByKind = useMemo(() => {
+    const map = new Map<string, string>();
+    artifactMetaQueries.forEach((entry) => {
+      const kind = entry.data?.data.kind;
+      const id = entry.data?.data.id;
+      if (kind && id) map.set(kind, id);
+    });
+    return map;
+  }, [artifactMetaQueries]);
 
   const healApply = useMutation({
     mutationFn: async (input: {
@@ -194,6 +250,36 @@ export function TestRunDetailPage() {
       }
     },
     onError: (error) => setHealError(error),
+  });
+
+  const jiraWrite = useMutation({
+    mutationFn: async (input: {
+      clusterId: string;
+      description: string;
+      reproSteps: string;
+      evidenceIds: string[];
+      jiraProject?: string;
+    }) => {
+      return api.post<ResourceEnvelope<ActionPreview>>("API-120", "/api/v1/action-previews", {
+        action_type: "jira_write",
+        project_id: run?.project_id,
+        target_object_type: "failure_cluster",
+        target_object_id: input.clusterId,
+        payload: {
+          description: input.description,
+          repro_steps: input.reproSteps,
+          jira_project: input.jiraProject,
+          evidence_ids: input.evidenceIds,
+        },
+      });
+    },
+    onMutate: () => setJiraError(null),
+    onSuccess: (payload) => {
+      if (payload.data.gate === "REQUIRE_APPROVAL" && payload.data.approval_request_id) {
+        navigate(`/approvals?highlight=${payload.data.approval_request_id}`);
+      }
+    },
+    onError: (error) => setJiraError(error),
   });
 
   const correctCluster = useMutation({
@@ -293,6 +379,24 @@ export function TestRunDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <RunProgressBar status={status} source={source} />
+            {run?.execution_source_badge?.normalized_from_external_ci ? (
+              <StatusBadge status="external_ci" />
+            ) : null}
+            {typeof run?.result_summary?.ci === "object" &&
+            run.result_summary.ci !== null &&
+            typeof (run.result_summary.ci as Record<string, unknown>).report_parse === "object" ? (
+              <p className="text-xs text-muted-foreground">
+                报告解析进度：{" "}
+                {JSON.stringify((run.result_summary.ci as Record<string, unknown>).report_parse)}
+              </p>
+            ) : null}
+            {typeof run?.result_summary?.ci === "object" &&
+            run.result_summary.ci !== null &&
+            (run.result_summary.ci as Record<string, unknown>).reason ? (
+              <p className="text-xs text-destructive">
+                CI 采集失败：{String((run.result_summary.ci as Record<string, unknown>).reason)}
+              </p>
+            ) : null}
             {sseHint ? (
               <p className="text-xs text-muted-foreground">SSE 提示（非终态）：{sseHint}。权威状态以 GET API-061 为准。</p>
             ) : null}
@@ -353,6 +457,7 @@ export function TestRunDetailPage() {
                     fixes: detailRow?.fixes_preview,
                     evidenceRefs: item.evidence_refs,
                     failureRefs: item.failure_refs,
+                    jiraIssue: detailRow?.jira_issue ?? item.jira_issue,
                     correctionHistory: detailRow?.correction_history,
                     similarItems: similarById.get(item.id),
                   }}
@@ -367,6 +472,16 @@ export function TestRunDetailPage() {
                     });
                   }}
                   applyPending={healApply.isPending}
+                  jiraPending={jiraWrite.isPending}
+                  showJiraButton={canCreateJira && !item.jira_issue && !detailRow?.jira_issue}
+                  onCreateJira={() => {
+                    jiraWrite.mutate({
+                      clusterId: item.id,
+                      description: item.root_cause ?? "失败聚类缺陷",
+                      reproSteps: `TestRun ${runId} · cluster ${item.id}`,
+                      evidenceIds: item.evidence_refs ?? [],
+                    });
+                  }}
                   onApply={(fix) => {
                     if (!linkedCaseId) {
                       setHealError(new Error("缺少目标用例"));
@@ -412,6 +527,7 @@ export function TestRunDetailPage() {
               )}
             </div>
             <CommandFeedback error={healError} apis={PAGE_APIS.P09} action="heal_apply Preview（API-120）" />
+            <CommandFeedback error={jiraError} apis={PAGE_APIS.P09} action="jira_write Preview（API-120）" />
             <CommandFeedback error={correctError} apis={PAGE_APIS.P09} action="人工修正（API-132）" />
           </CardContent>
         </Card>
@@ -436,14 +552,24 @@ export function TestRunDetailPage() {
                   <TableRow>
                     <TableHead>Case</TableHead>
                     <TableHead>结果</TableHead>
+                    <TableHead>Partial</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {resultItems.map((item) => (
-                    <TableRow key={item.id}>
+                    <TableRow
+                      key={item.id}
+                      className={
+                        item.id === selectedCaseResultId ? "cursor-pointer bg-muted/50" : "cursor-pointer"
+                      }
+                      onClick={() => setSelectedCaseResultId(item.id)}
+                    >
                       <TableCell className="font-mono text-xs">{item.test_case_id}</TableCell>
                       <TableCell>
                         <StatusBadge status={item.outcome} />
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {item.is_partial ? "partial" : "—"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -461,11 +587,16 @@ export function TestRunDetailPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <EvidenceViewer
-              screenshotUrl={typeof evidence.screenshot_url === "string" ? evidence.screenshot_url : undefined}
-              videoUrl={typeof evidence.video_url === "string" ? evidence.video_url : undefined}
-              traceAvailable={evidence.trace_available === true}
-            />
+            {!selectedCaseResultId ? (
+              <EmptyState compact title="未选用例结果" hint="点击上方结果行查看证据" />
+            ) : (
+              <EvidenceViewer
+                screenshotArtifactId={artifactsByKind.get("screenshot")}
+                videoArtifactId={artifactsByKind.get("video")}
+                traceArtifactId={artifactsByKind.get("trace")}
+                stepRuns={stepRuns.data?.data.items ?? []}
+              />
+            )}
             {source ? <StatusBadge status={source} /> : null}
           </CardContent>
         </Card>

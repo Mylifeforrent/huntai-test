@@ -35,6 +35,27 @@ def _preview_body(
     return body
 
 
+async def _seed_jira_preview_target(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    seeded_identity: dict[str, object],
+) -> tuple[uuid.UUID, dict[str, object]]:
+    from tests.test_api_130_131_039_heal import _start_failed_run
+
+    run, report = await _start_failed_run(client, db_session, seeded_identity)
+    cluster = report["items"][0]
+    return uuid.UUID(str(cluster["id"])), cluster
+
+
+def _jira_preview_payload(cluster: dict[str, object]) -> dict[str, object]:
+    return {
+        "description": str(cluster.get("root_cause") or "failed cluster"),
+        "repro_steps": "repro",
+        "jira_project": "HTST",
+        "evidence_ids": cluster.get("evidence_refs") or [],
+    }
+
+
 async def _seed_admin_peer(
     db_session: AsyncSession,
     *,
@@ -42,6 +63,39 @@ async def _seed_admin_peer(
     project_id: uuid.UUID,
     idp_subject: str = "admin-peer-120",
 ) -> uuid.UUID:
+    existing = await db_session.execute(
+        select(User).where(
+            User.organization_id == org_id,
+            User.idp_subject == idp_subject,
+        )
+    )
+    existing_user = existing.scalar_one_or_none()
+    if existing_user is not None:
+        membership = await db_session.execute(
+            select(ProjectMember).where(
+                ProjectMember.organization_id == org_id,
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == existing_user.id,
+            )
+        )
+        if membership.scalar_one_or_none() is None:
+            now = datetime.now(UTC)
+            db_session.add(
+                ProjectMember(
+                    id=uuid.uuid4(),
+                    organization_id=org_id,
+                    created_at=now,
+                    updated_at=now,
+                    created_by=existing_user.id,
+                    aggregate_version=1,
+                    project_id=project_id,
+                    user_id=existing_user.id,
+                    role="admin",
+                )
+            )
+            await db_session.commit()
+        return existing_user.id
+
     now = datetime.now(UTC)
     user_id = uuid.uuid4()
     db_session.add(
@@ -154,10 +208,14 @@ async def test_api_120_happy_l2_jira_write(
     project_id = seeded_identity["project_id"]
     assert isinstance(org_id, uuid.UUID)
     assert isinstance(project_id, uuid.UUID)
-    await _seed_admin_peer(db_session, org_id=org_id, project_id=project_id)
+    cluster_id, cluster = await _seed_jira_preview_target(client, db_session, seeded_identity)
     await login_as(client)
     key = str(uuid.uuid4())
-    body = _preview_body(project_id=project_id)
+    body = _preview_body(
+        project_id=project_id,
+        target_id=cluster_id,
+        payload=_jira_preview_payload(cluster),
+    )
     response = await client.post(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": key},
@@ -171,7 +229,9 @@ async def test_api_120_happy_l2_jira_write(
     assert data["approval_request_id"]
     assert data["card_payload"]["param_hash"] == data["param_hash"]
 
-    result = await db_session.execute(select(ApprovalRequest))
+    result = await db_session.execute(
+        select(ApprovalRequest).where(ApprovalRequest.action_type == "jira_write")
+    )
     rows = list(result.scalars().all())
     assert len(rows) == 1
     assert rows[0].status == "PENDING"
@@ -279,12 +339,17 @@ async def test_api_120_client_param_hash_val001(
     _ = mock_oidc_token_exchange
     project_id = seeded_identity["project_id"]
     assert isinstance(project_id, uuid.UUID)
-    await _seed_admin_peer(db_session, org_id=seeded_identity["org_id"], project_id=project_id)  # type: ignore[arg-type]
+    cluster_id, cluster = await _seed_jira_preview_target(client, db_session, seeded_identity)
     await login_as(client)
     response = await client.post(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": str(uuid.uuid4())},
-        json=_preview_body(project_id=project_id, extra={"param_hash": "forged"}),
+        json=_preview_body(
+            project_id=project_id,
+            target_id=cluster_id,
+            payload=_jira_preview_payload(cluster),
+            extra={"param_hash": "forged"},
+        ),
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "HT-VAL-001"
@@ -373,10 +438,14 @@ async def test_api_120_idempotent_same_key_same_hash(
     _ = mock_oidc_token_exchange
     project_id = seeded_identity["project_id"]
     assert isinstance(project_id, uuid.UUID)
-    await _seed_admin_peer(db_session, org_id=seeded_identity["org_id"], project_id=project_id)  # type: ignore[arg-type]
+    cluster_id, cluster = await _seed_jira_preview_target(client, db_session, seeded_identity)
     await login_as(client)
     key = str(uuid.uuid4())
-    body = _preview_body(project_id=project_id)
+    body = _preview_body(
+        project_id=project_id,
+        target_id=cluster_id,
+        payload=_jira_preview_payload(cluster),
+    )
     first = await client.post(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": key},
@@ -402,18 +471,26 @@ async def test_api_120_idempotent_same_key_different_hash(
     _ = mock_oidc_token_exchange
     project_id = seeded_identity["project_id"]
     assert isinstance(project_id, uuid.UUID)
-    await _seed_admin_peer(db_session, org_id=seeded_identity["org_id"], project_id=project_id)  # type: ignore[arg-type]
+    cluster_id, cluster = await _seed_jira_preview_target(client, db_session, seeded_identity)
     await login_as(client)
     key = str(uuid.uuid4())
     first = await client.post(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": key},
-        json=_preview_body(project_id=project_id),
+        json=_preview_body(
+            project_id=project_id,
+            target_id=cluster_id,
+            payload=_jira_preview_payload(cluster),
+        ),
     )
     second = await client.post(
         "/api/v1/action-previews",
         headers={"Idempotency-Key": key},
-        json=_preview_body(project_id=project_id, payload={"summary": "changed"}),
+        json=_preview_body(
+            project_id=project_id,
+            target_id=cluster_id,
+            payload={**_jira_preview_payload(cluster), "description": "changed"},
+        ),
     )
     assert first.status_code == 200
     assert second.status_code == 409

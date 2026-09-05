@@ -14,12 +14,20 @@ from app.core.config import Settings
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
 from app.modules.integration_hub import repository as repo
-from app.modules.integration_hub.models import ApiToken, Connector, ExternalObservation
+from app.modules.integration_hub.models import (
+    ApiToken,
+    Connector,
+    ExternalObservation,
+    ProjectCiTriggerConfig,
+)
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 
 COMMAND_TYPE_BIND_CREDENTIAL = "connector.bind_credential_ref"
 COMMAND_TYPE_ISSUE_TOKEN = "api_token.issue"
 COMMAND_TYPE_REVOKE_TOKEN = "api_token.revoke"
+COMMAND_TYPE_CONNECTOR_REGISTER = "connector.register"
+COMMAND_TYPE_CONNECTOR_PATCH = "connector.patch"
+COMMAND_TYPE_CI_TRIGGER_BINDINGS = "project.put_ci_trigger_bindings"
 TOKEN_PREFIX_LITERAL = "ht_live_"
 TOKEN_PREFIX_DISPLAY_LEN = 16
 PASSWORD_HASHER = PasswordHasher()
@@ -50,13 +58,17 @@ def _webhook_secret_present(connector: Connector) -> bool:
 
 
 def serialize_list_item(connector: Connector) -> dict[str, Any]:
+    has_credential = _credential_present(connector)
+    has_webhook_secret = _webhook_secret_present(connector)
     return {
         "id": str(connector.id),
         "type": connector.type,
         "name": connector.name,
         "auth_method": connector.auth_method,
-        "credential_present": _credential_present(connector),
-        "webhook_secret_present": _webhook_secret_present(connector),
+        "has_credential": has_credential,
+        "has_webhook_secret": has_webhook_secret,
+        "credential_present": has_credential,
+        "webhook_secret_present": has_webhook_secret,
         "outbound_write_enabled": connector.outbound_write_enabled,
         "action_contract": connector.action_contract,
         "config_version": connector.config_version,
@@ -846,3 +858,281 @@ async def _verify_token_candidates(
         except VerifyMismatchError:
             continue
     return None
+
+
+async def _require_project_owner_or_admin(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+) -> None:
+    if not await identity_query.project_exists_in_org(
+        session, organization_id=ctx.organization.id, project_id=project_id
+    ):
+        raise ValueError("not_found")
+    role = await identity_query.get_project_membership_role(
+        session,
+        organization_id=ctx.organization.id,
+        project_id=project_id,
+        user_id=ctx.user.id,
+    )
+    if role is None:
+        raise ValueError("not_found")
+    if role not in {"owner", "admin"}:
+        raise ValueError("forbidden")
+
+
+def _validate_connector_type(connector_type: str) -> None:
+    if connector_type not in repo.VALID_CONNECTOR_TYPES:
+        raise ValueError("validation")
+
+
+async def create_connector_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    connector_type: str,
+    name: str,
+    auth_method: str,
+    action_contract: dict[str, Any],
+    has_credential_binding: bool | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    org_id = ctx.organization.id
+    now = datetime.now(UTC)
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CONNECTOR_REGISTER,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return {"data": existing.response_ref}
+
+    _validate_connector_type(connector_type)
+    if not name.strip() or not auth_method.strip():
+        raise ValueError("validation")
+    if not isinstance(action_contract, dict):
+        raise ValueError("validation")
+
+    connector = await repo.create_connector(
+        session,
+        organization_id=org_id,
+        created_at=now,
+        created_by=ctx.user.id,
+        connector_type=connector_type,
+        name=name.strip(),
+        auth_method=auth_method.strip(),
+        credential_ref="bound" if has_credential_binding else "",
+        action_contract=action_contract,
+    )
+    response = serialize_list_item(connector)
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="connector.register",
+            resource_type="connector",
+            resource_id=connector.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CONNECTOR_REGISTER,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return {"data": response}
+
+
+async def patch_connector_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    connector_id: uuid.UUID,
+    expected_version: int,
+    name: str | None,
+    action_contract: dict[str, Any] | None,
+    outbound_write_enabled: bool | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    org_id = ctx.organization.id
+    now = datetime.now(UTC)
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CONNECTOR_PATCH,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return {"data": existing.response_ref}
+
+    connector = await repo.get_connector(
+        session,
+        organization_id=org_id,
+        connector_id=connector_id,
+        for_update=True,
+    )
+    if connector is None:
+        raise ValueError("not_found")
+    if connector.aggregate_version != expected_version:
+        raise ValueError("version")
+
+    if outbound_write_enabled is True and not connector.outbound_write_enabled:
+        raise ValueError("policy_deny")
+    if name is not None:
+        if not name.strip():
+            raise ValueError("validation")
+        connector.name = name.strip()
+    if action_contract is not None:
+        if not isinstance(action_contract, dict):
+            raise ValueError("validation")
+        connector.action_contract = action_contract
+    if outbound_write_enabled is not None:
+        connector.outbound_write_enabled = outbound_write_enabled
+    connector.aggregate_version += 1
+    connector.config_version += 1
+    connector.updated_at = now
+
+    response = serialize_list_item(connector)
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="connector.patch",
+            resource_type="connector",
+            resource_id=connector.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CONNECTOR_PATCH,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return {"data": response}
+
+
+def _serialize_ci_trigger_bindings(row: ProjectCiTriggerConfig) -> dict[str, Any]:
+    return {
+        "project_id": str(row.project_id),
+        "version": row.aggregate_version,
+        "bindings": list(row.bindings),
+        "updated_at": _iso(row.updated_at),
+    }
+
+
+async def put_ci_trigger_bindings_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    project_id: uuid.UUID,
+    expected_version: int,
+    bindings: list[dict[str, Any]],
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_project_owner_or_admin(session, ctx, project_id=project_id)
+    org_id = ctx.organization.id
+    now = datetime.now(UTC)
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CI_TRIGGER_BINDINGS,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return {"data": existing.response_ref}
+
+    normalized: list[dict[str, Any]] = []
+    for item in bindings:
+        if not isinstance(item, dict):
+            raise ValueError("validation")
+        repository = item.get("repository")
+        ref_pattern = item.get("ref_pattern")
+        test_plan_id = item.get("test_plan_id")
+        if not isinstance(repository, str) or not repository.strip():
+            raise ValueError("validation")
+        if not isinstance(ref_pattern, str) or not ref_pattern.strip():
+            raise ValueError("validation")
+        try:
+            plan_uuid = uuid.UUID(str(test_plan_id))
+        except (TypeError, ValueError) as exc:  # fmt: skip
+            raise ValueError("validation") from exc
+        entry: dict[str, Any] = {
+            "repository": repository.strip(),
+            "ref_pattern": ref_pattern.strip(),
+            "test_plan_id": str(plan_uuid),
+        }
+        connector_id = item.get("connector_id")
+        if connector_id is not None:
+            try:
+                entry["connector_id"] = str(uuid.UUID(str(connector_id)))
+            except (TypeError, ValueError) as exc:  # fmt: skip
+                raise ValueError("validation") from exc
+        normalized.append(entry)
+
+    row = await repo.upsert_ci_trigger_config(
+        session,
+        organization_id=org_id,
+        project_id=project_id,
+        bindings=normalized,
+        expected_version=expected_version,
+        created_by=ctx.user.id,
+        now=now,
+    )
+    response = _serialize_ci_trigger_bindings(row)
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="project.put_ci_trigger_bindings",
+            resource_type="project",
+            resource_id=project_id,
+            project_id=project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_CI_TRIGGER_BINDINGS,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return {"data": response}

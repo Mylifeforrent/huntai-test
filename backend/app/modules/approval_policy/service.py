@@ -21,8 +21,10 @@ from app.modules.execution_registry import command_port as execution_command
 from app.modules.identity_tenancy import command_port as identity_command
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext, compute_reauth_required
+from app.modules.quality_gates import query_port as quality_gates_query
 from app.modules.results_evidence import query_port as evidence_query
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
+from app.modules.run_orchestration import query_port as run_query
 from app.modules.test_assets import command_port as test_assets_command
 from app.modules.test_assets import query_port as test_assets_query
 
@@ -271,6 +273,172 @@ async def _validate_heal_apply_preview(
     return snapshot_ref
 
 
+async def _validate_jira_write_preview(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    target_object_type: str,
+    target_object_id: uuid.UUID,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if target_object_type not in {"failure_cluster", "case_result"}:
+        raise ValueError("validation")
+
+    cluster_evidence_refs: list[uuid.UUID] = []
+    failure_refs: list[uuid.UUID] = []
+    test_run_id: uuid.UUID | None = None
+
+    if target_object_type == "failure_cluster":
+        cluster = await evidence_query.get_failure_cluster_pointer(
+            session,
+            organization_id=organization_id,
+            failure_cluster_id=target_object_id,
+        )
+        if cluster is None:
+            raise ValueError("not_found")
+        test_run_id = cluster["test_run_id"]
+        cluster_evidence_refs = list(cluster["evidence_refs"])
+        failure_refs = list(cluster["failure_refs"])
+    else:
+        case = await evidence_query.get_case_result_pointer(
+            session,
+            organization_id=organization_id,
+            case_result_id=target_object_id,
+        )
+        if case is None:
+            raise ValueError("not_found")
+        test_run_id = case["test_run_id"]
+
+    if test_run_id is None:
+        raise ValueError("not_found")
+
+    run = await run_query.get_run_scope(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    if run is None or run["project_id"] != project_id:
+        raise ValueError("not_found")
+    if run["status"] != "FAILED":
+        raise ValueError("state")
+
+    summary_raw = payload.get("summary")
+    description_raw = payload.get("description")
+    repro_raw = payload.get("repro_steps")
+    summary = str(summary_raw).strip() if summary_raw is not None else ""
+    description = str(description_raw).strip() if description_raw is not None else ""
+    repro_steps = str(repro_raw).strip() if repro_raw is not None else ""
+    if not summary and not description and not repro_steps:
+        raise ValueError("validation")
+
+    jira_project_raw = payload.get("jira_project")
+    jira_project = str(jira_project_raw).strip() if jira_project_raw is not None else ""
+    if not jira_project:
+        fallback = await identity_query.get_project_jira_project_key(
+            session,
+            organization_id=organization_id,
+            project_id=project_id,
+        )
+        if fallback is None:
+            raise ValueError("validation")
+        jira_project = fallback
+
+    raw_evidence = payload.get("evidence_ids")
+    evidence_ids: list[str] = []
+    if raw_evidence is None:
+        evidence_ids = [str(item) for item in cluster_evidence_refs]
+    else:
+        if not isinstance(raw_evidence, list):
+            raise ValueError("validation")
+        for item in raw_evidence:
+            try:
+                evidence_ids.append(str(uuid.UUID(str(item))))
+            except (TypeError, ValueError) as exc:  # fmt: skip
+                raise ValueError("validation") from exc
+
+    deduped: list[str] = []
+    seen_ids: set[str] = set()
+    for item in evidence_ids:
+        if item not in seen_ids:
+            seen_ids.add(item)
+            deduped.append(item)
+    evidence_ids = deduped
+
+    if not evidence_ids and cluster_evidence_refs:
+        evidence_ids = [str(item) for item in cluster_evidence_refs]
+
+    if evidence_ids:
+        evidence_uuid_list = [uuid.UUID(item) for item in evidence_ids]
+        rows = await evidence_query.get_evidence_classifications(
+            session,
+            organization_id=organization_id,
+            evidence_ids=evidence_uuid_list,
+        )
+        if len(rows) != len(evidence_uuid_list):
+            raise ValueError("validation")
+        if any(classification == "Restricted" for classification in rows.values()):
+            raise ValueError("policy_deny")
+        allowed_subject_ids = {target_object_id, *failure_refs}
+        detail_rows = await evidence_query.list_evidence_subject_ids(
+            session,
+            organization_id=organization_id,
+            evidence_ids=evidence_uuid_list,
+        )
+        for evidence_id, subject_type, subject_id in detail_rows:
+            _ = evidence_id
+            if subject_type == "failure_cluster" and subject_id == target_object_id:
+                continue
+            if subject_type == "case_result" and subject_id in allowed_subject_ids:
+                continue
+            if str(evidence_id) in {str(item) for item in cluster_evidence_refs}:
+                continue
+            raise ValueError("validation")
+
+    normalized_description = description or summary or repro_steps
+    return {
+        "description": normalized_description,
+        "repro_steps": repro_steps,
+        "jira_project": jira_project,
+        "evidence_ids": sorted(evidence_ids),
+    }
+
+
+async def _validate_gate_waiver_preview(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    target_object_type: str,
+    target_object_id: uuid.UUID,
+    payload: dict[str, Any],
+    project_id: uuid.UUID | None,
+) -> uuid.UUID:
+    if payload.get("confirm") is not True:
+        raise ValueError("validation")
+    evaluation: dict[str, Any] | None
+    if target_object_type == "gate_evaluation":
+        evaluation = await quality_gates_query.get_evaluation_pointer(
+            session,
+            organization_id=organization_id,
+            evaluation_id=target_object_id,
+        )
+    elif target_object_type == "test_run":
+        evaluation = await quality_gates_query.get_evaluation_for_test_run(
+            session,
+            organization_id=organization_id,
+            test_run_id=target_object_id,
+        )
+    else:
+        raise ValueError("validation")
+    if evaluation is None:
+        raise ValueError("state")
+    if project_id is not None:
+        run_project = evaluation.get("project_id")
+        if run_project is not None and uuid.UUID(str(run_project)) != project_id:
+            raise ValueError("not_found")
+    return uuid.UUID(str(evaluation["id"]))
+
+
 async def create_action_preview(
     session: AsyncSession,
     ctx: SessionContext,
@@ -319,6 +487,8 @@ async def create_action_preview(
         if role is None:
             raise ValueError("not_found")
         if role == "viewer":
+            raise ValueError("forbidden")
+        if action_type == "gate_waiver" and role not in {"owner", "admin"}:
             raise ValueError("forbidden")
     elif not await identity_query.caller_has_non_viewer_role(
         session, organization_id=org_id, user_id=user_id
@@ -412,6 +582,8 @@ async def create_action_preview(
         raise ValueError("state")
 
     heal_snapshot_ref: uuid.UUID | None = None
+    gate_evaluation_id: uuid.UUID | None = None
+    jira_write_payload: dict[str, Any] | None = None
     if action_type == "heal_apply":
         if preview_input.target_object_type != "test_case":
             raise ValueError("validation")
@@ -441,19 +613,96 @@ async def create_action_preview(
                 raise ValueError("policy_deny") from exc
             raise
 
+    if action_type == "jira_write":
+        if project_id is None:
+            raise ValueError("validation")
+        try:
+            jira_write_payload = await _validate_jira_write_preview(
+                session,
+                organization_id=org_id,
+                project_id=project_id,
+                target_object_type=preview_input.target_object_type,
+                target_object_id=preview_input.target_object_id,
+                payload=preview_input.payload,
+            )
+        except ValueError as exc:
+            if str(exc) == "policy_deny":
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=audit_base.organization_id,
+                        actor_user_id=audit_base.actor_user_id,
+                        action=audit_base.action,
+                        resource_type=audit_base.resource_type,
+                        resource_id=audit_base.resource_id,
+                        project_id=audit_base.project_id,
+                        request_hash=audit_base.request_hash,
+                        result="failed",
+                    ),
+                )
+                raise ValueError("policy_deny") from exc
+            if str(exc) == "state":
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=audit_base.organization_id,
+                        actor_user_id=audit_base.actor_user_id,
+                        action=audit_base.action,
+                        resource_type=audit_base.resource_type,
+                        resource_id=audit_base.resource_id,
+                        project_id=audit_base.project_id,
+                        request_hash=audit_base.request_hash,
+                        result="failed",
+                    ),
+                )
+                raise ValueError("state") from exc
+            raise
+
+    effective_payload = (
+        jira_write_payload if jira_write_payload is not None else preview_input.payload
+    )
+
+    if action_type == "gate_waiver":
+        try:
+            gate_evaluation_id = await _validate_gate_waiver_preview(
+                session,
+                organization_id=org_id,
+                target_object_type=preview_input.target_object_type,
+                target_object_id=preview_input.target_object_id,
+                payload=preview_input.payload,
+                project_id=project_id,
+            )
+        except ValueError as exc:
+            if str(exc) == "state":
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=audit_base.organization_id,
+                        actor_user_id=audit_base.actor_user_id,
+                        action=audit_base.action,
+                        resource_type=audit_base.resource_type,
+                        resource_id=audit_base.resource_id,
+                        project_id=audit_base.project_id,
+                        request_hash=audit_base.request_hash,
+                        result="failed",
+                    ),
+                )
+                raise ValueError("state") from exc
+            raise
+
     param_hash = compute_param_hash(
         action_type=action_type,
         target_object_type=preview_input.target_object_type,
         target_object_id=preview_input.target_object_id,
         project_id=project_id,
-        payload=preview_input.payload,
+        payload=effective_payload,
         expected_target_version=preview_input.expected_target_version,
     )
     card_payload = build_card_payload(
         action_type=action_type,
         target_object_type=preview_input.target_object_type,
         target_object_id=preview_input.target_object_id,
-        payload=preview_input.payload,
+        payload=effective_payload,
         side_effect_level=side_effect_level,
         param_hash=param_hash,
     )
@@ -464,6 +713,8 @@ async def create_action_preview(
             "compensation_summary": "Rollback pointer via API-039",
             "none_declared": False,
         }
+    if action_type == "gate_waiver" and gate_evaluation_id is not None:
+        card_payload["gate_evaluation_id"] = str(gate_evaluation_id)
 
     approval_request_id: uuid.UUID | None = None
     if gate_result.gate == PolicyGate.REQUIRE_APPROVAL:
@@ -504,7 +755,9 @@ async def create_action_preview(
             action_type=action_type,
             target_object_type=preview_input.target_object_type,
             target_object_id=preview_input.target_object_id,
-            action_payload=preview_input.payload,
+            action_payload=(
+                effective_payload if action_type == "jira_write" else preview_input.payload
+            ),
             param_hash=param_hash,
             card_payload=card_payload,
             side_effect_level=side_effect_level,
@@ -1038,6 +1291,125 @@ async def submit_approval_decision(
                     action="heal_apply",
                     resource_type="test_case",
                     resource_id=approval.target_object_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="failed",
+                ),
+            )
+
+    if decision == "approve" and approval.action_type == "jira_write":
+        from app.modules.integration_hub import command_port as integration_command
+
+        try:
+            result = await integration_command.execute_jira_write_after_approval(
+                session,
+                organization_id=org_id,
+                approval_id=approval.id,
+                bound_hash=approval.param_hash,
+                actor_user_id=caller_id,
+                project_id=approval.project_id,
+                target_object_type=approval.target_object_type,
+                target_object_id=approval.target_object_id,
+                payload=approval.action_payload,
+                request_hash=request_hash or "",
+            )
+            if result.get("status") == "ok":
+                approval.status = "EXECUTED"
+                approval.execution_result = "ok"
+            else:
+                approval.status = "EXECUTED"
+                approval.execution_result = "failed"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            if result.get("status") != "ok":
+                await append_audit_event(
+                    session,
+                    AuditAppendInput(
+                        organization_id=org_id,
+                        actor_user_id=caller_id,
+                        action="jira_write",
+                        resource_type=approval.target_object_type,
+                        resource_id=approval.target_object_id,
+                        project_id=approval.project_id,
+                        request_hash=request_hash,
+                        result="failed",
+                    ),
+                )
+        except ValueError:
+            approval.status = "EXECUTED"
+            approval.execution_result = "failed"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="jira_write",
+                    resource_type=approval.target_object_type,
+                    resource_id=approval.target_object_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="failed",
+                ),
+            )
+
+    if decision == "approve" and approval.action_type == "gate_waiver":
+        evaluation_id = approval.target_object_id
+        from app.modules.quality_gates import command_port as quality_gates_command
+
+        try:
+            if approval.target_object_type == "test_run":
+                eval_ptr = await quality_gates_query.get_evaluation_for_test_run(
+                    session,
+                    organization_id=org_id,
+                    test_run_id=approval.target_object_id,
+                )
+                if eval_ptr is None:
+                    raise ValueError("state")
+                evaluation_id = uuid.UUID(str(eval_ptr["id"]))
+            attached = await quality_gates_command.attach_waiver(
+                session,
+                organization_id=org_id,
+                evaluation_id=evaluation_id,
+                approval_id=approval.id,
+            )
+            if not attached:
+                raise ValueError("state")
+            approval.status = "EXECUTED"
+            approval.execution_result = "ok"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="gate_waiver",
+                    resource_type="gate_evaluation",
+                    resource_id=evaluation_id,
+                    project_id=approval.project_id,
+                    request_hash=request_hash,
+                    result="ok",
+                ),
+            )
+        except ValueError:
+            approval.status = "EXECUTED"
+            approval.execution_result = "failed"
+            approval.updated_at = datetime.now(UTC)
+            approval.aggregate_version += 1
+            await session.flush()
+            await append_audit_event(
+                session,
+                AuditAppendInput(
+                    organization_id=org_id,
+                    actor_user_id=caller_id,
+                    action="gate_waiver",
+                    resource_type="gate_evaluation",
+                    resource_id=evaluation_id,
                     project_id=approval.project_id,
                     request_hash=request_hash,
                     result="failed",

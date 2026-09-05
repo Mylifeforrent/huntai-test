@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.results_evidence.audit_models import AuditEvent
 from app.modules.results_evidence.models import (
+    Artifact,
     CaseResult,
     CommandIdempotencyRecord,
     EvidenceObject,
@@ -240,6 +241,60 @@ async def get_case_result(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_case_result_by_attempt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    attempt_seq: int,
+) -> CaseResult | None:
+    result = await session.execute(
+        select(CaseResult).where(
+            CaseResult.organization_id == organization_id,
+            CaseResult.test_run_id == test_run_id,
+            CaseResult.test_case_id == test_case_id,
+            CaseResult.attempt_seq == attempt_seq,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_case_result_partial(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> bool:
+    row = await get_case_result(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+    if row is None:
+        return False
+    row.is_partial = True
+    await session.flush()
+    return True
+
+
+async def artifact_key_exists(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    object_key: str,
+) -> bool:
+    result = await session.execute(
+        select(Artifact.id)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.object_key == object_key,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
 
 
 async def list_step_runs_for_case_result(
@@ -498,6 +553,159 @@ async def list_evidence_objects_for_subjects(
     return list(result.scalars().all())
 
 
+async def list_evidence_objects_by_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    evidence_ids: list[uuid.UUID],
+) -> list[EvidenceObject]:
+    if not evidence_ids:
+        return []
+    result = await session.execute(
+        select(EvidenceObject).where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.id.in_(evidence_ids),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_evidence_object(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    evidence_object_id: uuid.UUID,
+) -> EvidenceObject | None:
+    result = await session.execute(
+        select(EvidenceObject).where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.id == evidence_object_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_evidence_objects(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    subject_type: str | None = None,
+    subject_id: uuid.UUID | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    cursor_created_at: datetime | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int | None = None,
+) -> list[EvidenceObject]:
+    query = (
+        select(EvidenceObject)
+        .where(EvidenceObject.organization_id == organization_id)
+        .order_by(EvidenceObject.created_at.desc(), EvidenceObject.id.desc())
+    )
+    if subject_type is not None:
+        query = query.where(EvidenceObject.subject_type == subject_type)
+    if subject_id is not None:
+        query = query.where(EvidenceObject.subject_id == subject_id)
+    if created_from is not None:
+        query = query.where(EvidenceObject.created_at >= created_from)
+    if created_to is not None:
+        query = query.where(EvidenceObject.created_at <= created_to)
+    if cursor_created_at is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                EvidenceObject.created_at < cursor_created_at,
+                and_(
+                    EvidenceObject.created_at == cursor_created_at,
+                    EvidenceObject.id < cursor_id,
+                ),
+            )
+        )
+    if limit is not None:
+        query = query.limit(limit + 1)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_artifact_by_run_kind(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    kind: str,
+) -> Artifact | None:
+    result = await session.execute(
+        select(Artifact)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.test_run_id == test_run_id,
+            Artifact.kind == kind,
+        )
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_artifact_by_source_receipt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    source_receipt_id: uuid.UUID,
+    kind: str,
+) -> Artifact | None:
+    result = await session.execute(
+        select(Artifact)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.source_receipt_id == source_receipt_id,
+            Artifact.kind == kind,
+        )
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_latest_jira_evidence_for_subject(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    subject_type: str,
+    subject_id: uuid.UUID,
+) -> EvidenceObject | None:
+    result = await session.execute(
+        select(EvidenceObject)
+        .where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.subject_type == subject_type,
+            EvidenceObject.subject_id == subject_id,
+            EvidenceObject.source_object["connector"].as_string() == "jira",
+        )
+        .order_by(EvidenceObject.created_at.desc(), EvidenceObject.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_jira_evidence_by_external_request_id(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    external_request_id: str,
+) -> EvidenceObject | None:
+    result = await session.execute(
+        select(EvidenceObject)
+        .where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.source_object["connector"].as_string() == "jira",
+            EvidenceObject.source_object["external_request_id"].as_string() == external_request_id,
+        )
+        .order_by(EvidenceObject.created_at.desc(), EvidenceObject.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_failure_cluster_corrections(
     session: AsyncSession,
     *,
@@ -552,3 +760,92 @@ async def list_similar_failure_clusters(
         query = query.limit(limit)
     result = await session.execute(query)
     return list(result.scalars().all())
+
+
+async def insert_artifact(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    case_result_id: uuid.UUID | None,
+    test_run_id: uuid.UUID | None,
+    kind: str,
+    object_key: str,
+    checksum: str,
+    byte_size: int | None,
+    mime_type: str | None,
+    data_classification: str,
+    original_filename: str | None,
+    artifact_id: uuid.UUID | None = None,
+    source_receipt_id: uuid.UUID | None = None,
+) -> Artifact:
+    row = Artifact(
+        id=artifact_id or uuid.uuid4(),
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        case_result_id=case_result_id,
+        test_run_id=test_run_id,
+        kind=kind,
+        object_key=object_key,
+        checksum=checksum,
+        byte_size=byte_size,
+        mime_type=mime_type,
+        data_classification=data_classification,
+        original_filename=original_filename,
+        source_receipt_id=source_receipt_id,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_artifact(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    artifact_id: uuid.UUID,
+) -> Artifact | None:
+    result = await session.execute(
+        select(Artifact).where(
+            Artifact.organization_id == organization_id,
+            Artifact.id == artifact_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_artifacts_for_case_result(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> list[Artifact]:
+    result = await session.execute(
+        select(Artifact)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.case_result_id == case_result_id,
+        )
+        .order_by(Artifact.created_at.asc(), Artifact.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_latest_case_result_for_test_case(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+) -> CaseResult | None:
+    result = await session.execute(
+        select(CaseResult)
+        .where(
+            CaseResult.organization_id == organization_id,
+            CaseResult.test_case_id == test_case_id,
+        )
+        .order_by(CaseResult.created_at.desc(), CaseResult.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()

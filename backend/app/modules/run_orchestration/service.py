@@ -15,6 +15,7 @@ from app.modules.test_assets import query_port as test_assets_query
 
 COMMAND_TYPE_START = "test_run.start_session"
 COMMAND_TYPE_CANCEL = "test_run.cancel"
+COMMAND_TYPE_TO_SCRIPT_DRAFT = "test_run.to_script_draft"
 
 EXECUTE_ROLES = frozenset({"owner", "admin", "tester"})
 READ_ROLES = frozenset({"owner", "admin", "tester", "viewer"})
@@ -822,6 +823,116 @@ async def get_command_receipt_for_caller(
         "resource_id": str(receipt.resource_id),
         "poll": {
             "path": f"/api/v1/command-receipts/{receipt.id}",
-            "sse_path": f"/api/v1/test-runs/{receipt.resource_id}/events",
+            "sse_path": (
+                f"/api/v1/test-runs/{receipt.resource_id}/events"
+                if receipt.resource_type == "TestRun"
+                else f"/api/v1/command-receipts/{receipt.id}/events"
+            ),
         },
     }
+
+
+async def create_script_draft_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    test_run_id: uuid.UUID,
+    expected_run_version: int | None,
+    title: str | None,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    """API-068: agent trajectory → new TestCase DRAFT (sync; run untouched)."""
+    from app.modules.results_evidence import query_port as evidence_query
+    from app.modules.test_assets import command_port as test_assets_command
+
+    org_id = ctx.organization.id
+    run = await _get_visible_test_run(session, ctx, test_run_id=test_run_id, for_update=True)
+    await _require_project_execute(session, ctx, project_id=run.project_id)
+    if expected_run_version is not None and run.aggregate_version != expected_run_version:
+        raise ValueError("version")
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_TO_SCRIPT_DRAFT,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        stored = existing.response_ref
+        if isinstance(stored, dict):
+            return dict(stored.get("data") or {})
+        return {}
+
+    if run.execution_source != "agent":
+        raise ValueError("state")
+    trajectory = await evidence_query.get_agent_trajectory_record(
+        session,
+        organization_id=org_id,
+        test_run_id=test_run_id,
+    )
+    if trajectory is None or trajectory.get("status") != "completed":
+        raise ValueError("state")
+
+    executed_raw = trajectory.get("executed_steps")
+    if not isinstance(executed_raw, list) or not executed_raw:
+        raise ValueError("schema")
+    draft_steps: list[dict[str, Any]] = []
+    for item in executed_raw:
+        if not isinstance(item, dict) or not isinstance(item.get("action"), dict):
+            raise ValueError("schema")
+        action = item["action"]
+        if str(item.get("tool", "")) != "request" or not isinstance(action.get("params"), dict):
+            # Only request tools are convertible in the M2 pilot.
+            raise ValueError("schema")
+        draft_steps.append({"action": "request", "params": dict(action["params"])})
+
+    raw_meta = trajectory.get("meta")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+    assertions_raw = meta.get("assertions")
+    draft_assertions = (
+        [item for item in assertions_raw if isinstance(item, dict)]
+        if isinstance(assertions_raw, list)
+        else []
+    )
+
+    draft_title = title if title else f"agent-draft-{str(test_run_id)[:8]}"
+    test_case = await test_assets_command.create_script_draft_from_trajectory(
+        session,
+        organization_id=org_id,
+        project_id=run.project_id,
+        created_by=ctx.user.id,
+        title=draft_title,
+        steps=draft_steps,
+        assertions=draft_assertions,
+        source_test_run_id=test_run_id,
+    )
+    response = {"test_case": test_case, "test_run_id": str(test_run_id)}
+
+    now = datetime.now(UTC)
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="agent.to_script_draft",
+            resource_type="TestRun",
+            resource_id=test_run_id,
+            project_id=run.project_id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_TO_SCRIPT_DRAFT,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref={"data": response},
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return response

@@ -38,6 +38,9 @@ export type ExecutionResult = (typeof EXECUTION_RESULTS)[number];
 export const ENVIRONMENT_STATUSES = ["PENDING_APPROVAL", "ACTIVE", "DEGRADED", "DISABLED"] as const;
 export type EnvironmentStatus = (typeof ENVIRONMENT_STATUSES)[number];
 
+export const REPORT_ADAPTERS = ["junit", "allure", "playwright", "pytest"] as const;
+export type ReportAdapter = (typeof REPORT_ADAPTERS)[number];
+
 export const RELEASE_STATUSES = [
   "DRAFT",
   "PENDING_CONFIRM",
@@ -215,6 +218,7 @@ export interface FailureClusterListItem {
   evidence_refs: string[];
   failure_refs: string[];
   created_at?: string;
+  jira_issue?: { key: string; external_request_id?: string };
 }
 
 export interface FailureClusterFixPreview {
@@ -701,6 +705,51 @@ export interface CaseResultListItem {
   is_late: boolean;
   is_partial: boolean;
   data_classification: string;
+}
+
+export interface CaseResultDetail extends CaseResultListItem {
+  normalized_summary?: Record<string, unknown> | null;
+  artifact_ids: string[];
+}
+
+export interface StepRunItem {
+  id: string;
+  created_at: string;
+  case_result_id: string;
+  step_index: number;
+  action?: Record<string, unknown> | null;
+  observation_ref?: string | null;
+  assertion_results?: Record<string, unknown> | null;
+  token_usage?: Record<string, unknown> | null;
+  is_incomplete: boolean;
+}
+
+export interface ArtifactContentAccess {
+  mode: "app_proxy";
+  content_path: string;
+}
+
+export interface ArtifactMetadata {
+  id: string;
+  created_at: string;
+  created_by?: string | null;
+  kind: string;
+  object_key: string;
+  checksum: string;
+  byte_size?: number | null;
+  mime_type?: string | null;
+  data_classification: string;
+  original_filename?: string | null;
+  test_run_id: string;
+  case_result_id?: string | null;
+  scan_status: string;
+  content_access: ArtifactContentAccess;
+}
+
+export interface EvidencePreview {
+  screenshot_artifact_ids: string[];
+  video_artifact_ids: string[];
+  trace_artifact_ids: string[];
 }
 
 export const CONNECTOR_TYPES = ["jira", "github", "ci", "release"] as const;

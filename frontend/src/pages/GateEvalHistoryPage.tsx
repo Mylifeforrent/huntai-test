@@ -1,5 +1,5 @@
-import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
 import { queryKeys } from "@/api/queryKeys";
@@ -7,28 +7,87 @@ import type { ListEnvelope } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useSession } from "@/hooks/useSession";
+
+type GateEvalItem = {
+  id: string;
+  test_run_id: string;
+  result: string;
+  check_run_ref?: Record<string, unknown> | null;
+  waiver_approval_id?: string | null;
+  policy_snapshot?: Record<string, unknown> | null;
+};
 
 export function GateEvalHistoryPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { get, set } = useUrlState();
+  const session = useSession();
   const projectId = get("projectId");
   const result = get("result");
   const testRunId = get("testRunId");
   const cursor = get("cursor");
+  const selectedId = get("evaluationId");
+
+  const canWaiver =
+    session.me?.memberships.some(
+      (membership) =>
+        membership.project_id === projectId &&
+        (membership.role === "owner" || membership.role === "admin"),
+    ) ?? false;
 
   const query = useQuery({
     queryKey: queryKeys.gateEvaluations({ projectId, result, testRunId, cursor }),
     queryFn: () =>
-      api.get<ListEnvelope<Record<string, unknown>>>("API-144", "/api/v1/gate-evaluations", {
+      api.get<ListEnvelope<GateEvalItem>>("API-144", "/api/v1/gate-evaluations", {
         project_id: projectId || undefined,
         result: result || undefined,
         test_run_id: testRunId || undefined,
         cursor: cursor || undefined,
       }),
+    enabled: Boolean(projectId || testRunId),
   });
   const items = query.data?.data.items ?? [];
+
+  const detailQuery = useQuery({
+    queryKey: queryKeys.gateEvaluationDetail(selectedId),
+    queryFn: () =>
+      api.get<{ data: GateEvalItem & { threshold_details?: Record<string, unknown> } }>(
+        "API-145",
+        `/api/v1/gate-evaluations/${selectedId}`,
+      ),
+    enabled: Boolean(selectedId),
+  });
+
+  const waiverMutation = useMutation({
+    mutationFn: async (evaluationId: string) => {
+      const preview = await api.post<{ data: { approval_request_id?: string; gate?: string } }>(
+        "API-120",
+        "/api/v1/action-previews",
+        {
+          action_type: "gate_waiver",
+          project_id: projectId,
+          target_object_type: "gate_evaluation",
+          target_object_id: evaluationId,
+          payload: { confirm: true },
+        },
+      );
+      if (preview.data.gate === "REQUIRE_APPROVAL" && preview.data.approval_request_id) {
+        navigate(`/approvals?highlight=${preview.data.approval_request_id}`);
+      }
+      return preview;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.gateEvaluations({ projectId, result, testRunId, cursor }) });
+      if (selectedId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.gateEvaluationDetail(selectedId) });
+      }
+    },
+  });
 
   return (
     <>
@@ -73,15 +132,21 @@ export function GateEvalHistoryPage() {
                 <TableHead>结论</TableHead>
                 <TableHead>Check Run</TableHead>
                 <TableHead>豁免</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((item, index) => {
-                const id = String(item.id ?? index);
+              {items.map((item) => {
+                const id = String(item.id);
                 const runId = String(item.test_run_id ?? "");
                 const check = asRecord(item.check_run_ref);
+                const showWaiver = item.result === "fail" && canWaiver && !item.waiver_approval_id;
                 return (
-                  <TableRow key={id}>
+                  <TableRow
+                    key={id}
+                    className={selectedId === id ? "bg-muted/50" : undefined}
+                    onClick={() => set({ evaluationId: id })}
+                  >
                     <TableCell className="font-mono text-xs">{id}</TableCell>
                     <TableCell>
                       {runId ? (
@@ -93,10 +158,42 @@ export function GateEvalHistoryPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={String(item.result ?? "")} />
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={String(item.result ?? "")} />
+                        {(() => {
+                          const snapshot = item.policy_snapshot;
+                          const mode =
+                            snapshot && typeof snapshot === "object"
+                              ? String((snapshot as Record<string, unknown>).mode ?? "")
+                              : "";
+                          if (mode !== "blocking" && mode !== "report_only") return null;
+                          return (
+                            <Badge variant={mode === "blocking" ? "destructive" : "outline"}>
+                              {mode === "blocking" ? "阻断" : "仅报告"}
+                            </Badge>
+                          );
+                        })()}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-xs">{String(check.status ?? check.state ?? "—")}</TableCell>
+                    <TableCell className="text-xs">{String(check.sync_status ?? check.status ?? "—")}</TableCell>
                     <TableCell className="font-mono text-xs">{String(item.waiver_approval_id ?? "—")}</TableCell>
+                    <TableCell>
+                      {showWaiver ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            waiverMutation.mutate(id);
+                          }}
+                          disabled={waiverMutation.isPending}
+                        >
+                          申请豁免
+                        </Button>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -104,6 +201,14 @@ export function GateEvalHistoryPage() {
           </Table>
         )}
       </QueryGate>
+      {selectedId && detailQuery.data?.data ? (
+        <div className="mt-4 rounded-md border p-4 text-sm">
+          <p className="font-medium">评估明细（API-145）</p>
+          <pre className="mt-2 overflow-auto text-xs">
+            {JSON.stringify(detailQuery.data.data.threshold_details ?? {}, null, 2)}
+          </pre>
+        </div>
+      ) : null}
     </>
   );
 }

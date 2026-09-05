@@ -23,12 +23,15 @@ from app.modules.identity_tenancy.service import SessionContext, require_idempot
 from app.modules.integration_hub import repository as repo
 from app.modules.integration_hub.service import (
     bind_credential_ref_for_caller,
+    create_connector_for_caller,
     get_connector_for_caller,
     issue_api_token_for_caller,
     list_api_tokens_for_caller,
     list_connectors_for_caller,
     list_webhook_deliveries_for_caller,
+    patch_connector_for_caller,
     process_inbound_webhook,
+    put_ci_trigger_bindings_for_caller,
     revoke_api_token_for_caller,
 )
 
@@ -62,6 +65,41 @@ class ApiTokenRevoke(BaseModel):
     reason: str | None = None
 
 
+class ConnectorCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: ConnectorTypeLiteral
+    name: str
+    auth_method: str
+    action_contract: dict[str, Any]
+    has_credential_binding: bool | None = None
+
+
+class ConnectorPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    name: str | None = None
+    action_contract: dict[str, Any] | None = None
+    outbound_write_enabled: bool | None = None
+
+
+class CiTriggerBindingItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str
+    ref_pattern: str
+    test_plan_id: uuid.UUID
+    connector_id: uuid.UUID | None = None
+
+
+class CiTriggerBindingsPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    bindings: list[CiTriggerBindingItem]
+
+
 def _parse_body[TModel: BaseModel](model: type[TModel], raw: bytes, trace_id: str) -> TModel:
     try:
         return model.model_validate_json(raw)
@@ -92,6 +130,10 @@ def _map_write_error(trace_id: str, exc: ValueError) -> NoReturn:
         raise version_conflict(trace_id) from exc
     if code == "idempotency_conflict":
         raise idempotency_conflict(trace_id) from exc
+    if code == "policy_deny":
+        from app.core.errors import policy_deny
+
+        raise policy_deny(trace_id) from exc
     raise validation_failed(trace_id) from exc
 
 
@@ -272,6 +314,114 @@ async def api_172_revoke_api_token(
         _map_write_error(trace_id, exc)
     await db.commit()
     return {"data": payload}
+
+
+@router.post("/connectors", status_code=201)
+async def api_162_create_connector(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(ConnectorCreate, raw, trace_id)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await create_connector_for_caller(
+            db,
+            ctx,
+            connector_type=body.type,
+            name=body.name,
+            auth_method=body.auth_method,
+            action_contract=body.action_contract,
+            has_credential_binding=body.has_credential_binding,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return payload
+
+
+@router.patch("/connectors/{connector_id}")
+async def api_163_patch_connector(
+    request: Request,
+    connector_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(ConnectorPatch, raw, trace_id)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await patch_connector_for_caller(
+            db,
+            ctx,
+            connector_id=connector_id,
+            expected_version=body.expected_version,
+            name=body.name,
+            action_contract=body.action_contract,
+            outbound_write_enabled=body.outbound_write_enabled,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return payload
+
+
+@router.put("/projects/{project_id}/ci-trigger-bindings")
+async def api_167_put_ci_trigger_bindings(
+    request: Request,
+    project_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(CiTriggerBindingsPut, raw, trace_id)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    bindings = [
+        {
+            "repository": item.repository,
+            "ref_pattern": item.ref_pattern,
+            "test_plan_id": str(item.test_plan_id),
+            **({"connector_id": str(item.connector_id)} if item.connector_id else {}),
+        }
+        for item in body.bindings
+    ]
+    try:
+        payload = await put_ci_trigger_bindings_for_caller(
+            db,
+            ctx,
+            project_id=project_id,
+            expected_version=body.expected_version,
+            bindings=bindings,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return payload
 
 
 @router.post("/inbound-webhooks/{connector_id}")

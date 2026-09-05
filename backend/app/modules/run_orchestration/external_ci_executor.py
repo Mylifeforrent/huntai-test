@@ -1,40 +1,63 @@
-"""External CI (Jenkins) trigger, poll, and JUnit collection for M1."""
+"""External CI (Jenkins) trigger, poll, multi-format report collection (S-M2-05)."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import time
 import uuid
-import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urljoin
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.modules.execution_registry import query_port as execution_query
-from app.modules.results_evidence import repository as evidence_repo
+from app.modules.integration_hub import command_port as integration_command
+from app.modules.quality_gates.command_port import schedule_gate_evaluation
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 from app.modules.results_evidence.command_port import (
+    ArtifactWrite,
     CaseResultWrite,
     StepRunWrite,
+    append_artifact,
     append_case_result,
+    append_ci_report_evidence,
     append_step_run,
+    artifact_object_key_exists,
+    find_case_result_id_by_attempt,
+    mark_case_result_partial,
     schedule_failure_triage,
+)
+from app.modules.results_evidence.object_store import (
+    sanitize_filename,
+    write_bytes,
 )
 from app.modules.run_orchestration import repository as repo
 from app.modules.run_orchestration.ci_settings import resolve_jenkins_env_ref
 from app.modules.run_orchestration.job_schema_validator import validate_params_against_schema
 from app.modules.run_orchestration.models import TestRun
+from app.modules.run_orchestration.report_adapters import (
+    SUPPORTED_REPORT_ADAPTERS,
+    ReportParseError,
+    iter_report_rows,
+    resolve_report_paths,
+)
 from app.modules.test_assets import command_port as test_assets_command
 from app.modules.test_assets import query_port as test_assets_query
 
 JENKINS_TIMEOUT = 30.0
 TERMINAL_STATUSES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT"})
+DEFAULT_CI_LOG_CHUNK_BYTES = 65536
+DEFAULT_CI_LOG_MAX_TOTAL_BYTES = 10_485_760
+DEFAULT_REPORT_PARSE_BATCH_ROWS = 500
 
 
 def _fail_summary(reason: str, *, details: list[str] | None = None) -> dict[str, Any]:
@@ -81,46 +104,80 @@ def _ci_summary(run: TestRun) -> dict[str, Any]:
     return ci if isinstance(ci, dict) else {}
 
 
-def _artifact_path(contract: dict[str, Any], case: dict[str, Any]) -> str | None:
-    job_binding = case.get("job_binding")
-    if isinstance(job_binding, dict):
-        collect = job_binding.get("collect_config")
-        if isinstance(collect, dict):
-            path = collect.get("artifact_path")
-            if isinstance(path, str) and path.strip():
-                return path.strip()
-    manifest = contract.get("artifact_manifest")
-    if isinstance(manifest, dict):
-        path = manifest.get("junit_path") or manifest.get("path")
-        if isinstance(path, str) and path.strip():
-            return path.strip()
-    return "junit.xml"
+def _worst_outcome(rows: list[dict[str, str]]) -> str:
+    worst = "passed"
+    for row in rows:
+        outcome = row["outcome"]
+        if outcome == "failed":
+            return "failed"
+        if outcome == "incomplete":
+            worst = "incomplete"
+    return worst
 
 
-def _junit_outcome(testcase: ET.Element) -> str:
-    if testcase.find("failure") is not None or testcase.find("error") is not None:
-        return "failed"
-    if testcase.find("skipped") is not None:
-        return "incomplete"
-    return "passed"
+def split_log_payload(
+    payload: bytes,
+    *,
+    chunk_size: int,
+    max_total: int,
+    already_written: int,
+) -> tuple[list[bytes], bool]:
+    """Slice a progressiveText body into artifact chunks without skipping bytes.
+
+    Truncation is only the max_total cap, and is always returned as an explicit flag.
+    """
+    if chunk_size <= 0 or max_total <= 0 or already_written >= max_total:
+        return [], True
+    remaining = max_total - already_written
+    truncated = len(payload) > remaining
+    view = payload[:remaining]
+    chunks: list[bytes] = []
+    offset = 0
+    while offset < len(view):
+        chunks.append(view[offset : offset + chunk_size])
+        offset += chunk_size
+    return chunks, truncated
+
+
+def _ci_log_limits() -> tuple[int, int]:
+    settings = get_settings()
+    chunk = settings.ci_log_chunk_bytes
+    max_total = settings.ci_log_max_total_bytes
+    return (
+        chunk if chunk is not None and chunk > 0 else DEFAULT_CI_LOG_CHUNK_BYTES,
+        max_total if max_total is not None and max_total > 0 else DEFAULT_CI_LOG_MAX_TOTAL_BYTES,
+    )
+
+
+def _report_batch_rows() -> int:
+    rows = get_settings().report_parse_batch_rows
+    return rows if rows is not None and rows > 0 else DEFAULT_REPORT_PARSE_BATCH_ROWS
+
+
+def _report_object_key(
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    checksum16: str,
+    filename: str,
+) -> str:
+    return f"{organization_id}/{test_run_id}/report/{checksum16}/{sanitize_filename(filename)}"
+
+
+def _log_object_key(
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    build_number: int,
+    chunk_index: int,
+) -> str:
+    return f"{organization_id}/{test_run_id}/logs/{build_number}/{chunk_index:05d}.txt"
 
 
 def _should_skip_jenkins_post(ci: dict[str, Any]) -> bool:
     trigger_state = ci.get("trigger_state")
     execution_result = ci.get("execution_result")
     return trigger_state in {"pending", "triggered"} or execution_result == "unknown"
-
-
-def parse_junit_xml(xml_text: str) -> list[dict[str, str]]:
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError:
-        return []
-    rows: list[dict[str, str]] = []
-    for testcase in root.iter("testcase"):
-        name = testcase.get("name") or testcase.get("classname") or "unknown"
-        rows.append({"name": str(name), "outcome": _junit_outcome(testcase)})
-    return rows
 
 
 async def validate_external_ci_run(
@@ -169,8 +226,8 @@ async def validate_external_ci_run(
             )
 
         adapter = contract.get("report_adapter")
-        if adapter != "junit":
-            return False, _fail_summary("adapter_not_in_m1", details=[str(adapter)]), []
+        if not isinstance(adapter, str) or adapter not in SUPPORTED_REPORT_ADAPTERS:
+            return False, _fail_summary("adapter_not_supported", details=[str(adapter)]), []
 
         contracts.append({"case": case, "contract": contract, "job_id": job_id.strip()})
 
@@ -267,6 +324,25 @@ async def _persist_ci(
     )
 
 
+async def _begin_collect(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    now: datetime,
+) -> bool:
+    ci = _ci_summary(run)
+    collect_state = ci.get("collect_state")
+    if collect_state == "done":
+        return False
+    await _persist_ci(
+        session,
+        run=run,
+        ci_patch={"collect_state": "collecting"},
+        now=now,
+    )
+    return True
+
+
 async def _trigger_jenkins(
     client: httpx.AsyncClient,
     *,
@@ -354,7 +430,7 @@ async def _build_finished(
     return True, None
 
 
-async def _fetch_junit_artifact(
+async def _fetch_artifact(
     client: httpx.AsyncClient,
     *,
     endpoint: str,
@@ -373,69 +449,346 @@ async def _fetch_junit_artifact(
     return response.text
 
 
-async def _write_junit_results(
+async def _store_report_artifact(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    report_text: str,
+    artifact_path: str,
+    checksum16: str,
+    now: datetime,
+    case_result_id: uuid.UUID | None,
+) -> str:
+    filename = sanitize_filename(PurePosixPath(artifact_path).name or "report.bin")
+    object_key = _report_object_key(
+        organization_id=run.organization_id,
+        test_run_id=run.id,
+        checksum16=checksum16,
+        filename=filename,
+    )
+    if await artifact_object_key_exists(
+        session,
+        organization_id=run.organization_id,
+        object_key=object_key,
+    ):
+        return object_key
+    checksum = write_bytes(object_key=object_key, data=report_text.encode("utf-8"))
+    with contextlib.suppress(IntegrityError):
+        async with session.begin_nested():
+            await append_artifact(
+                session,
+                organization_id=run.organization_id,
+                created_by=run.created_by,
+                created_at=now,
+                payload=ArtifactWrite(
+                    test_run_id=run.id,
+                    kind="report",
+                    object_key=object_key,
+                    checksum=checksum,
+                    case_result_id=case_result_id,
+                    byte_size=len(report_text.encode("utf-8")),
+                    mime_type="application/octet-stream",
+                    original_filename=filename,
+                ),
+            )
+    return object_key
+
+
+async def _collect_build_logs(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    client: httpx.AsyncClient,
+    endpoint: str,
+    token: str,
+    job_id: str,
+    build_number: int,
+    now: datetime,
+) -> None:
+    chunk_size, max_total = _ci_log_limits()
+    ci = _ci_summary(run)
+    offset_raw = ci.get("log_collect_offset")
+    offset = int(offset_raw) if isinstance(offset_raw, int) else 0
+    total_bytes = int(ci.get("log_bytes", 0)) if isinstance(ci.get("log_bytes"), int) else 0
+    chunk_index = int(ci.get("log_chunks", 0)) if isinstance(ci.get("log_chunks"), int) else 0
+    log_truncated = ci.get("log_truncated") is True
+
+    while total_bytes < max_total and not log_truncated:
+        url = (
+            f"{endpoint.rstrip('/')}/job/{job_id}/{build_number}/logText/progressiveText"
+            f"?start={offset}"
+        )
+        try:
+            response = await client.get(url, auth=("", token))
+        except httpx.HTTPError:
+            break
+        if response.status_code != 200:
+            break
+        data = response.content
+        if not data:
+            break
+        pieces, truncated = split_log_payload(
+            data,
+            chunk_size=chunk_size,
+            max_total=max_total,
+            already_written=total_bytes,
+        )
+        for piece in pieces:
+            object_key = _log_object_key(
+                organization_id=run.organization_id,
+                test_run_id=run.id,
+                build_number=build_number,
+                chunk_index=chunk_index,
+            )
+            if not await artifact_object_key_exists(
+                session,
+                organization_id=run.organization_id,
+                object_key=object_key,
+            ):
+                checksum = write_bytes(object_key=object_key, data=piece)
+                with contextlib.suppress(IntegrityError):
+                    async with session.begin_nested():
+                        await append_artifact(
+                            session,
+                            organization_id=run.organization_id,
+                            created_by=run.created_by,
+                            created_at=now,
+                            payload=ArtifactWrite(
+                                test_run_id=run.id,
+                                kind="log",
+                                object_key=object_key,
+                                checksum=checksum,
+                                byte_size=len(piece),
+                                mime_type="text/plain",
+                                original_filename=f"build-{build_number}-log-{chunk_index}.txt",
+                            ),
+                        )
+            total_bytes += len(piece)
+            chunk_index += 1
+        if truncated:
+            log_truncated = True
+            break
+        next_offset_raw = response.headers.get("X-Text-Size")
+        if next_offset_raw is None:
+            break
+        try:
+            next_offset = int(next_offset_raw)
+        except (TypeError, ValueError):  # fmt: skip
+            break
+        if next_offset <= offset:
+            break
+        offset = next_offset
+
+    patch: dict[str, Any] = {
+        "log_collect_offset": offset,
+        "log_chunks": chunk_index,
+        "log_bytes": total_bytes,
+    }
+    if log_truncated or total_bytes >= max_total:
+        patch["log_truncated"] = True
+    await _persist_ci(session, run=run, ci_patch=patch, now=now)
+
+
+async def _update_parse_progress(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    adapter: str,
+    rows_done: int,
+    rows_total: int | None,
+    step_index: int,
+    now: datetime,
+) -> None:
+    await _persist_ci(
+        session,
+        run=run,
+        ci_patch={
+            "report_parse": {
+                "status": "parsing",
+                "adapter": adapter,
+                "rows_done": rows_done,
+                "rows_total": rows_total,
+                "step_index": step_index,
+            }
+        },
+        now=now,
+    )
+
+
+async def _write_report_results(
     session: AsyncSession,
     *,
     run: TestRun,
     cases: list[dict[str, Any]],
     contracts: list[dict[str, Any]],
-    junit_rows: list[dict[str, str]],
-    xml_text: str,
+    adapter: str,
+    report_rows: list[dict[str, str]],
+    report_files: list[tuple[str, str]],
     now: datetime,
-) -> bool:
+    resume_step_index: int = 0,
+) -> tuple[bool, bool, bool]:
+    batch_size = _report_batch_rows()
+    timeout = get_settings().report_parse_timeout_seconds
+    started = time.monotonic()
     all_passed = True
+    parse_incomplete = False
     created_by = run.created_by
-    checksum = hashlib.sha256(xml_text.encode("utf-8")).hexdigest()
-    claim = f"junit report checksum={checksum[:16]} cases={len(junit_rows)}"
-    content_ref = f"junit://{run.id}/{checksum[:16]}"
+    combined = "\n".join(text for _path, text in report_files)
+    checksum = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+    checksum16 = checksum[:16]
+    claim = f"{adapter} report checksum={checksum16} cases={len(report_rows)}"
 
     if len(cases) == 1:
-        mapped = [(cases[0], junit_rows)]
+        mapped = [(cases[0], report_rows)]
     else:
-        mapped = [(case_item["case"], junit_rows) for case_item in contracts]
+        mapped = [(case_item["case"], report_rows) for case_item in contracts]
 
     for case, rows in mapped:
         if not rows:
-            rows = [{"name": "empty", "outcome": "failed"}]
+            return False, False, False
+
         version_raw = case.get("version_id")
         version_id = uuid.UUID(str(version_raw)) if version_raw else None
-        worst = "passed"
-        for row in rows:
-            outcome = row["outcome"]
-            if outcome == "failed":
-                worst = "failed"
-            elif outcome == "incomplete" and worst == "passed":
-                worst = "incomplete"
+        worst = _worst_outcome(rows)
         if worst != "passed":
             all_passed = False
-        case_result_id = await append_case_result(
+
+        case_id = uuid.UUID(str(case["id"]))
+        chunk_key = f"report:{checksum16}:{case_id}"
+        case_result_id = await find_case_result_id_by_attempt(
             session,
             organization_id=run.organization_id,
-            created_by=created_by,
-            created_at=now,
-            payload=CaseResultWrite(
-                test_run_id=run.id,
-                test_case_id=uuid.UUID(str(case["id"])),
-                test_case_version_id=version_id,
-                attempt_seq=1,
-                outcome=worst,
-                normalized_summary={"junit_cases": len(rows)},
-            ),
+            test_run_id=run.id,
+            test_case_id=case_id,
+            attempt_seq=1,
         )
-        await append_step_run(
-            session,
-            organization_id=run.organization_id,
-            created_by=created_by,
-            created_at=now,
-            payload=StepRunWrite(
+        rows_done = resume_step_index * batch_size
+        step_index = resume_step_index
+
+        for batch_start in range(resume_step_index * batch_size, len(rows), batch_size):
+            if timeout is not None and time.monotonic() - started > timeout:
+                parse_incomplete = True
+                break
+            batch = rows[batch_start : batch_start + batch_size]
+            is_last_batch = batch_start + batch_size >= len(rows)
+            if case_result_id is None:
+                try:
+                    async with session.begin_nested():
+                        case_result_id = await append_case_result(
+                            session,
+                            organization_id=run.organization_id,
+                            created_by=created_by,
+                            created_at=now,
+                            payload=CaseResultWrite(
+                                test_run_id=run.id,
+                                test_case_id=case_id,
+                                test_case_version_id=version_id,
+                                attempt_seq=1,
+                                outcome=worst,
+                                is_partial=False,
+                                chunk_key=chunk_key,
+                                normalized_summary={
+                                    "adapter": adapter,
+                                    "report_cases": len(rows),
+                                },
+                            ),
+                        )
+                except IntegrityError:
+                    case_result_id = await find_case_result_id_by_attempt(
+                        session,
+                        organization_id=run.organization_id,
+                        test_run_id=run.id,
+                        test_case_id=case_id,
+                        attempt_seq=1,
+                    )
+                    if case_result_id is None:
+                        return all_passed, False, False
+            if case_result_id is None:
+                return all_passed, False, False
+            with contextlib.suppress(IntegrityError):
+                async with session.begin_nested():
+                    await append_step_run(
+                        session,
+                        organization_id=run.organization_id,
+                        created_by=created_by,
+                        created_at=now,
+                        payload=StepRunWrite(
+                            case_result_id=case_result_id,
+                            step_index=step_index,
+                            action={"type": "external_ci", "source": adapter, "batch": step_index},
+                            assertion_results={"items": batch[:20]},
+                            is_incomplete=parse_incomplete and not is_last_batch,
+                        ),
+                    )
+
+            rows_done += len(batch)
+            step_index += 1
+            await _update_parse_progress(
+                session,
+                run=run,
+                adapter=adapter,
+                rows_done=rows_done,
+                rows_total=len(rows),
+                step_index=step_index,
+                now=now,
+            )
+
+        if parse_incomplete:
+            if case_result_id is None:
+                try:
+                    async with session.begin_nested():
+                        case_result_id = await append_case_result(
+                            session,
+                            organization_id=run.organization_id,
+                            created_by=created_by,
+                            created_at=now,
+                            payload=CaseResultWrite(
+                                test_run_id=run.id,
+                                test_case_id=case_id,
+                                test_case_version_id=version_id,
+                                attempt_seq=1,
+                                outcome="incomplete",
+                                is_partial=True,
+                                chunk_key=chunk_key,
+                                normalized_summary={
+                                    "adapter": adapter,
+                                    "report_cases": len(rows),
+                                },
+                            ),
+                        )
+                except IntegrityError:
+                    case_result_id = await find_case_result_id_by_attempt(
+                        session,
+                        organization_id=run.organization_id,
+                        test_run_id=run.id,
+                        test_case_id=case_id,
+                        attempt_seq=1,
+                    )
+            if case_result_id is not None:
+                await mark_case_result_partial(
+                    session,
+                    organization_id=run.organization_id,
+                    case_result_id=case_result_id,
+                )
+            return all_passed, True, True
+
+        if case_result_id is None:
+            return False, False, False
+
+        content_ref: str | None = None
+        for path, text in report_files:
+            content_ref = await _store_report_artifact(
+                session,
+                run=run,
+                report_text=text,
+                artifact_path=path,
+                checksum16=checksum16,
+                now=now,
                 case_result_id=case_result_id,
-                step_index=0,
-                action={"type": "external_ci", "source": "junit"},
-                assertion_results={"items": rows[:20]},
-                is_incomplete=False,
-            ),
-        )
-        await evidence_repo.insert_evidence_object(
+            )
+        if content_ref is None:
+            return False, False, False
+        await append_ci_report_evidence(
             session,
             organization_id=run.organization_id,
             created_at=now,
@@ -444,15 +797,26 @@ async def _write_junit_results(
             source_object={
                 "connector": "external_ci",
                 "resource": str(case_result_id),
-                "adapter": "junit",
+                "adapter": adapter,
                 "timestamp": now.isoformat(),
             },
             content_ref=content_ref,
-            subject_type="case_result",
             subject_id=case_result_id,
-            data_classification="Internal",
         )
-    return all_passed
+
+    await _persist_ci(
+        session,
+        run=run,
+        ci_patch={
+            "report_parse": {
+                "status": "done",
+                "adapter": adapter,
+                "rows_done": len(report_rows),
+            }
+        },
+        now=now,
+    )
+    return all_passed, True, False
 
 
 async def _finalize_terminal(
@@ -463,12 +827,16 @@ async def _finalize_terminal(
     now: datetime,
     extra_summary: dict[str, Any] | None = None,
     cancel_mode: bool = False,
+    fail_reason: str | None = None,
 ) -> None:
     final_status = "CANCELLED" if cancel_mode else ("SUCCEEDED" if all_passed else "FAILED")
+    ci_patch: dict[str, Any] = {"collect_state": "done"}
+    if fail_reason:
+        ci_patch["reason"] = fail_reason
     summary = merge_result_summary(
         run.result_summary if isinstance(run.result_summary, dict) else None,
         patch={
-            "ci": {"collect_state": "done"},
+            "ci": ci_patch,
             "cases": len(run.snapshot.get("case_ids", [])),
             "outcome": final_status.lower(),
             "clustering": {
@@ -489,7 +857,7 @@ async def _finalize_terminal(
     )
 
 
-async def collect_junit_for_run(
+async def collect_reports_for_run(
     session: AsyncSession,
     *,
     run: TestRun,
@@ -501,6 +869,11 @@ async def collect_junit_for_run(
     ci: dict[str, Any],
     cancel_mode: bool = False,
 ) -> bool:
+    _ = env_info
+    now = datetime.now(UTC)
+    if not await _begin_collect(session, run=run, now=now):
+        return False
+
     build_number = ci.get("build_number")
     if build_number is None:
         return False
@@ -509,18 +882,53 @@ async def collect_junit_for_run(
     except (TypeError, ValueError):  # fmt: skip
         return False
 
-    case_rows = [item["case"] for item in contracts]
-    artifact_path = _artifact_path(contracts[0]["contract"], contracts[0]["case"])
-    xml_text = await _fetch_junit_artifact(
-        client,
+    job_id = str(ci.get("job_id", contracts[0]["job_id"]))
+    contract = contracts[0]["contract"]
+    case_item = contracts[0]["case"]
+    adapter = contract.get("report_adapter")
+    if not isinstance(adapter, str):
+        adapter = "junit"
+
+    await _collect_build_logs(
+        session,
+        run=run,
+        client=client,
         endpoint=endpoint,
         token=token,
-        job_id=str(ci.get("job_id", contracts[0]["job_id"])),
+        job_id=job_id,
         build_number=build_num,
-        artifact_path=artifact_path or "junit.xml",
+        now=now,
     )
-    now = datetime.now(UTC)
-    if xml_text is None:
+
+    paths = resolve_report_paths(adapter, contract=contract, case=case_item)
+    if not paths:
+        fail_status = "CANCELLED" if cancel_mode else "FAILED"
+        await repo.update_test_run_status(
+            session,
+            run=run,
+            new_status=fail_status,
+            updated_at=now,
+            result_summary=merge_result_summary(
+                run.result_summary if isinstance(run.result_summary, dict) else None,
+                patch={"ci": {"collect_state": "failed", "reason": "report_path_missing"}},
+            ),
+        )
+        return True
+
+    report_files: list[tuple[str, str]] = []
+    for path in paths:
+        text = await _fetch_artifact(
+            client,
+            endpoint=endpoint,
+            token=token,
+            job_id=job_id,
+            build_number=build_num,
+            artifact_path=path,
+        )
+        if text is not None:
+            report_files.append((path, text))
+
+    if not report_files:
         fail_status = "CANCELLED" if cancel_mode else "FAILED"
         await repo.update_test_run_status(
             session,
@@ -534,16 +942,71 @@ async def collect_junit_for_run(
         )
         return True
 
-    junit_rows = parse_junit_xml(xml_text)
-    all_passed = await _write_junit_results(
+    report_rows: list[dict[str, str]] = []
+    try:
+        for _path, text in report_files:
+            report_rows.extend(list(iter_report_rows(adapter, text)))
+    except ReportParseError:
+        fail_status = "CANCELLED" if cancel_mode else "FAILED"
+        await repo.update_test_run_status(
+            session,
+            run=run,
+            new_status=fail_status,
+            updated_at=now,
+            result_summary=merge_result_summary(
+                run.result_summary if isinstance(run.result_summary, dict) else None,
+                patch={"ci": {"collect_state": "failed", "reason": "report_parse_error"}},
+            ),
+        )
+        return True
+
+    if not report_rows:
+        fail_status = "CANCELLED" if cancel_mode else "FAILED"
+        await repo.update_test_run_status(
+            session,
+            run=run,
+            new_status=fail_status,
+            updated_at=now,
+            result_summary=merge_result_summary(
+                run.result_summary if isinstance(run.result_summary, dict) else None,
+                patch={"ci": {"collect_state": "failed", "reason": "report_empty"}},
+            ),
+        )
+        return True
+
+    live_ci = _ci_summary(run)
+    parse_state = live_ci.get("report_parse")
+    resume_step = 0
+    if isinstance(parse_state, dict) and isinstance(parse_state.get("step_index"), int):
+        resume_step = int(parse_state["step_index"])
+
+    case_rows = [item["case"] for item in contracts]
+    all_passed, accounted, parse_incomplete = await _write_report_results(
         session,
         run=run,
         cases=case_rows,
         contracts=contracts,
-        junit_rows=junit_rows,
-        xml_text=xml_text,
+        adapter=adapter,
+        report_rows=report_rows,
+        report_files=report_files,
         now=now,
+        resume_step_index=resume_step,
     )
+
+    if not accounted:
+        return False
+
+    if parse_incomplete:
+        await _finalize_terminal(
+            session,
+            run=run,
+            all_passed=False,
+            now=now,
+            cancel_mode=cancel_mode,
+            fail_reason="report_parse_incomplete",
+        )
+        return True
+
     await _finalize_terminal(
         session,
         run=run,
@@ -552,6 +1015,31 @@ async def collect_junit_for_run(
         cancel_mode=cancel_mode,
     )
     return True
+
+
+async def collect_junit_for_run(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    contracts: list[dict[str, Any]],
+    env_info: dict[str, Any],
+    client: httpx.AsyncClient,
+    token: str,
+    endpoint: str,
+    ci: dict[str, Any],
+    cancel_mode: bool = False,
+) -> bool:
+    return await collect_reports_for_run(
+        session,
+        run=run,
+        contracts=contracts,
+        env_info=env_info,
+        client=client,
+        token=token,
+        endpoint=endpoint,
+        ci=ci,
+        cancel_mode=cancel_mode,
+    )
 
 
 async def execute_external_ci_run(
@@ -724,6 +1212,13 @@ async def execute_external_ci_run(
                 ci=ci,
             )
             if build_number is not None and run.status == "WAITING_EXTERNAL":
+                await integration_command.record_poll_observation(
+                    session,
+                    organization_id=organization_id,
+                    job_id=job_id,
+                    build_number=build_number,
+                    event_kind="build_started",
+                )
                 await _persist_ci(
                     session,
                     run=run,
@@ -778,7 +1273,20 @@ async def execute_external_ci_run(
                 await session.commit()
                 return
             ci = _ci_summary(run)
-            collected = await collect_junit_for_run(
+            build_num_raw = ci.get("build_number")
+            if build_num_raw is not None:
+                try:
+                    build_num = int(build_num_raw)
+                    await integration_command.record_poll_observation(
+                        session,
+                        organization_id=organization_id,
+                        job_id=job_id,
+                        build_number=build_num,
+                        event_kind=f"build_{build_result or 'finished'}",
+                    )
+                except (TypeError, ValueError):  # fmt: skip
+                    pass
+            collected = await collect_reports_for_run(
                 session,
                 run=run,
                 contracts=contracts,
@@ -808,6 +1316,10 @@ async def execute_external_ci_run(
             await session.commit()
 
     await schedule_failure_triage(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    await schedule_gate_evaluation(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )
@@ -911,7 +1423,7 @@ async def best_effort_collect_on_cancel(
             await session.commit()
             return
         ci = _ci_summary(run)
-        await collect_junit_for_run(
+        await collect_reports_for_run(
             session,
             run=run,
             contracts=contracts,
@@ -925,6 +1437,10 @@ async def best_effort_collect_on_cancel(
         await session.commit()
 
     await schedule_failure_triage(
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    await schedule_gate_evaluation(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )

@@ -353,6 +353,29 @@ async def get_command_receipt(
     return result.scalar_one_or_none()
 
 
+async def update_command_receipt_status(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+    status: str,
+) -> CommandReceipt | None:
+    result = await session.execute(
+        select(CommandReceipt)
+        .where(
+            CommandReceipt.organization_id == organization_id,
+            CommandReceipt.id == receipt_id,
+        )
+        .with_for_update()
+    )
+    receipt = result.scalar_one_or_none()
+    if receipt is None:
+        return None
+    receipt.status = status
+    await session.flush()
+    return receipt
+
+
 async def find_external_ci_run_for_observation(
     session: AsyncSession,
     *,
@@ -430,3 +453,24 @@ async def get_latest_run_for_plan(
     if row is None:
         return None
     return {"id": row[0], "status": row[1]}
+
+
+async def cas_attach_gate_evaluation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    gate_evaluation_id: uuid.UUID,
+) -> bool:
+    run = await get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        for_update=True,
+    )
+    if run is None or run.gate_evaluation_id is not None:
+        return False
+    run.gate_evaluation_id = gate_evaluation_id
+    run.aggregate_version += 1
+    await session.flush()
+    return True

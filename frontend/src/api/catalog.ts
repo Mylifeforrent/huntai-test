@@ -70,6 +70,10 @@ export const PAGE_APIS = {
     { id: "API-060", method: "GET", path: "/api/v1/test-runs", summary: "TestRun 列表" },
     { id: "API-061", method: "GET", path: "/api/v1/test-runs/{test_run_id}", summary: "TestRun 详情" },
     { id: "API-064", method: "GET", path: "/api/v1/test-runs/{test_run_id}/case-results", summary: "用例结果" },
+    { id: "API-065", method: "GET", path: "/api/v1/case-results/{case_result_id}", summary: "用例结果详情" },
+    { id: "API-066", method: "GET", path: "/api/v1/case-results/{case_result_id}/step-runs", summary: "步骤结果" },
+    { id: "API-220", method: "GET", path: "/api/v1/artifacts/{artifact_id}", summary: "制品元数据" },
+    { id: "API-221", method: "GET", path: "/api/v1/artifacts/{artifact_id}/content", summary: "制品代理下载" },
     { id: "API-130", method: "GET", path: "/api/v1/test-runs/{test_run_id}/failure-clusters", summary: "聚类报告" },
     { id: "API-131", method: "GET", path: "/api/v1/failure-clusters/{failure_cluster_id}", summary: "聚类详情" },
     { id: "API-132", method: "PATCH", path: "/api/v1/failure-clusters/{failure_cluster_id}", summary: "人工修正留痕" },
@@ -91,11 +95,20 @@ export const PAGE_APIS = {
     { id: "API-142", method: "POST", path: "/api/v1/quality-gate-policies", summary: "创建门禁策略" },
     { id: "API-143", method: "PATCH", path: "/api/v1/quality-gate-policies/{policy_id}", summary: "更新门禁策略" },
   ],
-  P12: [{ id: "API-144", method: "GET", path: "/api/v1/gate-evaluations", summary: "门禁评估历史" }],
+  P12: [
+    { id: "API-144", method: "GET", path: "/api/v1/gate-evaluations", summary: "门禁评估历史" },
+    { id: "API-145", method: "GET", path: "/api/v1/gate-evaluations/{gate_evaluation_id}", summary: "评估明细" },
+    { id: "API-146", method: "GET", path: "/api/v1/test-runs/{test_run_id}/gate-evaluation", summary: "挂接或不可评估原因" },
+    { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "gate_waiver Preview" },
+  ],
   P13: [
     { id: "API-031", method: "GET", path: "/api/v1/test-cases/{test_case_id}", summary: "用例详情" },
     { id: "API-037", method: "GET", path: "/api/v1/test-cases/{test_case_id}/versions", summary: "版本历史" },
+    { id: "API-038", method: "GET", path: "/api/v1/test-cases/{test_case_id}/versions/{version_id}", summary: "版本快照" },
     { id: "API-039", method: "POST", path: "/api/v1/test-cases/{test_case_id}/rollback", summary: "版本回滚" },
+    { id: "API-120", method: "POST", path: "/api/v1/action-previews", summary: "heal_apply Preview" },
+    { id: "API-220", method: "GET", path: "/api/v1/artifacts/{artifact_id}", summary: "制品元数据" },
+    { id: "API-221", method: "GET", path: "/api/v1/artifacts/{artifact_id}/content", summary: "制品代理下载" },
   ],
   P14: [
     { id: "API-067", method: "GET", path: "/api/v1/test-runs/{test_run_id}/trajectory", summary: "Agent 轨迹" },
@@ -124,7 +137,10 @@ export const PAGE_APIS = {
   P19: [{ id: "API-194", method: "GET", path: "/api/v1/skills", summary: "技能列表" }],
   P20: [
     { id: "API-026", method: "GET", path: "/api/v1/evidence-objects", summary: "证据检索" },
+    { id: "API-027", method: "GET", path: "/api/v1/evidence-objects/{evidence_object_id}", summary: "证据详情" },
     { id: "API-028", method: "POST", path: "/api/v1/evidence-objects/export-packages", summary: "证据包导出" },
+    { id: "API-212", method: "GET", path: "/api/v1/command-receipts/{receipt_id}/events", summary: "导出打包进度 SSE" },
+    { id: "API-223", method: "GET", path: "/api/v1/export-packages/{receipt_id}/content", summary: "导出包代理下载" },
   ],
   P21: [{ id: "API-183", method: "GET", path: "/api/v1/ai/cost-dashboard", summary: "AI 成本看板" }],
   P22: [

@@ -26,6 +26,7 @@ TEST_ENV: dict[str, str] = {
     "GITHUB_WEBHOOK_SECRET": "test-github-webhook-secret",
     "JENKINS_WEBHOOK_SECRET": "test-jenkins-webhook-secret",
     "JENKINS_API_TOKEN": "test-jenkins-api-token",
+    "ARTIFACT_ROOT": os.environ.get("ARTIFACT_ROOT", "/tmp/huntai-test-artifacts"),
 }
 
 for _key, _value in TEST_ENV.items():
@@ -105,10 +106,12 @@ async def _truncate_tables() -> AsyncGenerator[None]:
         "test_assets.test_plans",
         "test_assets.test_cases",
         "test_assets.import_sources",
+        "quality_gates.gate_evaluations",
         "quality_gates.command_idempotency_records",
         "quality_gates.quality_gate_policies",
         "test_assets.command_idempotency_records",
         "integration_hub.command_idempotency_records",
+        "integration_hub.project_ci_trigger_configs",
         "integration_hub.inbox_events",
         "integration_hub.external_observations",
         "integration_hub.api_tokens",
@@ -117,6 +120,7 @@ async def _truncate_tables() -> AsyncGenerator[None]:
         "run_orchestration.command_receipts",
         "run_orchestration.test_runs",
         "results_evidence.step_runs",
+        "results_evidence.artifacts",
         "results_evidence.evidence_objects",
         "results_evidence.command_idempotency_records",
         "results_evidence.case_results",

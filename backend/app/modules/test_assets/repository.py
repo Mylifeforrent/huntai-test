@@ -41,6 +41,25 @@ def decode_updated_id_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
         raise ValueError("invalid_cursor") from exc
 
 
+def encode_version_seq_cursor(*, version_seq: int, item_id: uuid.UUID) -> str:
+    payload = json.dumps(
+        {"s": version_seq, "i": str(item_id)},
+        separators=(",", ":"),
+    )
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def decode_version_seq_cursor(cursor: str) -> tuple[int, uuid.UUID]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        data = json.loads(raw.decode("utf-8"))
+        version_seq = int(data["s"])
+        item_id = uuid.UUID(data["i"])
+        return version_seq, item_id
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid_cursor") from exc
+
+
 async def get_idempotency_record(
     session: AsyncSession,
     *,
@@ -176,6 +195,55 @@ async def insert_test_case_version(session: AsyncSession, row: TestCaseVersion) 
     session.add(row)
     await session.flush()
     return row
+
+
+async def list_test_case_versions(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    cursor_version_seq: int | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int,
+) -> list[TestCaseVersion]:
+    query = (
+        select(TestCaseVersion)
+        .where(
+            TestCaseVersion.organization_id == organization_id,
+            TestCaseVersion.test_case_id == test_case_id,
+        )
+        .order_by(TestCaseVersion.version_seq.desc(), TestCaseVersion.id.desc())
+    )
+    if cursor_version_seq is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                TestCaseVersion.version_seq < cursor_version_seq,
+                and_(
+                    TestCaseVersion.version_seq == cursor_version_seq,
+                    TestCaseVersion.id < cursor_id,
+                ),
+            )
+        )
+    query = query.limit(limit + 1)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_test_case_version_for_case(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    version_id: uuid.UUID,
+) -> TestCaseVersion | None:
+    result = await session.execute(
+        select(TestCaseVersion).where(
+            TestCaseVersion.organization_id == organization_id,
+            TestCaseVersion.test_case_id == test_case_id,
+            TestCaseVersion.id == version_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_import_source(

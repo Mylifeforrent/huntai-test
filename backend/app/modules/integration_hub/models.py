@@ -98,6 +98,27 @@ class ExternalObservation(Base):
     data_classification: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class ProjectCiTriggerConfig(Base):
+    __tablename__ = "project_ci_trigger_configs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "project_id",
+            name="uq_project_ci_trigger_configs_org_project",
+        ),
+        {"schema": "integration_hub"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    bindings: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+
+
 class InboxEvent(Base):
     __tablename__ = "inbox_events"
     __table_args__ = (

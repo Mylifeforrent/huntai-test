@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -616,3 +617,158 @@ async def test_cross_tenant_run_get_not_found(
     response = await client.get(f"/api/v1/test-runs/{run.id}")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "HT-RES-001"
+
+
+PYTEST_JSON = json.dumps(
+    {
+        "tests": [
+            {"nodeid": "tests/test_ok.py::test_ok", "outcome": "passed"},
+            {"nodeid": "tests/test_bad.py::test_bad", "outcome": "failed"},
+        ]
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_invalid_report_adapter(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await login_as(client)
+    response = await client.post(
+        "/api/v1/execution-environments",
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+        json={
+            "name": "Bad Adapter Env",
+            "env_type": "external_ci",
+            "scope_level": "project",
+            "project_id": str(project_id),
+            "endpoint": "https://ci.example.com",
+            "job_contracts": [
+                {
+                    "job_id": "smoke-suite",
+                    "supports_cancel": True,
+                    "contract_version": 1,
+                    "report_adapter": "cucumber",
+                    "schema": {"type": "object", "properties": {}},
+                }
+            ],
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "HT-VAL-001"
+
+
+@pytest.mark.asyncio
+async def test_pytest_adapter_collects_report_json(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    env = await activate_external_ci_env(
+        client,
+        db_session,
+        seeded_identity,
+        params_schema={"type": "object", "properties": {"branch": {"type": "string"}}},
+    )
+    from app.modules.execution_registry import repository as env_repo
+
+    bound = await env_repo.get_environment(
+        db_session,
+        organization_id=seeded_identity["org_id"],  # type: ignore[arg-type]
+        environment_id=uuid.UUID(str(env["id"])),
+    )
+    assert bound is not None
+    contracts = await env_repo.list_job_contracts(
+        db_session,
+        organization_id=bound.organization_id,
+        execution_environment_id=bound.id,
+    )
+    for row in contracts:
+        row.report_adapter = "pytest"
+        row.artifact_manifest = {"report_path": "report.json"}
+    await db_session.commit()
+
+    case = await create_active_referenced_case(
+        client,
+        project_id=project_id,
+        env_id=env["id"],
+        job_id="smoke-suite",
+        artifact_path="report.json",
+    )
+    await login_as(client)
+
+    class _PytestMockClient(_JenkinsMockClient):
+        async def _get(self, url: str, **kwargs: object) -> Response:
+            if "/artifact/" in url and "report.json" in url:
+                return Response(200, text=PYTEST_JSON)
+            return await super()._get(url, **kwargs)
+
+    mock_client = _PytestMockClient()
+    with patch("app.modules.run_orchestration.external_ci_executor.httpx.AsyncClient") as cls:
+        cls.return_value.__aenter__.return_value = mock_client
+        start = await client.post(
+            "/api/v1/test-runs",
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+            json={
+                **_start_body(
+                    project_id=project_id,
+                    env_id=env["id"],
+                    case_ids=[case["id"]],
+                    execution_source="external_ci",
+                    expected_env_version=env["version"],
+                ),
+                "params": {"branch": "main"},
+            },
+        )
+        assert start.status_code == 200
+        run_id = start.json()["data"]["id"]
+        detail = await _poll_run(client, run_id, wanted={"SUCCEEDED", "FAILED"})
+    assert detail["status"] == "FAILED"
+    results = await client.get(f"/api/v1/test-runs/{run_id}/case-results")
+    assert results.status_code == 200
+    items = results.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["outcome"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_collect_state_done_short_circuits_second_collect(
+    db_session: AsyncSession,
+    seeded_identity: dict[str, object],
+) -> None:
+    from app.modules.run_orchestration.external_ci_executor import _begin_collect
+    from app.modules.run_orchestration.models import TestRun
+
+    org_id = seeded_identity["org_id"]
+    assert isinstance(org_id, uuid.UUID)
+    now = datetime.now(UTC)
+
+    run = TestRun(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        created_at=now,
+        updated_at=now,
+        created_by=None,
+        aggregate_version=1,
+        project_id=uuid.uuid4(),
+        env_id=uuid.uuid4(),
+        execution_source="external_ci",
+        trigger_type="manual",
+        idempotency_key=str(uuid.uuid4()),
+        status="RUNNING",
+        snapshot={},
+        result_summary={"ci": {"collect_state": "done"}},
+    )
+    db_session.add(run)
+    await db_session.commit()
+    acquired = await _begin_collect(db_session, run=run, now=now)
+    assert acquired is False

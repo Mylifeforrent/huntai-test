@@ -5,6 +5,9 @@
 
 | 日期 | 变更对象（路径） | 变更摘要 | 原因 | 批准人 | 状态 |
 |---|---|---|---|---|---|
+| 2026-09-04 | `.env.example` | 新增 `CI_LOG_CHUNK_BYTES`、`CI_LOG_MAX_TOTAL_BYTES`、`REPORT_PARSE_TIMEOUT_SECONDS`（空=不启用超时）、`REPORT_PARSE_BATCH_ROWS` 键名（无默认值） | S-M2-05 外部 CI 日志分片与超大报告分批解析配置；禁止硬编码 | 用户（S-M2-05 Plan） | 已完成 |
+| 2026-09-03 | `integration_hub.project_ci_trigger_configs`（实现表） | Alembic 0020 每项目一行：`bindings` jsonb + `aggregate_version`；承接 API-167 CI 触发绑定；`data_model.md` 未列该表 | S-M2-03 切片需要持久化仓库/分支↔计划绑定；实现侧补表并登记 | 用户（S-M2-03 Plan） | 已完成 |
+| 2026-09-03 | `.env.example` | 新增 `ARTIFACT_ROOT` 键名（无默认值）；S-M2-01 Playwright 制品本地卷根路径配置 | S-M2-01 切片需要 M0/M1 本地卷落盘 object_key；禁止硬编码路径 | 用户（本会话确认 S-M2-01 Plan） | 已完成 |
 | 2026-09-03 | `test_assets.test_plans.schedule_binding`（实现列） | Alembic 0016 可空 jsonb，承接 API-055 定时绑定；cron/时区仍 TBD，禁止写默认频率 | S-M1-06 切片需要持久化 schedule 绑定；`data_model.md` §7.3 未列该列 | 用户（S-M1-06 Plan） | 已完成 |
 | 2026-09-03 | `.env.example` | 新增 `JENKINS_WEBHOOK_SECRET`、`JENKINS_API_TOKEN` 键名（无默认值）；S-M1-05 external_ci Jenkins 验签与 API Token 引用 | S-M1-05 切片需要 Jenkins webhook HMAC 与 trigger Basic 认证 env 引用；禁止硬编码密钥 | 用户（S-M1-05 Plan） | 已完成 |
 | 2026-09-03 | `results_evidence.failure_clusters.fixes`（实现列） | Alembic 0014 增加可空 jsonb `fixes` 列，用于 API-131 `fixes_preview`（A4 建议投影）；`data_model.md` §7.8 未列该列 | S-M1-03 实现需要持久化 A4 fixes；数据模型遗漏，实现侧补列并登记 | 用户（S-M1-03 会话） | 已完成 |

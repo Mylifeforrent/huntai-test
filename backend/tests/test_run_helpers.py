@@ -177,6 +177,7 @@ async def create_active_referenced_case(
     env_id: str,
     job_id: str = "smoke-suite",
     title: str = "Referenced CI case",
+    artifact_path: str = "junit.xml",
 ) -> dict[str, Any]:
     await login_as(client)
     create = await client.post(
@@ -190,7 +191,7 @@ async def create_active_referenced_case(
             "job_binding": {
                 "env_id": env_id,
                 "job_id": job_id,
-                "collect_config": {"artifact_path": "junit.xml"},
+                "collect_config": {"artifact_path": artifact_path},
             },
         },
     )

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
@@ -24,6 +24,7 @@ import { asRecord } from "@/lib/utils";
 
 export function AgentTaskDetailPage() {
   const { runId = "" } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [draftOpen, setDraftOpen] = useState(false);
@@ -67,8 +68,21 @@ export function AgentTaskDetailPage() {
   });
 
   const draft = useMutation({
-    mutationFn: () => api.post("API-068", `/api/v1/test-runs/${runId}/script-drafts`, {}),
+    mutationFn: () =>
+      api.post<ResourceEnvelope<Record<string, unknown>>>(
+        "API-068",
+        `/api/v1/test-runs/${runId}/script-drafts`,
+        {},
+      ),
     onMutate: () => setDraftError(null),
+    onSuccess: (payload) => {
+      const testCase = asRecord(payload.data.test_case);
+      const projectId = String(testCase.project_id ?? "");
+      const caseId = String(testCase.id ?? "");
+      if (projectId && caseId) {
+        void navigate(`/projects/${projectId}/cases/${caseId}`);
+      }
+    },
     onError: (error) => setDraftError(error),
   });
 

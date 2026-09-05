@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session_factory
 from app.modules.results_evidence import repository as repo
 from app.modules.results_evidence.a2_service import confidence_to_decimal, run_a2_triage
+from app.modules.results_evidence.a3_service import run_a3_for_locator_cluster
 from app.modules.run_orchestration import command_port as run_command
 from app.modules.run_orchestration import query_port as run_query
 
@@ -43,6 +44,20 @@ class StepRunWrite:
     token_usage: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class ArtifactWrite:
+    test_run_id: uuid.UUID
+    kind: str
+    object_key: str
+    checksum: str
+    case_result_id: uuid.UUID | None = None
+    byte_size: int | None = None
+    mime_type: str | None = None
+    data_classification: str = "Confidential"
+    original_filename: str | None = None
+    artifact_id: uuid.UUID | None = None
+
+
 async def append_case_result(
     session: AsyncSession,
     *,
@@ -66,6 +81,33 @@ async def append_case_result(
         chunk_key=payload.chunk_key,
         normalized_summary=payload.normalized_summary,
         data_classification=payload.data_classification,
+    )
+    return row.id
+
+
+async def append_artifact(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_by: uuid.UUID | None,
+    created_at: datetime,
+    payload: ArtifactWrite,
+) -> uuid.UUID:
+    row = await repo.insert_artifact(
+        session,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        case_result_id=payload.case_result_id,
+        test_run_id=payload.test_run_id,
+        kind=payload.kind,
+        object_key=payload.object_key,
+        checksum=payload.checksum,
+        byte_size=payload.byte_size,
+        mime_type=payload.mime_type,
+        data_classification=payload.data_classification,
+        original_filename=payload.original_filename,
+        artifact_id=payload.artifact_id,
     )
     return row.id
 
@@ -95,6 +137,76 @@ async def append_step_run(
         assertion_results=assertion_payload,
         token_usage=payload.token_usage,
         is_incomplete=payload.is_incomplete,
+    )
+    return row.id
+
+
+async def mark_case_result_partial(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> bool:
+    return await repo.mark_case_result_partial(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+
+
+async def find_case_result_id_by_attempt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    attempt_seq: int,
+) -> uuid.UUID | None:
+    row = await repo.get_case_result_by_attempt(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        test_case_id=test_case_id,
+        attempt_seq=attempt_seq,
+    )
+    return None if row is None else row.id
+
+
+async def artifact_object_key_exists(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    object_key: str,
+) -> bool:
+    return await repo.artifact_key_exists(
+        session,
+        organization_id=organization_id,
+        object_key=object_key,
+    )
+
+
+async def append_ci_report_evidence(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    claim: str,
+    source_object: dict[str, Any],
+    content_ref: str,
+    subject_id: uuid.UUID,
+) -> uuid.UUID:
+    row = await repo.insert_evidence_object(
+        session,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        claim=claim,
+        source_object=source_object,
+        content_ref=content_ref,
+        subject_type="case_result",
+        subject_id=subject_id,
+        data_classification="Internal",
     )
     return row.id
 
@@ -213,6 +325,47 @@ async def _create_evidence_pool_for_failed_cases(
         )
         evidence_by_case[row.id] = evidence.id
     return evidence_by_case
+
+
+async def append_jira_issue_evidence(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    created_at: datetime,
+    created_by: uuid.UUID | None,
+    subject_type: str,
+    subject_id: uuid.UUID,
+    issue_key: str,
+    external_request_id: str,
+    evidence_ids: list[uuid.UUID],
+    approval_id: uuid.UUID,
+    bound_hash: str,
+) -> uuid.UUID:
+    claim_parts = [f"Jira defect {issue_key}"]
+    if evidence_ids:
+        claim_parts.append(f"evidence_refs={len(evidence_ids)}")
+    row = await repo.insert_evidence_object(
+        session,
+        organization_id=organization_id,
+        created_at=created_at,
+        created_by=created_by,
+        claim=" ".join(claim_parts),
+        source_object={
+            "connector": "jira",
+            "resource": issue_key,
+            "version": "1",
+            "timestamp": created_at.isoformat(),
+            "external_request_id": external_request_id,
+            "approval_id": str(approval_id),
+            "bound_hash": bound_hash,
+            "evidence_ids": [str(item) for item in evidence_ids],
+        },
+        content_ref=None,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        data_classification="Internal",
+    )
+    return row.id
 
 
 def _merge_cluster_evidence_refs(
@@ -349,7 +502,20 @@ async def run_failure_triage_background(
             failed_cases=failed_payloads,
             evidence_pool=set(evidence_by_case.values()),
         )
+        failed_by_id = {item["id"]: item for item in failed_payloads}
+        case_result_test_case_ids = {row.id: row.test_case_id for row in failed_rows}
         for draft in triage.clusters:
+            fixes = list(draft.fixes)
+            if draft.category == "locator_stale":
+                a3_fixes = await run_a3_for_locator_cluster(
+                    session,
+                    organization_id=organization_id,
+                    user_id=run["created_by"],
+                    failure_refs=draft.failure_refs,
+                    failed_payloads=failed_by_id,
+                    case_result_test_case_ids=case_result_test_case_ids,
+                )
+                fixes.extend(a3_fixes)
             await repo.insert_failure_cluster(
                 session,
                 organization_id=organization_id,
@@ -367,7 +533,7 @@ async def run_failure_triage_background(
                 ),
                 failure_refs=draft.failure_refs,
                 unclustered_refs=triage.unclustered_refs or None,
-                fixes=draft.fixes or None,
+                fixes=fixes or None,
             )
         await run_command.merge_clustering_projection(
             session,
@@ -403,10 +569,17 @@ async def schedule_failure_triage(
 
 
 __all__ = [
+    "ArtifactWrite",
     "CaseResultWrite",
     "StepRunWrite",
+    "append_artifact",
     "append_case_result",
+    "append_ci_report_evidence",
+    "append_jira_issue_evidence",
     "append_step_run",
+    "artifact_object_key_exists",
+    "find_case_result_id_by_attempt",
+    "mark_case_result_partial",
     "prepare_failure_triage",
     "run_failure_triage_background",
     "schedule_failure_triage",

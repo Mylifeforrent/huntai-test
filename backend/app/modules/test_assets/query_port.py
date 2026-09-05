@@ -88,6 +88,7 @@ async def get_cases_for_run_validation(
             {
                 "id": case.id,
                 "title": case.title,
+                "case_type": case.case_type,
                 "lifecycle_status": case.lifecycle_status,
                 "validity": case.validity,
                 "execution_mode": case.execution_mode,
@@ -188,6 +189,29 @@ async def get_test_case_pointer(
         "aggregate_version": case.aggregate_version,
         "current_version_id": case.current_version_id,
     }
+
+
+async def get_test_case_snapshot(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    case = await repo.get_test_case(
+        session,
+        organization_id=organization_id,
+        test_case_id=test_case_id,
+    )
+    if case is None or case.current_version_id is None:
+        return None
+    version = await repo.get_test_case_version(
+        session,
+        organization_id=organization_id,
+        version_id=case.current_version_id,
+    )
+    if version is None:
+        return None
+    return dict(version.snapshot)
 
 
 async def get_plan_scope(

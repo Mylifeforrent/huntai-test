@@ -2,7 +2,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -22,6 +32,14 @@ class CaseResult(Base):
             name="uq_case_results_org_run_case_attempt",
         ),
         Index("ix_case_results_org_test_run", "organization_id", "test_run_id"),
+        Index(
+            "ix_case_results_org_run_chunk_key",
+            "organization_id",
+            "test_run_id",
+            "chunk_key",
+            unique=True,
+            postgresql_where=text("chunk_key IS NOT NULL"),
+        ),
         {"schema": "results_evidence"},
     )
 
@@ -66,6 +84,31 @@ class StepRun(Base):
     assertion_results: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     token_usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     is_incomplete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        Index("ix_artifacts_org_object_key", "organization_id", "object_key", unique=True),
+        Index("ix_artifacts_org_test_run", "organization_id", "test_run_id"),
+        Index("ix_artifacts_org_source_receipt", "organization_id", "source_receipt_id"),
+        {"schema": "results_evidence"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    case_result_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    test_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_classification: Mapped[str] = mapped_column(Text, nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_receipt_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
 
 class EvidenceObject(Base):

@@ -13,6 +13,7 @@ from app.modules.execution_registry.models import ExecutionEnvironment, JobContr
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext, compute_reauth_required
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
+from app.modules.run_orchestration.report_adapters import SUPPORTED_REPORT_ADAPTERS
 
 COMMAND_TYPE_REGISTER = "execution_environment.register"
 COMMAND_TYPE_DISABLE = "execution_environment.disable"
@@ -539,6 +540,12 @@ async def register_execution_environment(
         schema = item.get("schema")
         if schema is not None and not isinstance(schema, dict):
             raise ValueError("validation")
+        report_adapter_raw = item.get("report_adapter")
+        if report_adapter_raw is not None and (
+            not isinstance(report_adapter_raw, str)
+            or report_adapter_raw.strip() not in SUPPORTED_REPORT_ADAPTERS
+        ):
+            raise ValueError("validation")
         await repo.create_job_contract(
             session,
             organization_id=org_id,
@@ -553,8 +560,8 @@ async def register_execution_environment(
             artifact_manifest=item.get("artifact_manifest")
             if isinstance(item.get("artifact_manifest"), dict)
             else None,
-            report_adapter=item.get("report_adapter")
-            if isinstance(item.get("report_adapter"), str)
+            report_adapter=report_adapter_raw.strip()
+            if isinstance(report_adapter_raw, str)
             else None,
             supports_cancel=bool(supports_cancel),
             contract_version=contract_version,
