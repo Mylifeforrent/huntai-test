@@ -47,8 +47,13 @@ async def sync_check_run_stub(
     evaluation_result: str,
     check_run_ref: dict[str, Any] | None,
     request_hash: str,
+    policy_mode: str = "blocking",
 ) -> dict[str, Any]:
-    conclusion = "success" if evaluation_result == "pass" else "failure"
+    if evaluation_result == "pass":
+        conclusion = "success"
+    else:
+        # report_only records the fail but must not block CI (M2: 仅报告 ⇄ 阻断).
+        conclusion = "failure" if policy_mode == "blocking" else "neutral"
     ref: dict[str, Any] = dict(check_run_ref or {})
     ref["external_id"] = str(evaluation_id)
 

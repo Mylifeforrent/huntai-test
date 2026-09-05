@@ -44,6 +44,7 @@ async def _create_quality_gate_policy(
     project_id: uuid.UUID,
     *,
     min_pass_rate: float = 100.0,
+    mode: str = "report_only",
 ) -> dict[str, object]:
     await login_as(client)
     thresholds = dict(POLICY_THRESHOLDS)
@@ -51,7 +52,12 @@ async def _create_quality_gate_policy(
     response = await client.post(
         "/api/v1/quality-gate-policies",
         headers={"Idempotency-Key": str(uuid.uuid4())},
-        json=_create_body(project_id, thresholds=thresholds),
+        json=_create_body(
+            project_id,
+            mode=mode,
+            confirm_blocking=True if mode == "blocking" else None,
+            thresholds=thresholds,
+        ),
     )
     assert response.status_code == 201, response.text
     return response.json()["data"]
@@ -61,10 +67,14 @@ async def _run_failed_script_case(
     client: AsyncClient,
     db_session: AsyncSession,
     seeded_identity: dict[str, object],
+    *,
+    create_policy: bool = True,
+    policy_mode: str = "report_only",
 ) -> dict[str, object]:
     project_id = seeded_identity["project_id"]
     assert isinstance(project_id, uuid.UUID)
-    await _create_quality_gate_policy(client, project_id, min_pass_rate=100.0)
+    if create_policy:
+        await _create_quality_gate_policy(client, project_id, min_pass_rate=100.0, mode=policy_mode)
     env = await activate_platform_executor_env(client, db_session, seeded_identity)
     case = await create_active_script_case(
         client,
@@ -107,7 +117,8 @@ async def test_ac_058_failed_run_creates_fail_evaluation_and_check_run(
     _ = mock_oidc_token_exchange
     project_id = seeded_identity["project_id"]
     assert isinstance(project_id, uuid.UUID)
-    run = await _run_failed_script_case(client, db_session, seeded_identity)
+    await _create_quality_gate_policy(client, project_id, mode="blocking")
+    run = await _run_failed_script_case(client, db_session, seeded_identity, create_policy=False)
     run_id = str(run["id"])
     assert run.get("gate_evaluation_id") is not None
 
@@ -229,6 +240,9 @@ async def test_ac_061_cancelled_and_no_policy_skip_evaluation(
     no_policy_gate = await client.get(f"/api/v1/test-runs/{no_policy.id}/gate-evaluation")
     assert no_policy_gate.json()["data"]["unevaluated_reason"] == "policy_unmet"
     assert no_policy_gate.json()["data"]["evaluation"] is None
+    # 结果枚举仅 pass / fail / waived；未评估不是结果（AC-057/061 纪律）
+    assert "not_evaluated" not in cancelled_gate.text
+    assert "not_evaluated" not in no_policy_gate.text
 
 
 @pytest.mark.asyncio
@@ -363,7 +377,9 @@ async def test_ac_059_check_run_stub_failure_retries_and_keeps_fail(
         "app.modules.quality_gates.check_run_stub._apply_phase",
         side_effect=flaky_apply_phase,
     ):
-        run = await _run_failed_script_case(client, db_session, seeded_identity)
+        run = await _run_failed_script_case(
+            client, db_session, seeded_identity, policy_mode="blocking"
+        )
 
     gate = await client.get(f"/api/v1/test-runs/{run['id']}/gate-evaluation")
     assert gate.json()["data"]["evaluation"]["result"] == "fail"
@@ -390,6 +406,8 @@ async def test_ac_062_patch_policy_does_not_rewrite_historical_evaluation(
     evaluation = gate_before.json()["data"]["evaluation"]
     evaluation_id = evaluation["id"]
     result_before = evaluation["result"]
+    conclusion_before = evaluation["check_run_ref"]["conclusion"]
+    assert conclusion_before == "neutral"  # report_only fail 不阻断
     policy_id = evaluation["policy_id"]
 
     await login_as(client)
@@ -408,6 +426,16 @@ async def test_ac_062_patch_policy_does_not_rewrite_historical_evaluation(
 
     gate_after = await client.get(f"/api/v1/gate-evaluations/{evaluation_id}")
     assert gate_after.json()["data"]["result"] == result_before
+    assert gate_after.json()["data"]["check_run_ref"]["conclusion"] == conclusion_before
+
+    # 切到 blocking 后的新评估用新模式（阻断生效），历史行仍不被改写
+    run2 = await _run_failed_script_case(client, db_session, seeded_identity, create_policy=False)
+    gate_new = await client.get(f"/api/v1/test-runs/{run2['id']}/gate-evaluation")
+    assert gate_new.status_code == 200
+    new_evaluation = gate_new.json()["data"]["evaluation"]
+    assert new_evaluation is not None
+    assert new_evaluation["result"] == "fail"
+    assert new_evaluation["check_run_ref"]["conclusion"] == "failure"
 
 
 @pytest.mark.asyncio
@@ -520,3 +548,24 @@ async def test_api_162_create_github_connector_no_secrets_in_list(
     assert "credential" not in item
     assert "webhook_secret" not in item
     assert "credential_ref" not in item
+
+
+@pytest.mark.asyncio
+async def test_report_only_fail_records_fail_but_does_not_block(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    run = await _run_failed_script_case(client, db_session, seeded_identity)
+    gate = await client.get(f"/api/v1/test-runs/{run['id']}/gate-evaluation")
+    assert gate.status_code == 200
+    body = gate.json()["data"]
+    assert body["unevaluated_reason"] is None
+    evaluation = body["evaluation"]
+    assert evaluation is not None
+    assert evaluation["result"] == "fail"
+    # 仅报告模式：如实记录 fail，但 Check Run conclusion=neutral，不阻断 CI
+    assert evaluation["check_run_ref"]["conclusion"] == "neutral"
+    assert evaluation["policy_snapshot"]["mode"] == "report_only"

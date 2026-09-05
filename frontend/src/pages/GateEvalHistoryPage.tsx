@@ -7,6 +7,7 @@ import type { ListEnvelope } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
@@ -18,6 +19,7 @@ type GateEvalItem = {
   result: string;
   check_run_ref?: Record<string, unknown> | null;
   waiver_approval_id?: string | null;
+  policy_snapshot?: Record<string, unknown> | null;
 };
 
 export function GateEvalHistoryPage() {
@@ -156,7 +158,22 @@ export function GateEvalHistoryPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={String(item.result ?? "")} />
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={String(item.result ?? "")} />
+                        {(() => {
+                          const snapshot = item.policy_snapshot;
+                          const mode =
+                            snapshot && typeof snapshot === "object"
+                              ? String((snapshot as Record<string, unknown>).mode ?? "")
+                              : "";
+                          if (mode !== "blocking" && mode !== "report_only") return null;
+                          return (
+                            <Badge variant={mode === "blocking" ? "destructive" : "outline"}>
+                              {mode === "blocking" ? "阻断" : "仅报告"}
+                            </Badge>
+                          );
+                        })()}
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs">{String(check.sync_status ?? check.status ?? "—")}</TableCell>
                     <TableCell className="font-mono text-xs">{String(item.waiver_approval_id ?? "—")}</TableCell>

@@ -81,6 +81,7 @@ describe("GateEvalHistoryPage", () => {
                 test_run_id: "run-1",
                 result: "fail",
                 check_run_ref: { sync_status: "completed" },
+                policy_snapshot: { mode: "report_only" },
                 waiver_approval_id: null,
               },
             ],
@@ -111,6 +112,13 @@ describe("GateEvalHistoryPage", () => {
     const container = renderPage();
     await flush();
     expect(container.textContent).toContain("申请豁免");
+  });
+
+  it("renders policy mode badge from policy_snapshot", async () => {
+    const container = renderPage();
+    await flush();
+    expect(container.textContent).toContain("仅报告");
+    expect(container.textContent).not.toContain("阻断");
   });
 
   it("posts gate_waiver preview with confirm true", async () => {

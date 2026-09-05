@@ -83,6 +83,7 @@ async def _evaluate_run(
         evaluation_result=result,
         check_run_ref=None,
         request_hash=request_hash,
+        policy_mode=policy.mode,
     )
     row = GateEvaluation(
         id=evaluation_id,
