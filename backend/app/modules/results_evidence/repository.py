@@ -570,6 +570,82 @@ async def list_evidence_objects_by_ids(
     return list(result.scalars().all())
 
 
+async def get_evidence_object(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    evidence_object_id: uuid.UUID,
+) -> EvidenceObject | None:
+    result = await session.execute(
+        select(EvidenceObject).where(
+            EvidenceObject.organization_id == organization_id,
+            EvidenceObject.id == evidence_object_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_evidence_objects(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    subject_type: str | None = None,
+    subject_id: uuid.UUID | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    cursor_created_at: datetime | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int | None = None,
+) -> list[EvidenceObject]:
+    query = (
+        select(EvidenceObject)
+        .where(EvidenceObject.organization_id == organization_id)
+        .order_by(EvidenceObject.created_at.desc(), EvidenceObject.id.desc())
+    )
+    if subject_type is not None:
+        query = query.where(EvidenceObject.subject_type == subject_type)
+    if subject_id is not None:
+        query = query.where(EvidenceObject.subject_id == subject_id)
+    if created_from is not None:
+        query = query.where(EvidenceObject.created_at >= created_from)
+    if created_to is not None:
+        query = query.where(EvidenceObject.created_at <= created_to)
+    if cursor_created_at is not None and cursor_id is not None:
+        query = query.where(
+            or_(
+                EvidenceObject.created_at < cursor_created_at,
+                and_(
+                    EvidenceObject.created_at == cursor_created_at,
+                    EvidenceObject.id < cursor_id,
+                ),
+            )
+        )
+    if limit is not None:
+        query = query.limit(limit + 1)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_artifact_by_source_receipt(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    source_receipt_id: uuid.UUID,
+    kind: str,
+) -> Artifact | None:
+    result = await session.execute(
+        select(Artifact)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.source_receipt_id == source_receipt_id,
+            Artifact.kind == kind,
+        )
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_latest_jira_evidence_for_subject(
     session: AsyncSession,
     *,
@@ -673,7 +749,7 @@ async def insert_artifact(
     created_at: datetime,
     created_by: uuid.UUID | None,
     case_result_id: uuid.UUID | None,
-    test_run_id: uuid.UUID,
+    test_run_id: uuid.UUID | None,
     kind: str,
     object_key: str,
     checksum: str,
@@ -682,6 +758,7 @@ async def insert_artifact(
     data_classification: str,
     original_filename: str | None,
     artifact_id: uuid.UUID | None = None,
+    source_receipt_id: uuid.UUID | None = None,
 ) -> Artifact:
     row = Artifact(
         id=artifact_id or uuid.uuid4(),
@@ -697,6 +774,7 @@ async def insert_artifact(
         mime_type=mime_type,
         data_classification=data_classification,
         original_filename=original_filename,
+        source_receipt_id=source_receipt_id,
     )
     session.add(row)
     await session.flush()

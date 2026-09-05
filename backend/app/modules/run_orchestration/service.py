@@ -822,6 +822,10 @@ async def get_command_receipt_for_caller(
         "resource_id": str(receipt.resource_id),
         "poll": {
             "path": f"/api/v1/command-receipts/{receipt.id}",
-            "sse_path": f"/api/v1/test-runs/{receipt.resource_id}/events",
+            "sse_path": (
+                f"/api/v1/test-runs/{receipt.resource_id}/events"
+                if receipt.resource_type == "TestRun"
+                else f"/api/v1/command-receipts/{receipt.id}/events"
+            ),
         },
     }

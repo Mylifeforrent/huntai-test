@@ -46,7 +46,7 @@ def serialize_artifact_metadata(row: Artifact) -> dict[str, Any]:
         "mime_type": row.mime_type,
         "data_classification": row.data_classification,
         "original_filename": row.original_filename,
-        "test_run_id": str(row.test_run_id),
+        "test_run_id": str(row.test_run_id) if row.test_run_id else None,
         "case_result_id": str(row.case_result_id) if row.case_result_id else None,
         "scan_status": _scan_status(row),
         "content_access": {
@@ -62,6 +62,10 @@ async def _require_artifact_read(
     *,
     artifact: Artifact,
 ) -> uuid.UUID:
+    if artifact.test_run_id is None:
+        # Artifacts without a run scope (export packages) are only reachable
+        # through their own authorized channel (API-223), not API-220/221.
+        raise ValueError("not_found")
     run = await run_query.get_run_scope(
         session,
         organization_id=ctx.organization.id,

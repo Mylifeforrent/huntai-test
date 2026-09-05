@@ -69,6 +69,40 @@ def _serialize_workbench_run(run: TestRun, *, now: datetime) -> dict[str, Any]:
     return payload
 
 
+class CommandReceiptPointer(TypedDict):
+    id: uuid.UUID
+    command_type: str
+    status: str
+    resource_type: str
+    resource_id: uuid.UUID
+    project_id: uuid.UUID
+    created_by: uuid.UUID | None
+
+
+async def get_command_receipt_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+) -> CommandReceiptPointer | None:
+    receipt = await repo.get_command_receipt(
+        session,
+        organization_id=organization_id,
+        receipt_id=receipt_id,
+    )
+    if receipt is None:
+        return None
+    return {
+        "id": receipt.id,
+        "command_type": receipt.command_type,
+        "status": receipt.status,
+        "resource_type": receipt.resource_type,
+        "resource_id": receipt.resource_id,
+        "project_id": receipt.project_id,
+        "created_by": receipt.created_by,
+    }
+
+
 async def get_run_scope(
     session: AsyncSession,
     *,

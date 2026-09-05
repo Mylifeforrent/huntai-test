@@ -340,6 +340,103 @@ async def api_071_get_command_receipt(
     return {"data": payload}
 
 
+async def _command_receipt_sse_events(
+    *,
+    request: Request,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+) -> Any:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from app.core.db import get_session_factory
+
+    factory = get_session_factory()
+    seq = 0
+    try:
+        while True:
+            if await request.is_disconnected():
+                break
+            async with factory() as session:
+                try:
+                    receipt = await get_command_receipt_for_caller(
+                        session,
+                        organization_id=organization_id,
+                        user_id=user_id,
+                        receipt_id=receipt_id,
+                    )
+                except ValueError:
+                    await session.commit()
+                    break
+                status = receipt["status"]
+                await session.commit()
+            seq += 1
+            now = datetime.now(UTC).isoformat()
+            if status in {"accepted", "running"}:
+                yield {
+                    "event": "progress",
+                    "id": str(seq),
+                    "data": json.dumps(
+                        {
+                            "id": str(seq),
+                            "type": "progress",
+                            "resource_type": "command_receipt",
+                            "resource_id": str(receipt_id),
+                            "hint": status,
+                            "occurred_at": now,
+                        }
+                    ),
+                }
+            else:
+                yield {
+                    "event": "resource_changed",
+                    "id": str(seq),
+                    "data": json.dumps(
+                        {
+                            "id": str(seq),
+                            "type": "resource_changed",
+                            "resource_type": "command_receipt",
+                            "resource_id": str(receipt_id),
+                            "hint": "status_may_have_changed",
+                            "occurred_at": now,
+                        }
+                    ),
+                }
+                break
+            await asyncio.sleep(0.2)
+    except asyncio.CancelledError:
+        return
+
+
+@router.get("/command-receipts/{receipt_id}/events")
+async def api_212_command_receipt_events(
+    request: Request,
+    receipt_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> EventSourceResponse:
+    trace_id = get_trace_id(request)
+    try:
+        await get_command_receipt_for_caller(
+            db,
+            organization_id=ctx.organization.id,
+            user_id=ctx.user.id,
+            receipt_id=receipt_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    await db.commit()
+    return EventSourceResponse(
+        _command_receipt_sse_events(
+            request=request,
+            organization_id=ctx.organization.id,
+            user_id=ctx.user.id,
+            receipt_id=receipt_id,
+        )
+    )
+
+
 async def _test_run_sse_events(
     *,
     request: Request,

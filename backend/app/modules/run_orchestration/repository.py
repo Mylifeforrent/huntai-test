@@ -353,6 +353,29 @@ async def get_command_receipt(
     return result.scalar_one_or_none()
 
 
+async def update_command_receipt_status(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    receipt_id: uuid.UUID,
+    status: str,
+) -> CommandReceipt | None:
+    result = await session.execute(
+        select(CommandReceipt)
+        .where(
+            CommandReceipt.organization_id == organization_id,
+            CommandReceipt.id == receipt_id,
+        )
+        .with_for_update()
+    )
+    receipt = result.scalar_one_or_none()
+    if receipt is None:
+        return None
+    receipt.status = status
+    await session.flush()
+    return receipt
+
+
 async def find_external_ci_run_for_observation(
     session: AsyncSession,
     *,

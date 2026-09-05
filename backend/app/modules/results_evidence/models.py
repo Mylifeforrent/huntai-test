@@ -91,6 +91,7 @@ class Artifact(Base):
     __table_args__ = (
         Index("ix_artifacts_org_object_key", "organization_id", "object_key", unique=True),
         Index("ix_artifacts_org_test_run", "organization_id", "test_run_id"),
+        Index("ix_artifacts_org_source_receipt", "organization_id", "source_receipt_id"),
         {"schema": "results_evidence"},
     )
 
@@ -99,7 +100,7 @@ class Artifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     case_result_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    test_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    test_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     object_key: Mapped[str] = mapped_column(Text, nullable=False)
     checksum: Mapped[str] = mapped_column(Text, nullable=False)
@@ -107,6 +108,7 @@ class Artifact(Base):
     mime_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_classification: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_receipt_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
 
 class EvidenceObject(Base):
