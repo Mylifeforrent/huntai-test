@@ -103,6 +103,34 @@ async def get_command_receipt_pointer(
     }
 
 
+class AgentRunPointer(TypedDict):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str
+    execution_source: str
+
+
+async def get_agent_run_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> AgentRunPointer | None:
+    scope = await repo.get_test_run(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+    )
+    if scope is None:
+        return None
+    return {
+        "id": scope.id,
+        "project_id": scope.project_id,
+        "status": scope.status,
+        "execution_source": scope.execution_source,
+    }
+
+
 async def get_run_scope(
     session: AsyncSession,
     *,

@@ -143,6 +143,50 @@ async def _invoke_playwright_worker(payload: dict[str, Any]) -> int:
         Path(payload_path).unlink(missing_ok=True)
 
 
+async def _invoke_agent_worker(payload: dict[str, Any]) -> int:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as handle:
+        json.dump(payload, handle)
+        payload_path = handle.name
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "app.modules.run_orchestration.agent_worker",
+            payload_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(Path(__file__).resolve().parents[3]),
+        )
+        await proc.communicate()
+        return int(proc.returncode or 0)
+    finally:
+        Path(payload_path).unlink(missing_ok=True)
+
+
+def _validate_agent_manifest(raw: object) -> dict[str, Any] | None:
+    """Run params must declare the agent manifest; no defaults are invented."""
+    if not isinstance(raw, dict):
+        return None
+    tools_raw = raw.get("allowed_tools")
+    if not isinstance(tools_raw, list) or not tools_raw:
+        return None
+    max_steps = raw.get("max_steps")
+    total_timeout = raw.get("total_timeout_seconds")
+    if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps < 1:
+        return None
+    if (
+        not isinstance(total_timeout, (int, float))
+        or isinstance(total_timeout, bool)
+        or total_timeout < 1
+    ):
+        return None
+    return {
+        "allowed_tools": [str(tool) for tool in tools_raw],
+        "max_steps": max_steps,
+        "total_timeout_seconds": total_timeout,
+    }
+
+
 async def _execute_web_case(
     *,
     organization_id: uuid.UUID,
@@ -573,18 +617,54 @@ async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uu
             return
 
         if run.execution_source == "agent":
+            params = run.snapshot.get("params_redacted")
+            params_dict = params if isinstance(params, dict) else {}
+            manifest = _validate_agent_manifest(params_dict.get("agent_manifest"))
+            if manifest is None:
+                await repo.update_test_run_status(
+                    session,
+                    run=run,
+                    new_status="FAILED",
+                    updated_at=now,
+                    result_summary=_fail_summary("invalid_agent_manifest"),
+                )
+                await session.commit()
+                return
+            base_url = str(params_dict.get("TARGET_ENV", "")).strip()
+            case_payloads: list[dict[str, Any]] = []
+            for case in cases:
+                case_payload = dict(case)
+                case_payload["id"] = str(case["id"])
+                if case.get("version_id") is not None:
+                    case_payload["version_id"] = str(case["version_id"])
+                case_payloads.append(case_payload)
+            payload = {
+                "organization_id": str(organization_id),
+                "test_run_id": str(test_run_id),
+                "created_by": str(run.created_by) if run.created_by else None,
+                "cases": case_payloads,
+                "params": params_dict,
+                "manifest": manifest,
+                "base_url": base_url,
+            }
             await repo.update_test_run_status(
                 session,
                 run=run,
-                new_status="VALIDATING",
+                new_status="RUNNING",
                 updated_at=now,
-                result_summary={
-                    "dispatch": "deferred",
-                    "reason": "agent_worker_not_available_M2",
-                    "validated": True,
-                },
+                heartbeat=True,
             )
             await session.commit()
+            await _invoke_agent_worker(payload)
+            await schedule_failure_triage(
+                organization_id=organization_id,
+                test_run_id=test_run_id,
+            )
+            # Gate port skips agent runs (agent_source); kept for uniform teardown.
+            await schedule_gate_evaluation(
+                organization_id=organization_id,
+                test_run_id=test_run_id,
+            )
             return
 
         if env_info["env_type"] != "platform_executor":

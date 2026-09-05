@@ -21,6 +21,7 @@ from app.core.errors import (
     idempotency_conflict,
     not_found,
     precondition_failed,
+    schema_validation_failed,
     token_cannot_approve,
     token_project_forbidden,
     token_revoked,
@@ -36,6 +37,7 @@ from app.modules.run_orchestration.command_port import cancel_external_ci_with_c
 from app.modules.run_orchestration.executor import run_test_run_background
 from app.modules.run_orchestration.service import (
     cancel_test_run,
+    create_script_draft_for_caller,
     get_command_receipt_for_caller,
     get_execution_options_for_caller,
     get_test_run_for_auth,
@@ -108,6 +110,8 @@ def _map_write_error(trace_id: str, exc: ValueError) -> NoReturn:
         raise version_conflict(trace_id) from exc
     if code == "idempotency_conflict":
         raise idempotency_conflict(trace_id) from exc
+    if code == "schema":
+        raise schema_validation_failed(trace_id) from exc
     raise validation_failed(trace_id) from exc
 
 
@@ -314,6 +318,46 @@ async def api_069_execution_options(
         )
     except ValueError as exc:
         _map_read_error(trace_id, exc)
+    return {"data": payload}
+
+
+class ScriptDraftFromRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_run_version: int | None = Field(default=None, ge=1)
+    title: str | None = None
+
+
+@router.post("/test-runs/{test_run_id}/script-drafts")
+async def api_068_create_script_draft(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(ScriptDraftFromRun, raw, trace_id)
+    assert isinstance(body, ScriptDraftFromRun)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await create_script_draft_for_caller(
+            db,
+            ctx,
+            test_run_id=test_run_id,
+            expected_run_version=body.expected_run_version,
+            title=body.title,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
     return {"data": payload}
 
 

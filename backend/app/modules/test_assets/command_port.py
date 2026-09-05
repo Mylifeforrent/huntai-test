@@ -9,7 +9,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.test_assets import repository as repo
-from app.modules.test_assets.models import TestCaseVersion
+from app.modules.test_assets.models import TestCase, TestCaseVersion
+from app.modules.test_assets.service import _build_snapshot
 
 HEAL_PATCH_WHITELIST = frozenset(
     {"assertions", "steps", "locator_health", "title", "priority", "tags"}
@@ -98,3 +99,79 @@ async def apply_heal_after_approval(
     case.aggregate_version += 1
     await session.flush()
     return current_version.id
+
+
+async def create_script_draft_from_trajectory(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    created_by: uuid.UUID | None,
+    title: str,
+    steps: list[dict[str, Any]],
+    assertions: list[dict[str, Any]],
+    source_test_run_id: uuid.UUID,
+) -> dict[str, Any]:
+    """API-068: trajectory → new TestCase DRAFT; the source run is untouched."""
+    now = datetime.now(UTC)
+    case_id = uuid.uuid4()
+    version_id = uuid.uuid4()
+    tags = ["ai-generated"]
+    snapshot = _build_snapshot(
+        title=title,
+        priority="P2",
+        tags=tags,
+        case_type="api",
+        execution_mode="script",
+        drafts=[{"steps": steps, "assertions": assertions}],
+        script=None,
+    )
+    case = TestCase(
+        id=case_id,
+        organization_id=organization_id,
+        created_at=now,
+        updated_at=now,
+        created_by=created_by,
+        aggregate_version=1,
+        project_id=project_id,
+        case_type="api",
+        execution_mode="script",
+        title=title,
+        priority="P2",
+        tags=tags,
+        lifecycle_status="DRAFT",
+        validity="valid",
+        invalid_reason=None,
+        invalidated_at=None,
+        script_ref=None,
+        job_binding=None,
+        jira_story_key=None,
+        current_version_id=version_id,
+    )
+    version = TestCaseVersion(
+        id=version_id,
+        organization_id=organization_id,
+        created_at=now,
+        created_by=created_by,
+        test_case_id=case_id,
+        version_seq=1,
+        snapshot=snapshot,
+        data_classification="Internal",
+    )
+    session.add(case)
+    await session.flush()
+    session.add(version)
+    await session.flush()
+    return {
+        "id": str(case_id),
+        "project_id": str(project_id),
+        "case_type": "api",
+        "execution_mode": "script",
+        "title": title,
+        "priority": "P2",
+        "tags": tags,
+        "lifecycle_status": "DRAFT",
+        "validity": "valid",
+        "version": 1,
+        "source_test_run_id": str(source_test_run_id),
+    }

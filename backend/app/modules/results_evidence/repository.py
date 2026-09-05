@@ -626,6 +626,26 @@ async def list_evidence_objects(
     return list(result.scalars().all())
 
 
+async def get_artifact_by_run_kind(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    kind: str,
+) -> Artifact | None:
+    result = await session.execute(
+        select(Artifact)
+        .where(
+            Artifact.organization_id == organization_id,
+            Artifact.test_run_id == test_run_id,
+            Artifact.kind == kind,
+        )
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_artifact_by_source_receipt(
     session: AsyncSession,
     *,

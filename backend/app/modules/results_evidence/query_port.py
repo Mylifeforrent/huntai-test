@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -51,6 +52,31 @@ async def get_case_result_pointer(
         "test_run_id": row.test_run_id,
         "test_case_id": row.test_case_id,
     }
+
+
+async def get_agent_trajectory_record(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    """Full stored trajectory record for API-068 (caller handles RBAC)."""
+    from app.modules.results_evidence import object_store
+
+    artifact = await repo.get_artifact_by_run_kind(
+        session,
+        organization_id=organization_id,
+        test_run_id=test_run_id,
+        kind="agent_trajectory",
+    )
+    if artifact is None or not object_store.file_exists(artifact.object_key):
+        return None
+    raw = object_store.read_bytes(artifact.object_key)
+    try:
+        stored = json.loads(raw.decode("utf-8"))
+    except ValueError, UnicodeDecodeError:
+        return None
+    return stored if isinstance(stored, dict) else None
 
 
 async def get_evidence_classifications(

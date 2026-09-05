@@ -19,7 +19,7 @@ from app.core.errors import (
 )
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
-from app.modules.results_evidence import evidence_service
+from app.modules.results_evidence import evidence_service, trajectory_service
 from app.modules.results_evidence import repository as repo
 from app.modules.results_evidence.artifacts_service import (
     get_artifact_metadata_for_caller,
@@ -255,6 +255,25 @@ def _map_evidence_error(trace_id: str, exc: ValueError) -> NoReturn:
     if code in {"validation", "invalid_cursor"}:
         raise validation_failed(trace_id) from exc
     raise validation_failed(trace_id) from exc
+
+
+@router.get("/test-runs/{test_run_id}/trajectory")
+async def api_067_get_trajectory(
+    request: Request,
+    test_run_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await trajectory_service.get_trajectory_for_caller(
+            db,
+            ctx,
+            test_run_id=test_run_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}
 
 
 @router.get("/evidence-objects")
