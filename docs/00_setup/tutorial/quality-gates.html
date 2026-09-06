@@ -61,6 +61,17 @@ table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}t
 # 同一管线内实测判定：actual &lt;= threshold 才 pass；任一超阈 → fail
 # 压测 run 无指标 → perf_report_missing（fail-close，不默认通过）</code></pre>
 
+<h2>6. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/quality_gates/</code>，前端相对 <code>frontend/src/pages/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1 策略 CRUD + confirm_blocking（API-140…143）</td><td>service.py：<code>create_policy_for_caller</code> / <code>patch_policy_for_caller</code>（切 blocking 必须显式 confirm）、<code>_validate_thresholds</code>、模式常量 <code>VALID_MODES</code></td><td>QualityGatePolicyPage.tsx（P11：api.post/patch API-142/143）</td></tr>
+<tr><td>§2 评估管线（run 终态触发）</td><td>command_port.py：<code>schedule_gate_evaluation</code>（调用方：run_orchestration 的 executor / external_ci_executor / perf_worker）→ <code>_evaluate_run</code>（agent_source / partial_report / policy_unmet / perf_report_missing 各 fail-close 分支）；evaluation_rules.py：<code>compute_pass_rate</code> / <code>build_threshold_details</code> / <code>is_partial_report</code></td><td>—（评估纯后端）</td></tr>
+<tr><td>§2/§3 Check Run 三段式 + 仅报告⇄阻断</td><td>check_run_stub.py：<code>sync_check_run_stub</code>（report_only → conclusion=neutral；blocking 且 fail → failure）；评估行经 run_orchestration command_port <code>cas_attach_gate_evaluation</code> CAS 挂到 TestRun</td><td>GateEvalHistoryPage.tsx（P12：api.get API-144/145）；TestRunDetailPage.tsx 门禁投影 API-146</td></tr>
+<tr><td>§4 豁免（gate_waiver）</td><td>command_port.py：<code>attach_waiver</code>（审批批准后挂 waiver_approval_id，result 不改写）；审批发起走 approval_policy</td><td>ApprovalCenterPage.tsx（gate_waiver 审批卡）</td></tr>
+<tr><td>§2 查询 / 投影（API-144…146）</td><td>evaluation_service.py：<code>list_evaluations_for_caller</code> / <code>get_evaluation_for_caller</code> / <code>get_run_gate_evaluation_projection</code> / <code>_unevaluated_reason_for_run</code></td><td>GateEvalHistoryPage.tsx</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_144_146_gate_evaluations.py -q</code>，重点读 <code>test_ac_062_patch_policy_does_not_rewrite_historical_evaluation</code>。</div>
 
 <div class="pager"><a href="approval-policy.html">← 上一篇</a><a href="integration-hub.html">下一篇：integration_hub →</a></div>

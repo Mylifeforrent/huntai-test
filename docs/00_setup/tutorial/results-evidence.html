@@ -66,6 +66,19 @@ assert verify_checksum(key, checksum)                  # 下载前必验，不�
 
 <h2>6. 审计检索（P24）</h2>
 <p><code>AuditEvent</code> append-only，API-024 全字段检索（actor / request_hash / approval / resource / external_request_id…）。副作用动作的关键节点都会写审计——「每个副作用可归因」是产品原则。</p>
+<h2>7. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/results_evidence/</code>，前端相对 <code>frontend/src/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1 结果三件套</td><td>router.py：<code>api_064_list_case_results</code> / <code>api_065_get_case_result</code> / <code>api_066_list_step_runs</code>；case_results_service.py：同名 <code>*_for_caller</code></td><td>pages/TestRunDetailPage.tsx（api.get API-064/065/066）</td></tr>
+<tr><td>§2 产物元数据与代理下载</td><td>router.py：<code>api_220_get_artifact</code> / <code>api_221_get_artifact_content</code>；artifacts_service.py：<code>read_artifact_content_for_caller</code>（先 <code>verify_checksum</code> 再流式返回）+ RBAC/分级门禁 <code>_require_artifact_read</code></td><td>components/domain/EvidenceViewer.tsx（blob 展示，禁止直链/预签名）</td></tr>
+<tr><td>§3 证据检索（API-026/027）</td><td>router.py：<code>api_026_list_evidence_objects</code> / <code>api_027_get_evidence_object</code>；evidence_service.py 查询实现</td><td>pages/EvidenceCenterPage.tsx（P20，api.get API-026）</td></tr>
+<tr><td>§3 导出受理→打包→下载（API-028/223，AC-096）</td><td>evidence_service.py：<code>create_export_for_caller</code>（202 受理，BackgroundTasks 派发）→ <code>run_export_packaging</code>（后台：Restricted 整单拒绝 → <code>_build_package_bytes</code> / <code>_evidence_markdown</code> → object_store 落盘 → <code>insert_artifact</code> → receipt 置 succeeded）；下载 <code>read_export_content_for_caller</code>（router <code>api_223_get_export_package_content</code>）</td><td>EvidenceCenterPage.tsx：api.post API-028 → EventSource API-212（约 L107–130）→ 完成后 api.getBlob API-223；receipt_id 只当回执不当令牌</td></tr>
+<tr><td>§4 失败聚类 / A2 / A3</td><td>a2_service.py：<code>run_a2_triage</code>（AI 降级走 <code>rule_cluster_failed_cases</code>）；a3_service.py：<code>run_a3_for_locator_cluster</code>；cluster_service.py：<code>list_failure_clusters_for_caller</code> / <code>correct_failure_cluster_for_caller</code>（API-132）/ <code>list_similar_failure_clusters_for_caller</code>（API-133）</td><td>TestRunDetailPage.tsx 聚类视图；components/domain/ClusterCard.tsx</td></tr>
+<tr><td>§5 对象存储（本地卷，M0/M3 无 MinIO）</td><td>object_store.py：<code>generate_object_key</code> / <code>resolve_path</code>（防穿越）/ <code>write_bytes</code> / <code>read_bytes</code> / <code>verify_checksum</code> / <code>sanitize_filename</code></td><td>—（前端只见 object_key，永不拼 URL）</td></tr>
+<tr><td>§6 审计检索（P24）</td><td>router.py：<code>api_024_list_audit_events</code> / <code>api_025_get_audit_event</code>；service.py：<code>list_audit_events_for_caller</code>；append-only 表 audit_models.py <code>AuditEvent</code></td><td>pages/AuditSearchPage.tsx（api.get API-024/025，筛选进 URL）</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_220_221_artifacts.py -q</code> 与 <code>tests/test_api_026_027_028_223_evidence.py -q</code>，观察「跨租户 404 / Restricted 403 / 受理≠完成」三条断言。</div>
 
 <div class="pager"><a href="run-orchestration.html">← 上一篇</a><a href="approval-policy.html">下一篇：approval_policy →</a></div>

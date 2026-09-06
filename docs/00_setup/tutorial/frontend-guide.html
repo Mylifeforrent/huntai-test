@@ -70,6 +70,18 @@ const blob = await api.getBlob("API-223", `/api/v1/export-packages/${id}/content
 </ul>
 
 <h2>5. 新手任务</h2>
+<h2>6. 代码入口速查（文件 · 方法）</h2>
+<p>路径相对 <code>frontend/src/</code>。</p>
+<table>
+<tr><th>功能块</th><th>入口</th></tr>
+<tr><td>路由表（P01–P25）</td><td>App.tsx 的 <code>&lt;Routes&gt;</code>（外层 SessionGate → AppLayout，react-router v6；禁止 loader/action）</td></tr>
+<tr><td>会话与登录</td><td>hooks/useSession.ts <code>useSession()</code>（API-005，401 自动 <code>startOidcLogin()</code>）；api/authFlow.ts：<code>startOidcLogin()</code> / <code>handleAuthApiError()</code> / <code>validateReturnPath()</code>；components/layout/SessionGate.tsx、SsoRecoveryPanel.tsx；api/session.ts <code>logoutSession()</code></td></tr>
+<tr><td>统一 API 调用</td><td>api/client.ts：<code>apiRequest</code> 与 <code>api.get|post|patch|put|delete|getBlob</code>（自动幂等键 + 401 处理）；api/apiConfig.ts <code>newIdempotencyKey()</code>；api/errors.ts <code>toApiError()</code> / <code>classifyHttpFailure()</code>；api/catalog.ts <code>PAGE_APIS</code>（页面→API 静态清单）；api/types.ts 全部 DTO</td></tr>
+<tr><td>领域组件（components/domain/）</td><td>RunProgressBar.tsx（<code>RunProgressBar</code> 十态进度条）、EvidenceViewer.tsx（<code>EvidenceViewer</code>）、ApprovalCard.tsx（<code>approvalCardFromRequest()</code>）、ClusterCard.tsx、PageState.tsx（QueryGate/PageHeader/EmptyState 七态基线）、AiDegradeBanner.tsx</td></tr>
+<tr><td>SSE（只作 hint）</td><td>pages/TestRunDetailPage.tsx（约 L57–82）与 pages/EvidenceCenterPage.tsx（约 L107–130）内 <code>new EventSource(...)</code>：<code>resource_changed</code> → <code>queryClient.invalidateQueries</code> 触发权威 GET 刷新；无全局 SSE hook / store</td></tr>
+<tr><td>URL 状态 / 本地 UI store</td><td>hooks/useUrlState.ts <code>useUrlState()</code>（筛选/分页进 URL）；stores/uiStore.ts（仅 sidebarCollapsed）</td></tr>
+</table>
+
 <div class="tip">读 <code>pages/EvidenceCenterPage.tsx</code>（列表+导出全链路的最小完整样例）→ 跑 <code>npm run test -- --run src/pages/EvidenceCenterPage.test.tsx</code> → 仿照它给一个缺测试的页面补一条交互测试。</div>
 
 <div class="pager"><a href="ai-governance.html">← 上一篇</a><a href="dev-workflow.html">下一篇：开发工作流 →</a></div>

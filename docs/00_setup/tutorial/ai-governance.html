@@ -69,6 +69,17 @@ GET  /api/v1/copilot-sessions/{id}                  # 193 仅所有者，message
 
 <h2>4. ModelRoute（模型路由）</h2>
 <p>按 task_type 配置 provider/model/白名单/成本上限/fallback（API-196–198，P22）；工厂据此选模型名并计量成本到 AIInvocationLog（喂给 P21 成本看板与 OrgQuota）。</p>
+<h2>5. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/ai_governance/</code>，前端相对 <code>frontend/src/pages/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1 LLM 工厂（唯一出口）</td><td>llm_factory.py：<code>invoke(session, InvokeInput) -&gt; InvokeOutput</code>（kill switch <code>_is_kill_switch_active</code> → 配额 <code>quota_query.token_budget_exhausted</code> → Restricted 拒绝 → 写 AIInvocationLog）；拒绝落库 <code>_log_refused</code>、模型解析 <code>_resolve_model_name</code></td><td>—（业务模块唯一调用方）</td></tr>
+<tr><td>§2 A1 生成（API-180…182 + SSE 211）</td><td>a1_service.py：<code>create_generation_for_caller</code>（202 受理）/ <code>run_generation_background</code> / <code>_reject_non_json_spec</code>；router.py <code>api_211_generation_events</code>（生成器 <code>_generation_sse_events</code>，含 heartbeat）</td><td>GenerationReviewPage.tsx（P07；SSE 端点已登记，页面暂用 refetchInterval 轮询）</td></tr>
+<tr><td>§3 Copilot A6（API-190…193）</td><td>copilot_router.py（独立挂载）；copilot_service.py：<code>post_message_for_caller</code>（kill switch → 配额 → <code>_uuid_in_scope</code> 跨域引用剥离 → <code>llm_factory.invoke</code> → 白名单工具 <code>_query_test_assets</code>）、<code>create_session_for_caller</code>、<code>_requested_tool</code></td><td>AssistantPage.tsx（P18）</td></tr>
+<tr><td>§4 ModelRoute / 成本看板 / 调用日志（API-196…198、183、184/185）</td><td>service.py：<code>put_model_route_for_caller</code> / <code>connection_test_for_caller</code> / <code>get_cost_dashboard_for_caller</code> / <code>list_invocation_logs_for_caller</code> / <code>seed_default_model_routes</code> / <code>is_restricted_outbound_violation</code></td><td>ModelRoutePage.tsx（P22）；AiCostPage.tsx（P21，api.get API-183）</td></tr>
+<tr><td>§1 kill switch 开关（API-199）</td><td>归属 identity_tenancy/service.py <code>tighten_capability_controls</code>（见 <a href="identity-tenancy.html">identity_tenancy</a> §5）；本模块只读检查</td><td>AiSwitchPage.tsx（P23，api.post API-199）</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_190_193_copilot.py -q</code>，并检查 <code>AIInvocationLog.copilot_session_id</code> 确实落了行。</div>
 
 <div class="pager"><a href="release-orchestration.html">← 上一篇</a><a href="frontend-guide.html">下一篇：frontend →</a></div>

@@ -78,6 +78,19 @@ cd frontend &amp;&amp; npm run lint &amp;&amp; npx tsc --noEmit &amp;&amp; npm r
 # 测试套件真实执行 alembic upgrade head —— 迁移错误会在 pytest 里暴露
 uv run alembic upgrade head</code></pre>
 
+<h2>7. 代码入口速查（全局设施）</h2>
+<p>后端路径相对 <code>backend/app/</code>。各业务模块的入口在各篇教程末尾的速查表。</p>
+<table>
+<tr><th>关注点</th><th>入口</th></tr>
+<tr><td>应用装配</td><td>main.py <code>create_app()</code>（注册 TraceIdMiddleware、异常处理器、api_router；lifespan 退出 <code>dispose_engine</code>）；api/router.py <code>api_router</code> 聚合 12 个模块 router（均 <code>prefix="/api/v1"</code>）</td></tr>
+<tr><td>错误信封与错误码（§3）</td><td>core/errors.py：<code>error_envelope(...)</code> 与约 25 个错误码工厂（<code>unauthenticated</code> / <code>forbidden</code> / <code>policy_deny</code> / <code>hmac_failed</code> / <code>four_eyes_violation</code> / <code>quota_exceeded</code> / <code>version_conflict</code> / <code>idempotency_conflict</code>…）；<code>register_exception_handlers(app)</code></td></tr>
+<tr><td>trace_id / 日志</td><td>core/middleware.py <code>TraceIdMiddleware.dispatch</code>；core/logging.py <code>configure_logging</code> / <code>log_with_trace</code></td></tr>
+<tr><td>数据库与配置</td><td>core/db.py：<code>get_engine</code> / <code>get_session_factory</code> / <code>get_db_session</code>（FastAPI 依赖）；core/config.py <code>get_settings()</code>（pydantic-settings，只从 .env 注入）</td></tr>
+<tr><td>每请求鉴权依赖</td><td>api/deps.py：<code>require_session</code> / <code>require_api_token(required_scope=...)</code> / <code>require_session_or_token_read</code>（Policy Gate 在 modules/approval_policy/policy_gate.py）</td></tr>
+<tr><td>跨模块协作</td><td>各模块 command_port.py / query_port.py（返回 dict，禁止 import 他模块 ORM）——规范见第 5 节切片工作流第 4 步</td></tr>
+<tr><td>测试</td><td>backend/tests/（pytest + httpx AsyncClient）；frontend/src/pages/*.test.tsx（Vitest + Testing Library）</td></tr>
+</table>
+
 <div class="tip"><b>恭喜</b>：读到这里你已经覆盖了入职所需的全部骨架。接下来最好的学习方式是挑一个 <code>tests/</code> 目录里的测试文件，顺着断言去读对应的实现。</div>
 
 <div class="pager"><a href="frontend-guide.html">← 上一篇</a><a href="index.html">回到总览 →</a></div>
