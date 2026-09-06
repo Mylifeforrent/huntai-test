@@ -107,7 +107,7 @@ M2 与 M3 **可并行**（PRD B.10）。Release v1 依赖本里程碑的 Jira �
 |---|---|---|---|---|---|
 | S-M3-01 | US-08 | FR-11 | 包装 Locust/k6；白名单+高危审批+并发预算+kill | P16 | 不自研引擎 | **完成** |
 | S-M3-02 | US-18 | FR-12 | p95/错误率与功能域同一套门禁对象 | P11、P12 | 依赖 M2 门禁模型 | **完成** |
-| S-M3-03 | US-09 | FR-15 | Release Task + Readiness + 审批后调 Release | P17、P06、P25 | 依赖 M2 Jira |
+| S-M3-03 | US-09 | FR-15 | Release Task + Readiness + 审批后调 Release | P17、P06、P25 | 依赖 M2 Jira | **完成** |
 | S-M3-04 | US-10 | FR-16 | Copilot 只读技能 + 会话 + 越权阻断 | P18、P23 | 可提前到 M2（只依赖 M0 日志）；API-194/195 属 M4 |
 
 ### 4.5 M4（愿景，默认不排进当前 Stage 11）
