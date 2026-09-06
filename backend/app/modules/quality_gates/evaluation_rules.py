@@ -41,9 +41,16 @@ def build_threshold_details(
     thresholds: dict[str, Any],
     pass_rate: float,
     pass_detail: dict[str, Any],
+    perf_metrics: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str]:
+    """FR-12: perf runs evaluate p95/error_rate in the same pipeline.
+
+    Functional runs leave p95/error_rate as not_measured (no data source);
+    perf runs must carry metrics — the caller fail-closes otherwise.
+    """
     min_pass_rate = float(thresholds["min_pass_rate"])
     pass_ok = pass_rate >= min_pass_rate
+    all_ok = pass_ok
     details: dict[str, Any] = {
         "min_pass_rate": {
             "threshold": min_pass_rate,
@@ -60,5 +67,28 @@ def build_threshold_details(
             "not_measured": True,
         },
     }
-    result = "pass" if pass_ok else "fail"
+    if perf_metrics is not None:
+        p95_raw = perf_metrics.get("p95_ms")
+        error_raw = perf_metrics.get("error_rate")
+        if isinstance(p95_raw, (int, float)):
+            p95_threshold = float(thresholds["max_p95_ms"])
+            p95_ok = float(p95_raw) <= p95_threshold
+            details["max_p95_ms"] = {
+                "threshold": p95_threshold,
+                "actual": float(p95_raw),
+                "passed": p95_ok,
+                "not_measured": False,
+            }
+            all_ok = all_ok and p95_ok
+        if isinstance(error_raw, (int, float)):
+            error_threshold = float(thresholds["max_error_rate"])
+            error_ok = float(error_raw) <= error_threshold
+            details["max_error_rate"] = {
+                "threshold": error_threshold,
+                "actual": float(error_raw),
+                "passed": error_ok,
+                "not_measured": False,
+            }
+            all_ok = all_ok and error_ok
+    result = "pass" if all_ok else "fail"
     return details, result

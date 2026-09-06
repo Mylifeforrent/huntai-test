@@ -83,12 +83,14 @@ def _requests_from_case(case: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 LOCUSTFILE_TEMPLATE = """
-from locust import HttpUser, SequentialTaskSet, constant
+from locust import HttpUser, constant, task
 
 REQUESTS = {requests!r}
 
 
-class ScenarioTasks(SequentialTaskSet):
+class PerfUser(HttpUser):
+    wait_time = constant({wait_seconds!r})
+
     @task
     def run_steps(self):
         for request in REQUESTS:
@@ -96,13 +98,7 @@ class ScenarioTasks(SequentialTaskSet):
                 request["method"],
                 request["path"],
                 name=request["path"],
-                catch_response=True,
             )
-
-
-class PerfUser(HttpUser):
-    wait_time = constant({wait_seconds!r})
-    tasks = [ScenarioTasks]
 """
 
 
@@ -200,6 +196,7 @@ async def _finalize(
             result_summary={
                 "cases": 1,
                 "outcome": run_outcome.lower(),
+                "execution_source": "perf",
                 "perf": report.get("metrics", {}),
                 "clustering": {
                     "generation_status": "skipped",
@@ -228,33 +225,74 @@ async def _finalize(
     )
 
 
-def _p95_from_stats(payload: dict[str, Any]) -> float | None:
-    stats_raw = payload.get("stats")
-    stats: list[Any] = stats_raw if isinstance(stats_raw, list) else []
-    for entry in stats:
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("name", "")) != "Aggregated":
-            continue
-        for key in ("response_time_percentile_0.95", "p95", "ninety_ninth_percentile"):
-            value = entry.get(key)
-            if isinstance(value, (int, float)):
-                return float(value)
-    return None
+def _iter_stat_entries(payload: Any) -> list[dict[str, Any]]:
+    """--json-file yields a list; the live web API yields {"stats": [...]}."""
+    if isinstance(payload, list):
+        return [entry for entry in payload if isinstance(entry, dict)]
+    if isinstance(payload, dict) and isinstance(payload.get("stats"), list):
+        return [entry for entry in payload["stats"] if isinstance(entry, dict)]
+    return []
 
 
-def _error_rate_from_stats(payload: dict[str, Any]) -> float | None:
-    stats_raw = payload.get("stats")
-    stats: list[Any] = stats_raw if isinstance(stats_raw, list) else []
-    for entry in stats:
-        if not isinstance(entry, dict):
+def _aggregate_entry(payload: Any) -> dict[str, Any] | None:
+    entries = _iter_stat_entries(payload)
+    for entry in entries:
+        if str(entry.get("name", "")) == "Aggregated":
+            return entry
+    if not entries:
+        return None
+    # The final --json list has no Aggregated row: synthesize one.
+    total_requests = sum(int(entry.get("num_requests") or 0) for entry in entries)
+    total_failures = sum(int(entry.get("num_failures") or 0) for entry in entries)
+    histogram: dict[str, int] = {}
+    for entry in entries:
+        response_times = entry.get("response_times")
+        if not isinstance(response_times, dict):
             continue
-        if str(entry.get("name", "")) != "Aggregated":
+        for bucket, count in response_times.items():
+            histogram[str(bucket)] = histogram.get(str(bucket), 0) + int(count)
+    return {
+        "num_requests": total_requests,
+        "num_failures": total_failures,
+        "response_times": histogram,
+    }
+
+
+def _p95_ms(entry: dict[str, Any]) -> float | None:
+    percentile = entry.get("response_time_percentile_0.95")
+    if isinstance(percentile, (int, float)):
+        return float(percentile)
+    # Approximate p95 from the response-time histogram buckets.
+    histogram = entry.get("response_times")
+    if not isinstance(histogram, dict) or not histogram:
+        return None
+    buckets: list[tuple[int, int]] = []
+    for bucket, count in histogram.items():
+        try:
+            buckets.append((int(float(bucket)), int(count)))
+        except (TypeError, ValueError):  # fmt: skip
             continue
-        ratio = entry.get("fail_ratio")
-        if isinstance(ratio, (int, float)):
-            return float(ratio) * 100.0
-    return None
+    buckets.sort()
+    total = sum(count for _, count in buckets)
+    if total <= 0:
+        return None
+    cumulative = 0
+    for bucket_ms, count in buckets:
+        cumulative += count
+        if cumulative >= total * 0.95:
+            return float(bucket_ms)
+    return float(buckets[-1][0])
+
+
+def _error_rate_pct(entry: dict[str, Any]) -> float | None:
+    num_requests = int(entry.get("num_requests") or 0)
+    if num_requests <= 0:
+        return None
+    fail_ratio = entry.get("fail_ratio")
+    if isinstance(fail_ratio, (int, float)) and "fail_ratio" in entry:
+        return float(fail_ratio) * 100.0
+    num_failures = int(entry.get("num_failures") or 0)
+    return num_failures / num_requests * 100.0
 
 
 async def run_perf_worker(payload: dict[str, Any]) -> None:
@@ -310,7 +348,6 @@ async def run_perf_worker(payload: dict[str, Any]) -> None:
     with tempfile_directory() as workdir:
         locustfile = _write_locustfile(workdir, requests, wait_seconds)
         port = 18000 + (int(test_run_id.int) % 20000)
-        json_path = workdir / "stats.json"
         csv_prefix = str(workdir / "stats")
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -334,15 +371,15 @@ async def run_perf_worker(payload: dict[str, Any]) -> None:
             "--host",
             base_url,
             "--only-summary",
-            "--json-file",
-            str(json_path),
+            "--json",
+            "--skip-log",
             "--csv",
             csv_prefix,
             "--loglevel",
             "ERROR",
             cwd=str(workdir),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
 
         killed_by_kill_switch = False
@@ -387,47 +424,50 @@ async def run_perf_worker(payload: dict[str, Any]) -> None:
                     )
                 except httpx.HTTPError, ValueError:
                     stats_payload = {}
-                if abort_p95 is not None:
-                    p95 = _p95_from_stats(stats_payload)
-                    if p95 is not None and p95 > float(abort_p95):
-                        aborted_on_breach = f"max_p95_ms={abort_p95}"
-                        break
-                if abort_error_rate is not None:
-                    error_rate = _error_rate_from_stats(stats_payload)
-                    if error_rate is not None and error_rate > float(abort_error_rate):
-                        aborted_on_breach = f"max_error_rate={abort_error_rate}"
-                        break
+                if abort_p95 is not None or abort_error_rate is not None:
+                    live_entry = _aggregate_entry(stats_payload)
+                    if live_entry is not None:
+                        if abort_p95 is not None:
+                            p95 = _p95_ms(live_entry)
+                            if p95 is not None and p95 > float(abort_p95):
+                                aborted_on_breach = f"max_p95_ms={abort_p95}"
+                                break
+                        if abort_error_rate is not None:
+                            error_rate = _error_rate_pct(live_entry)
+                            if error_rate is not None and error_rate > float(abort_error_rate):
+                                aborted_on_breach = f"max_error_rate={abort_error_rate}"
+                                break
                 # Breach/kill must land within the 60s AC-052 window; POLL_SECONDS
                 # bounds detection latency well below it.
 
+        stdout_bytes = b""
         if proc.returncode is None:
             proc.terminate()
             try:
-                await asyncio.wait_for(proc.communicate(), timeout=10.0)
+                stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
             except TimeoutError:
                 proc.kill()
-                await proc.communicate()
+                stdout_bytes, _ = await proc.communicate()
         else:
-            await proc.communicate()
+            stdout_bytes, _ = await proc.communicate()
 
-        if json_path.exists():
+        final_stats: Any = []
+        raw_output = stdout_bytes.decode("utf-8", errors="replace").strip()
+        if raw_output:
             try:
-                final_stats = json.loads(json_path.read_text(encoding="utf-8"))
+                final_stats = json.loads(raw_output)
             except ValueError:
-                final_stats = {}
-        else:
-            final_stats = {}
-        if not isinstance(final_stats, dict):
-            final_stats = {}
-        p95 = _p95_from_stats(final_stats)
-        error_rate = _error_rate_from_stats(final_stats)
+                final_stats = []
+        final_entry = _aggregate_entry(final_stats)
+        p95 = _p95_ms(final_entry) if final_entry is not None else None
+        error_rate = _error_rate_pct(final_entry) if final_entry is not None else None
         saturated = bool(cpu_samples) and (sum(cpu_samples) / len(cpu_samples)) > 80.0
         report: dict[str, Any] = {
             "metrics": {
                 "p95_ms": p95,
                 "error_rate": error_rate,
-                "total_requests": final_stats.get("total_requests"),
-                "total_failures": final_stats.get("total_failures"),
+                "total_requests": final_entry.get("num_requests") if final_entry else None,
+                "total_failures": final_entry.get("num_failures") if final_entry else None,
                 "users": scenario_users,
                 "run_time_seconds": run_time_seconds,
             },

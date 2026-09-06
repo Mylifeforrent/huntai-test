@@ -101,6 +101,20 @@ async def _unevaluated_reason_for_run(
     summary = run["result_summary"] if isinstance(run["result_summary"], dict) else None
     if is_partial_report(result_summary=summary, case_results=case_results):
         return "partial_report"
+    perf_raw = summary.get("perf") if isinstance(summary, dict) else None
+    perf_run = (
+        isinstance(summary, dict)
+        and summary.get("execution_source") == "perf"
+        or isinstance(perf_raw, dict)
+    )
+    if perf_run and not (
+        isinstance(perf_raw, dict)
+        and (
+            isinstance(perf_raw.get("p95_ms"), (int, float))
+            or isinstance(perf_raw.get("error_rate"), (int, float))
+        )
+    ):
+        return "perf_report_missing"
     return "not_terminal"
 
 

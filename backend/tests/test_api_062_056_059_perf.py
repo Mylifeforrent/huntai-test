@@ -16,6 +16,7 @@ from app.modules.quota_governance.models import OrgQuota
 from app.modules.run_orchestration.executor import run_test_run_background
 from tests.helpers import login_as
 from tests.test_api_120_action_previews import _seed_admin_peer
+from tests.test_api_144_146_gate_evaluations import _create_quality_gate_policy
 from tests.test_run_helpers import activate_platform_executor_env
 
 WHITELIST = ["http://127.0.0.1:9"]
@@ -518,3 +519,90 @@ async def test_kill_switch_stops_running_load(
     # AC-052: 全部施压进程在 60s 内停止
     assert elapsed < 60.0, f"kill switch took {elapsed}s"
     _ = timedelta
+
+
+@pytest.mark.asyncio
+async def test_perf_gate_evaluates_p95_and_error_rate(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    # blocking 策略：max_error_rate=1%（全部请求失败必然超阈）
+    await _create_quality_gate_policy(client, project_id, mode="blocking")
+    env = await activate_platform_executor_env(client, db_session, seeded_identity)
+    case = await create_active_performance_case(client, project_id=project_id)
+    start = await start_perf_run(client, project_id=project_id, env=env, case=case)
+    assert start.status_code == 200, start.text
+    run_id = str(start.json()["data"]["id"])
+    await _poll_run_status(client, run_id, wanted={"SUCCEEDED"})
+
+    # detached worker：门禁评估在终态后异步落库，轮询对账
+    evaluation = None
+    for _ in range(50):
+        gate = await client.get(f"/api/v1/test-runs/{run_id}/gate-evaluation")
+        assert gate.status_code == 200
+        body = gate.json()["data"]
+        if body["evaluation"] is not None:
+            evaluation = body["evaluation"]
+            break
+        await asyncio.sleep(0.2)
+    assert evaluation is not None, "gate evaluation did not appear"
+    assert evaluation["result"] == "fail"  # 100% 失败请求 > 1% 阈值
+    details = evaluation["threshold_details"]
+    assert details["max_error_rate"]["not_measured"] is False
+    assert details["max_error_rate"]["actual"] == 100.0
+    assert details["max_error_rate"]["passed"] is False
+
+    # AC-056: 压测 run 的 GateEvaluation 出现在门禁历史检索
+    listing = await client.get("/api/v1/gate-evaluations", params={"project_id": str(project_id)})
+    assert listing.status_code == 200
+    assert any(item["test_run_id"] == run_id for item in listing.json()["data"]["items"])
+
+
+@pytest.mark.asyncio
+async def test_perf_run_without_metrics_is_unevaluated(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    org_id = seeded_identity["org_id"]
+    project_id = seeded_identity["project_id"]
+    user_id = seeded_identity["user_id"]
+    assert isinstance(org_id, uuid.UUID)
+    assert isinstance(project_id, uuid.UUID)
+    assert isinstance(user_id, uuid.UUID)
+    from app.modules.run_orchestration.models import TestRun
+
+    await _create_quality_gate_policy(client, project_id)
+    now = datetime.now(UTC)
+    run = TestRun(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        created_at=now,
+        updated_at=now,
+        created_by=user_id,
+        aggregate_version=1,
+        project_id=project_id,
+        env_id=uuid.uuid4(),
+        execution_source="script",
+        trigger_type="manual",
+        idempotency_key=str(uuid.uuid4()),
+        status="SUCCEEDED",
+        snapshot={"case_ids": [str(uuid.uuid4())]},
+        result_summary={"execution_source": "perf"},  # 无 perf 指标
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await login_as(client)
+    response = await client.get(f"/api/v1/test-runs/{run.id}/gate-evaluation")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["evaluation"] is None
+    assert body["unevaluated_reason"] == "perf_report_missing"
+    assert "not_evaluated" not in response.text

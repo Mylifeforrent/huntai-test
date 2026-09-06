@@ -748,7 +748,10 @@ async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uu
                     run=run,
                     new_status="FAILED",
                     updated_at=now,
-                    result_summary=_fail_summary("perf_quota_exhausted"),
+                    result_summary={
+                        **_fail_summary("perf_quota_exhausted"),
+                        "execution_source": "perf",
+                    },
                 )
                 await session.commit()
                 return
@@ -782,7 +785,10 @@ async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uu
                             run=run,
                             new_status="FAILED",
                             updated_at=now,
-                            result_summary=_fail_summary("no_eligible_approver"),
+                            result_summary={
+                                **_fail_summary("no_eligible_approver"),
+                                "execution_source": "perf",
+                            },
                         )
                         await quota_command.release_perf_concurrency(
                             session, organization_id=organization_id
