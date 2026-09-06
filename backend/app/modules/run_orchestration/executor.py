@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sys
 import tempfile
@@ -15,6 +16,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.modules.execution_registry import query_port as execution_query
 from app.modules.quality_gates.command_port import schedule_gate_evaluation
@@ -161,6 +163,96 @@ async def _invoke_agent_worker(payload: dict[str, Any]) -> int:
         return int(proc.returncode or 0)
     finally:
         Path(payload_path).unlink(missing_ok=True)
+
+
+def _perf_scenario(params: dict[str, Any]) -> dict[str, Any]:
+    scenario = params.get("perf_scenario")
+    return scenario if isinstance(scenario, dict) else {}
+
+
+def _perf_approval_hash(scenario: dict[str, Any]) -> str:
+    canonical = json.dumps(scenario, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _perf_requires_approval(scenario: dict[str, Any], cases: list[dict[str, Any]]) -> bool:
+    declared = scenario.get("side_effect_level")
+    if isinstance(declared, str) and declared in {"L2", "L3", "L4"}:
+        return True
+    for case in cases:
+        steps_raw = case.get("steps")
+        steps: list[Any] = steps_raw if isinstance(steps_raw, list) else []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            step_params_raw = step.get("params")
+            step_params: dict[str, Any] = (
+                step_params_raw if isinstance(step_params_raw, dict) else {}
+            )
+            level = step_params.get("side_effect_level") if isinstance(step_params, dict) else None
+            if isinstance(level, str) and level in {"L2", "L3", "L4"}:
+                return True
+    return False
+
+
+def _perf_already_approved(run: Any) -> bool:
+    summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+    perf_raw = summary.get("perf")
+    perf: dict[str, Any] = perf_raw if isinstance(perf_raw, dict) else {}
+    return perf.get("approval_id") is not None
+
+
+async def _promote_queued_perf_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+) -> None:
+    queued = await repo.find_queued_perf_run_for_scenario(
+        session,
+        organization_id=organization_id,
+        test_case_id=test_case_id,
+    )
+    if queued is None:
+        return
+    await repo.clear_perf_queued_flag(session, run=queued)
+    await session.commit()
+    # Single dispatch owner: the terminating run's task promotes exactly one
+    # queued sibling; that sibling promotes the next when it terminates.
+    await run_test_run_background(
+        organization_id=organization_id,
+        test_run_id=queued.id,
+    )
+
+
+def _spawn_perf_worker_detached(payload: dict[str, Any]) -> None:
+    """Fire-and-forget: the worker owns finalization, gate and queue promotion.
+
+    Awaiting the worker here would block the accept request until the whole
+    load run (and any approval wait) finishes — perf runs are long-lived, so
+    the subprocess outlives the dispatch task (no in-process DB task).
+    """
+    payload_path = Path(tempfile.gettempdir()) / f"perf-worker-{uuid.uuid4()}.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    async def _spawn() -> None:
+        await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "app.modules.run_orchestration.perf_worker",
+            str(payload_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=str(Path(__file__).resolve().parents[3]),
+            start_new_session=True,
+        )
+
+    task = asyncio.ensure_future(_spawn())
+    _spawn_tasks.add(task)
+    task.add_done_callback(_spawn_tasks.discard)
+
+
+_spawn_tasks: set[asyncio.Future[Any]] = set()
 
 
 def _validate_agent_manifest(raw: object) -> dict[str, Any] | None:
@@ -614,6 +706,122 @@ async def run_test_run_background(*, organization_id: uuid.UUID, test_run_id: uu
                 contracts=contracts,
                 env_info=env_info_fresh,
             )
+            return
+
+        if (
+            run.execution_source == "script"
+            and cases
+            and all(case.get("case_type") == "performance" for case in cases)
+        ):
+            perf_params = run.snapshot.get("params_redacted")
+            params_dict = perf_params if isinstance(perf_params, dict) else {}
+            scenario = _perf_scenario(params_dict)
+            scenario_case_id = uuid.UUID(str(cases[0]["id"]))
+            sibling = await repo.find_active_perf_run_for_scenario(
+                session,
+                organization_id=organization_id,
+                test_case_id=scenario_case_id,
+                exclude_run_id=run.id,
+            )
+            if sibling is not None:
+                # AC-054 scenario mutex: stay PENDING (queued), never parallel load.
+                await repo.update_test_run_status(
+                    session,
+                    run=run,
+                    new_status="PENDING",
+                    updated_at=now,
+                    result_summary={"queued": True, "reason": "scenario_mutex"},
+                )
+                snapshot = dict(run.snapshot)
+                snapshot["perf_queued"] = True
+                run.snapshot = snapshot
+                await session.commit()
+                return
+            from app.modules.quota_governance import command_port as quota_command
+
+            reserved = await quota_command.reserve_perf_concurrency(
+                session, organization_id=organization_id
+            )
+            if not reserved:
+                await repo.update_test_run_status(
+                    session,
+                    run=run,
+                    new_status="FAILED",
+                    updated_at=now,
+                    result_summary=_fail_summary("perf_quota_exhausted"),
+                )
+                await session.commit()
+                return
+
+            from app.modules.approval_policy import command_port as approval_command
+
+            high_risk = _perf_requires_approval(scenario, cases)
+            already_approved = _perf_already_approved(run)
+            if high_risk and not already_approved:
+                approval_hash = _perf_approval_hash(scenario)
+                pending = await approval_command.find_pending_perf_high_risk(
+                    session,
+                    organization_id=organization_id,
+                    test_run_id=run.id,
+                )
+                if pending is None:
+                    try:
+                        _, approval_hash = await approval_command.create_perf_high_risk_approval(
+                            session,
+                            get_settings(),
+                            organization_id=organization_id,
+                            created_by=run.created_by,
+                            project_id=run.project_id,
+                            test_run_id=run.id,
+                            scenario=scenario,
+                            approval_hash=approval_hash,
+                        )
+                    except ValueError:
+                        await repo.update_test_run_status(
+                            session,
+                            run=run,
+                            new_status="FAILED",
+                            updated_at=now,
+                            result_summary=_fail_summary("no_eligible_approver"),
+                        )
+                        await quota_command.release_perf_concurrency(
+                            session, organization_id=organization_id
+                        )
+                        await session.commit()
+                        return
+                await repo.set_perf_waiting_approval(
+                    session, run=run, approval_hash=approval_hash, updated_at=now
+                )
+                await session.commit()
+
+            if not (high_risk and not already_approved):
+                await repo.update_test_run_status(
+                    session,
+                    run=run,
+                    new_status="RUNNING",
+                    updated_at=now,
+                    heartbeat=True,
+                )
+                await session.commit()
+
+            case_payloads_perf: list[dict[str, Any]] = []
+            for case in cases:
+                case_payload = dict(case)
+                case_payload["id"] = str(case["id"])
+                if case.get("version_id") is not None:
+                    case_payload["version_id"] = str(case["version_id"])
+                case_payloads_perf.append(case_payload)
+            payload = {
+                "organization_id": str(organization_id),
+                "test_run_id": str(test_run_id),
+                "created_by": str(run.created_by) if run.created_by else None,
+                "cases": case_payloads_perf,
+                "params": params_dict,
+                "base_url": str(params_dict.get("TARGET_ENV", "")).strip(),
+            }
+            # Fire-and-forget: finalization, quota release, gate and queue
+            # promotion are owned by the worker subprocess.
+            _spawn_perf_worker_detached(payload)
             return
 
         if run.execution_source == "agent":

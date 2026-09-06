@@ -219,3 +219,35 @@ async def cancel_external_ci_with_collect(
         organization_id=organization_id,
         test_run_id=test_run_id,
     )
+
+
+async def cas_resume_perf_after_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    param_hash: str,
+) -> str:
+    """Resume a WAITING_APPROVAL perf run after perf_high_risk approval."""
+    return await repo.resume_perf_after_approval(
+        session,
+        organization_id=organization_id,
+        run_id=test_run_id,
+        approval_id=approval_id,
+        param_hash=param_hash,
+    )
+
+
+async def cas_cancel_perf_from_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> bool:
+    """Cancel a perf run waiting for a perf_high_risk approval (reject/expire)."""
+    return await repo.cancel_perf_from_approval(
+        session,
+        organization_id=organization_id,
+        run_id=test_run_id,
+    )

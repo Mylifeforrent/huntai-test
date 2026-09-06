@@ -20,6 +20,7 @@ from app.core.errors import (
     forbidden,
     idempotency_conflict,
     not_found,
+    policy_undeclared,
     precondition_failed,
     schema_validation_failed,
     token_cannot_approve,
@@ -112,6 +113,8 @@ def _map_write_error(trace_id: str, exc: ValueError) -> NoReturn:
         raise idempotency_conflict(trace_id) from exc
     if code == "schema":
         raise schema_validation_failed(trace_id) from exc
+    if code == "perf_policy":
+        raise policy_undeclared(trace_id, "perf target not in whitelist") from exc
     raise validation_failed(trace_id) from exc
 
 

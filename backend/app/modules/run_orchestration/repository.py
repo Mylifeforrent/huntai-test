@@ -2,7 +2,7 @@ import base64
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import and_, or_, select
@@ -374,6 +374,154 @@ async def update_command_receipt_status(
     receipt.status = status
     await session.flush()
     return receipt
+
+
+def _snapshot_json(run: TestRun) -> dict[str, Any]:
+    return run.snapshot if isinstance(run.snapshot, dict) else {}
+
+
+async def find_active_perf_run_for_scenario(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+    exclude_run_id: uuid.UUID,
+) -> TestRun | None:
+    """Scenario mutex: any non-terminal run containing the scenario case."""
+    result = await session.execute(
+        select(TestRun)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.status.notin_(tuple(TERMINAL_STATUSES)),
+            TestRun.id != exclude_run_id,
+            TestRun.snapshot["case_ids"].as_string().contains(f'"{test_case_id}"'),
+        )
+        .order_by(TestRun.created_at.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def find_queued_perf_run_for_scenario(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_case_id: uuid.UUID,
+) -> TestRun | None:
+    result = await session.execute(
+        select(TestRun)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.status == "PENDING",
+            TestRun.snapshot["perf_queued"].as_boolean().is_(True),
+            TestRun.snapshot["case_ids"].as_string().contains(f'"{test_case_id}"'),
+        )
+        .order_by(TestRun.created_at.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def set_perf_waiting_approval(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+    approval_hash: str,
+    updated_at: datetime,
+) -> TestRun:
+    run.status = "WAITING_APPROVAL"
+    run.updated_at = updated_at
+    run.aggregate_version += 1
+    summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+    perf_raw = summary.get("perf")
+    perf: dict[str, Any] = perf_raw if isinstance(perf_raw, dict) else {}
+    perf["approval_hash"] = approval_hash
+    perf["awaiting_approval"] = True
+    summary["perf"] = perf
+    run.result_summary = summary
+    await session.flush()
+    return run
+
+
+async def resume_perf_after_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    run_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    param_hash: str,
+) -> str:
+    result = await session.execute(
+        select(TestRun)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.id == run_id,
+        )
+        .with_for_update()
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        return "not_found"
+    summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+    perf_raw = summary.get("perf")
+    perf: dict[str, Any] = perf_raw if isinstance(perf_raw, dict) else {}
+    if run.status != "WAITING_APPROVAL" or perf.get("approval_hash") != param_hash:
+        return "hash_mismatch"
+    run.status = "RUNNING"
+    run.updated_at = datetime.now(UTC)
+    run.aggregate_version += 1
+    perf["approval_id"] = str(approval_id)
+    perf["awaiting_approval"] = False
+    summary["perf"] = perf
+    run.result_summary = summary
+    await session.flush()
+    return "ok"
+
+
+async def cancel_perf_from_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        select(TestRun)
+        .where(
+            TestRun.organization_id == organization_id,
+            TestRun.id == run_id,
+        )
+        .with_for_update()
+    )
+    run = result.scalar_one_or_none()
+    if run is None or run.status != "WAITING_APPROVAL":
+        return False
+    run.status = "CANCELLED"
+    run.updated_at = datetime.now(UTC)
+    run.aggregate_version += 1
+    summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+    perf_raw = summary.get("perf")
+    perf: dict[str, Any] = perf_raw if isinstance(perf_raw, dict) else {}
+    perf["awaiting_approval"] = False
+    perf["cancelled_reason"] = "approval_not_granted"
+    summary["perf"] = perf
+    run.result_summary = summary
+    await session.flush()
+    return True
+
+
+async def clear_perf_queued_flag(
+    session: AsyncSession,
+    *,
+    run: TestRun,
+) -> None:
+    snapshot = _snapshot_json(run)
+    snapshot.pop("perf_queued", None)
+    run.snapshot = snapshot
+    summary = run.result_summary if isinstance(run.result_summary, dict) else {}
+    summary["queued"] = False
+    run.result_summary = summary
+    run.aggregate_version += 1
+    await session.flush()
 
 
 async def find_external_ci_run_for_observation(

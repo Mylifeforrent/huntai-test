@@ -872,6 +872,14 @@ async def _lazy_expire_if_needed(
         approval.updated_at = now
         approval.aggregate_version += 1
         await session.flush()
+        if approval.action_type == "perf_high_risk" and approval.target_object_type == "TestRun":
+            from app.modules.run_orchestration import command_port as run_command
+
+            await run_command.cas_cancel_perf_from_approval(
+                session,
+                organization_id=approval.organization_id,
+                test_run_id=approval.target_object_id,
+            )
 
 
 async def _can_view_approval(
@@ -1186,6 +1194,31 @@ async def submit_approval_decision(
     approval.updated_at = now
     approval.aggregate_version += 1
     await session.flush()
+
+    if approval.action_type == "perf_high_risk" and approval.target_object_type == "TestRun":
+        from app.modules.run_orchestration import command_port as run_command
+
+        target_run_id = approval.target_object_id
+        if decision == "approve":
+            outcome = await run_command.cas_resume_perf_after_approval(
+                session,
+                organization_id=org_id,
+                test_run_id=target_run_id,
+                approval_id=approval.id,
+                param_hash=approval.param_hash,
+            )
+            approval.execution_result = "ok" if outcome == "ok" else "failed"
+        else:
+            cancelled = await run_command.cas_cancel_perf_from_approval(
+                session,
+                organization_id=org_id,
+                test_run_id=target_run_id,
+            )
+            approval.execution_result = "ok" if cancelled else "failed"
+        approval.status = "EXECUTED"
+        approval.updated_at = now
+        approval.aggregate_version += 1
+        await session.flush()
 
     if decision == "approve" and approval.action_type == "kill_switch_restore":
         target = approval.action_payload.get("target")
