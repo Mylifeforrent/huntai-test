@@ -15,6 +15,25 @@ def _connector_ready(connector: Any) -> bool:
     return connector.type == "jira" and connector.outbound_write_enabled and has_credential
 
 
+async def get_connector_pointer_by_type(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    connector_type: str,
+) -> dict[str, Any] | None:
+    rows = await repo.list_connectors(
+        session,
+        organization_id=organization_id,
+        connector_type=connector_type,
+        cursor_created_at=None,
+        cursor_id=None,
+        limit=50,
+    )
+    for row in rows:
+        return {"id": row.id, "type": row.type, "name": row.name}
+    return None
+
+
 async def get_ci_connector(
     session: AsyncSession,
     *,

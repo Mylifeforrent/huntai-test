@@ -1195,6 +1195,41 @@ async def submit_approval_decision(
     approval.aggregate_version += 1
     await session.flush()
 
+    if (
+        decision == "approve"
+        and approval.action_type == "release_push"
+        and approval.target_object_type == "release_task"
+    ):
+        from app.modules.release_orchestration import command_port as release_command
+
+        prepare_result = await release_command.prepare_release_task_after_approval(
+            session,
+            organization_id=org_id,
+            release_task_id=approval.target_object_id,
+            approval_id=approval.id,
+            param_hash=approval.param_hash,
+            actor_user_id=caller_id,
+            request_hash=request_hash or "",
+        )
+        approval.execution_result = "ok" if prepare_result == "ok" else "failed"
+        approval.status = "EXECUTED"
+        approval.updated_at = now
+        approval.aggregate_version += 1
+        await session.flush()
+
+    if (
+        decision == "reject"
+        and approval.action_type == "release_push"
+        and approval.target_object_type == "release_task"
+    ):
+        from app.modules.release_orchestration import command_port as release_command
+
+        await release_command.cancel_release_task_from_approval(
+            session,
+            organization_id=org_id,
+            release_task_id=approval.target_object_id,
+        )
+
     if approval.action_type == "perf_high_risk" and approval.target_object_type == "TestRun":
         from app.modules.run_orchestration import command_port as run_command
 

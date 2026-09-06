@@ -11,6 +11,39 @@ from app.modules.quality_gates.service import serialize_detail as serialize_poli
 from app.modules.run_orchestration import query_port as run_query
 
 
+async def get_latest_gate_evaluation_pointer(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    from app.modules.run_orchestration import query_port as run_query
+
+    run_ids = await run_query.list_run_ids_for_project(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
+    if not run_ids:
+        return None
+    rows = await repo.list_gate_evaluations(
+        session,
+        organization_id=organization_id,
+        test_run_ids=run_ids,
+        test_run_id=None,
+        result_filter=None,
+        created_from=None,
+        created_to=None,
+        cursor_created_at=None,
+        cursor_id=None,
+        limit=1,
+    )
+    if not rows:
+        return None
+    latest = rows[0]
+    return {"id": latest.id, "result": latest.result, "test_run_id": latest.test_run_id}
+
+
 async def get_policy_for_project(
     session: AsyncSession,
     *,
