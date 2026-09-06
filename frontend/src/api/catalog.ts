@@ -127,6 +127,8 @@ export const PAGE_APIS = {
   ],
   P16: [
     { id: "API-056", method: "GET", path: "/api/v1/perf-baselines", summary: "性能基线" },
+    { id: "API-057", method: "POST", path: "/api/v1/perf-baselines", summary: "创建基线" },
+    { id: "API-062", method: "POST", path: "/api/v1/test-runs", summary: "发起压测（统一 TestRun）" },
     { id: "API-199", method: "POST", path: "/api/v1/organizations/current/capability-controls/tighten", summary: "kill switch 关停" },
   ],
   P17: [
