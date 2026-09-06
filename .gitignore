@@ -38,3 +38,5 @@ build/
 logs/
 tmp/
 temp/
+# 本地运行时制品卷（object_store 本地卷）
+backend/artifacts/

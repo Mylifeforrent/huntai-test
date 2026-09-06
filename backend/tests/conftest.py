@@ -70,6 +70,10 @@ def pytest_sessionfinish(session: object, exitstatus: int) -> None:
     """Re-seed mock IdP user so pytest TRUNCATE does not brick local login."""
     _ = session
     _ = exitstatus
+    if os.environ.get("HUNTAI_LIVE") == "1":
+        # Live mode skipped _truncate_tables (which disposes the engine);
+        # dispose here so the re-seed below does not reuse a dead loop.
+        asyncio.run(dispose_engine())
     seed_path = Path(__file__).resolve().parents[1] / "scripts" / "seed_local_identity.py"
     spec = importlib.util.spec_from_file_location("seed_local_identity", seed_path)
     if spec is None or spec.loader is None:
@@ -98,6 +102,11 @@ def _run_migrations() -> Generator[None]:
 
 @pytest.fixture(autouse=True)
 async def _truncate_tables() -> AsyncGenerator[None]:
+    if os.environ.get("HUNTAI_LIVE") == "1":
+        # Live smoke suite drives a real running stack with seeded demo data;
+        # never wipe it.
+        yield
+        return
     engine = get_engine()
     tables = [
         "ai_governance.a1_generations",
