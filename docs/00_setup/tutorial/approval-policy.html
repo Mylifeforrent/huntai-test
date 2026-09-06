@@ -72,6 +72,17 @@ if decision == "approve" and approval.action_type == "jira_write":
     reauth_required=False)
 # → GateEvaluation(gate=ALLOW, side_effect_level="L1")
 # 未声明 → DENY(undeclared)；L2 → REQUIRE_APPROVAL；L3/L4 → REQUIRE_APPROVAL/REQUIRE_REAUTH</code></pre>
+<h2>6. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/approval_policy/</code>，前端相对 <code>frontend/src/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1 Policy Gate（纯函数）</td><td>policy_gate.py：<code>evaluate_policy_gate(...)</code> / <code>resolve_side_effect_level(action_type, payload)</code>；调用方如 execution_registry/service.py 注册环境、agent 工具路由</td><td>—（裁决纯后端）</td></tr>
+<tr><td>§2 审批决策（API-112/113，含四眼）</td><td>service.py：<code>submit_approval_decision</code>（owner/admin 校验 + expected_version CAS + param_hash 重算；<code>caller_id == approval.initiator_id</code> → four_eyes）；<code>resubmit_approval_request</code>；懒过期 <code>_lazy_expire_if_needed</code></td><td>pages/ApprovalCenterPage.tsx（P10：api.post API-112/113）</td></tr>
+<tr><td>§2/§4 动作预览与九要素卡片（API-120/121）</td><td>service.py：<code>create_action_preview</code>（幂等冲突检查）、<code>compute_param_hash</code>、<code>build_card_payload</code> / <code>build_preview_payload</code>、<code>_validate_heal_apply_preview</code> / <code>_validate_jira_write_preview</code> / <code>_validate_gate_waiver_preview</code></td><td>components/domain/ApprovalCard.tsx（<code>approvalCardFromRequest()</code>，只渲染不裁决）；ApprovalCenterPage.tsx 发起 API-120</td></tr>
+<tr><td>§2 审批列表 / 详情（API-110/111）</td><td>service.py：<code>list_approval_requests_for_caller</code>（可见性过滤 <code>_build_visibility_filter</code>）/ <code>get_approval_request_for_caller</code></td><td>ApprovalCenterPage.tsx（api.get API-110）</td></tr>
+<tr><td>§3 执行钩子（跨模块 command_port）</td><td>本模块 command_port.py：<code>create_env_register_approval</code> / <code>create_perf_high_risk_approval</code> / <code>find_pending_perf_high_risk</code>；被调的各域入口：test_assets <code>apply_heal_after_approval</code>、release_orchestration <code>prepare_release_task_after_approval</code>、integration_hub <code>execute_jira_write_after_approval</code>、quality_gates <code>attach_waiver</code></td><td>—</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_policy_gate.py tests/test_api_120_action_previews.py -q</code>，给 <code>evaluate_policy_gate</code> 手算三个输入验证理解。</div>
 
 <div class="pager"><a href="results-evidence.html">← 上一篇</a><a href="quality-gates.html">下一篇：quality_gates →</a></div>

@@ -50,6 +50,15 @@ exhausted = await quota_query.token_budget_exhausted(session, organization_id=..
 <tr><td>「这个月 token 花完了」</td><td>OrgQuota 预算（经济约束）</td></tr>
 <tr><td>「出事故了立刻停掉 Copilot/压测」</td><td>API-199 tighten（安全约束，L1 即时）</td></tr>
 </table>
+<h2>4. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/quota_governance/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1/§2 配额查询（API-017/018）</td><td>router.py：<code>api_017_org_quota_current</code> / <code>api_018_project_quota_view</code>；service.py：<code>get_current_quota_for_caller</code> / <code>compute_token_remaining</code> / <code>seed_default_org_quota</code> / <code>serialize_org_quota</code></td><td>ProjectOverviewPage.tsx / WorkbenchPage.tsx（余量提示，只展示不裁决）</td></tr>
+<tr><td>§2 token 预算检查（LLM 工厂调用）</td><td>query_port.py：<code>token_budget_exhausted</code> / <code>get_current_quota</code>；调用方 modules/ai_governance/llm_factory.py <code>invoke</code></td><td>—</td></tr>
+<tr><td>§2 压测并发占用 / 释放</td><td>command_port.py：<code>reserve_perf_concurrency</code>（行锁，不足返回 False）/ <code>release_perf_concurrency</code>（幂等）/ <code>get_perf_concurrency_projection</code>；调用方 run_orchestration executor 与 perf_worker</td><td>—</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_017_018_183_199_quota_kill_switch.py -q</code>，观察配额耗尽后的 429 与 kill switch 后的拒绝路径。</div>
 
 <div class="pager"><a href="integration-hub.html">← 上一篇</a><a href="release-orchestration.html">下一篇：release_orchestration →</a></div>

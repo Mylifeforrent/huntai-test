@@ -58,6 +58,17 @@ PENDING_CONFIRM / FAILED_RETRYABLE ──API-154──▶ CANCELLED（迟到 REA
 
 <h2>5. READY 由观察驱动</h2>
 <p>prepare 只把任务推进到 SUBMITTED 并登记 <code>release_item_refs</code>；<b>READY 只能来自 API-090 HMAC webhook 观察</b>（release 连接器分派到 <code>apply_release_observation</code>）。观察链保证「先验签、去重、落观察，再经命令推进领域状态」。</p>
+<h2>6. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/release_orchestration/</code>，前端相对 <code>frontend/src/pages/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§2 创建任务 + A5 草稿（API-152）</td><td>service.py：<code>create_release_task_for_caller</code> → <code>_build_a5_draft</code>（经 modules/ai_governance/llm_factory.py <code>invoke</code>，能力 A5）→ <code>advance_draft_to_pending_confirm</code></td><td>ReleaseTaskPage.tsx（P17：api.post API-152）</td></tr>
+<tr><td>§2 列表 / 详情 / 就绪度（API-150/151/155）</td><td>service.py：<code>build_readiness_projection</code>（jira_scope / gate_evaluation / notes_draft 三项聚合，后端评估）</td><td>ReleaseTaskPage.tsx（api.get API-150/155）</td></tr>
+<tr><td>§3 审批后 prepare（幂等，AC-067）</td><td>command_port.py：<code>prepare_release_task_after_approval</code>（被 approval_policy 决策钩子调用）/ <code>cancel_release_task_from_approval</code> → service.py <code>prepare_after_approval</code> / <code>_prepare_item</code> → <code>_release_connector_create_item</code>（stub，RI-xxx）；prepare_key 幂等在 service.py</td><td>—（审批在 P10 触发）</td></tr>
+<tr><td>§5 webhook 观察 → READY</td><td>service.py：<code>apply_release_observation</code>（SUBMITTED→READY；CANCELLED 迟到只记 divergence）；入口 modules/integration_hub/service.py <code>process_inbound_webhook</code> 分派</td><td>ReleaseTaskPage.tsx（GET 对账；SSE 不当命令）</td></tr>
+<tr><td>§2 重试 / 取消（API-153/154）</td><td>service.py：<code>retry_release_task_for_caller</code>（202 + 回执）/ <code>prepare_after_retry</code> / <code>cancel_release_task_for_caller</code></td><td>ReleaseTaskPage.tsx（api.post API-153，自动幂等键）</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_150_155_release.py -q</code>，重点读重试幂等测试（stub 调用计数 == 2，item ref 恒 1 行）。</div>
 
 <div class="pager"><a href="quota-governance.html">← 上一篇</a><a href="ai-governance.html">下一篇：ai_governance →</a></div>

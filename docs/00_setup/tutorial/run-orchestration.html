@@ -80,7 +80,21 @@ GET /api/v1/test-runs/{run_id}/events              # SSE 进度（只读 hint，
 <tr><td>压力机自监控</td><td>psutil 采 CPU；施压机饱和与「目标慢」分开判定，写 perf_report</td></tr>
 </table>
 
-<h2>6. 新手任务</h2>
+<h2>6. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/run_orchestration/</code>，前端相对 <code>frontend/src/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1 受理（API-062，幂等）</td><td>router.py：<code>api_062_080_start_test_run</code> → service.py <code>_start_test_run_core</code>（幂等 + 校验 + 建 Run）→ 路由层 <code>_queue_run_if_new</code> BackgroundTasks 派发；ApiToken 双入口 <code>start_test_run_api_token</code></td><td>pages/ExecutionLaunchPage.tsx（P08：api.get API-069 选项 → api.post API-062）</td></tr>
+<tr><td>§1 状态机推进（调度 Owner）</td><td>executor.py：<code>run_test_run_background</code>（主循环）→ repository.py <code>update_test_run_status</code>（CAS）；心跳参数 <code>heartbeat=True</code>；僵尸回收 service.py <code>reclaim_stale_active_runs</code>；停止收敛 executor.py <code>complete_stopping_run</code> / <code>complete_stopping_runs</code></td><td>pages/TestRunDetailPage.tsx（P09：GET API-061 对账）；components/domain/RunProgressBar.tsx（十态进度条）</td></tr>
+<tr><td>§2 script·api 路径</td><td>executor.py <code>_execute_script_run</code> → http_runner.py：<code>run_case_http</code> / <code>execute_request_step</code> / <code>evaluate_assertion</code></td><td>同上（结果表）</td></tr>
+<tr><td>§2 script·web / agent 路径</td><td>executor.py：<code>_execute_web_case</code>、<code>_invoke_playwright_worker</code> / <code>_invoke_agent_worker</code>（asyncio.create_subprocess_exec）；worker 侧 playwright_worker.py <code>run_worker</code>、agent_worker.py <code>run_agent_worker</code></td><td>pages/AgentTaskDetailPage.tsx（P14，轨迹 api.get API-067）</td></tr>
+<tr><td>§2 external_ci 路径</td><td>external_ci_executor.py：<code>execute_external_ci_run</code> / <code>collect_reports_for_run</code> / <code>collect_junit_for_run</code> / <code>resume_external_ci_run</code>；报告适配 report_adapters.py</td><td>TestRunListPage.tsx / TestRunDetailPage.tsx</td></tr>
+<tr><td>§2/§5 performance 路径</td><td>executor.py：<code>_promote_queued_perf_run</code>（审批后晋升）/ <code>_perf_requires_approval</code> / <code>_spawn_perf_worker_detached</code>；perf_worker.py <code>run_perf_worker</code>（Locust 包装）；并发预算经 quota_governance command_port</td><td>pages/PerformancePage.tsx（P16）</td></tr>
+<tr><td>§4 回执与 SSE</td><td>router.py：<code>api_071_get_command_receipt</code>、<code>api_210_test_run_events</code> / <code>api_212_command_receipt_events</code>（生成器 <code>_test_run_sse_events</code> / <code>_command_receipt_sse_events</code>）；repository.py <code>create_command_receipt</code> / <code>update_command_receipt_status</code></td><td>TestRunDetailPage.tsx 内 <code>new EventSource("/api/v1/test-runs/{id}/events")</code>（约 L57–82）；EvidenceCenterPage.tsx 订阅 API-212</td></tr>
+<tr><td>§4 变量解析 / Job 契约</td><td>variable_resolver.py：<code>validate_and_resolve_snapshot</code> / <code>build_bindings</code> / <code>resolve_value</code>；job_schema_validator.py、ci_settings.py</td><td>ExecutionLaunchPage.tsx 提示性校验（权威在后端）</td></tr>
+</table>
+
+<h2>7. 新手任务</h2>
 <div class="tip">读 <code>executor.py::run_test_run_background</code> 的分叉结构 → 跑 <code>uv run pytest tests/test_api_060_063_test_runs.py -q</code> → 观察 STOPPING/stop_signal_at 的消费路径（<code>complete_stopping_run</code>）。</div>
 
 <div class="pager"><a href="test-assets.html">← 上一篇</a><a href="results-evidence.html">下一篇：results_evidence →</a></div>

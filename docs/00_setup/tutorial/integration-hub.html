@@ -61,6 +61,16 @@ POST /api/v1/approval-requests/{id}/decisions  {decision: "approve"}
 
 <h2>4. 纪律速记</h2>
 <div class="warn"><b>前端永远不直连外部系统</b>；Jira/PR/日志/DOM 内容一律视为不可信输入；秘密只以 credential_ref / 单向哈希形态存在。</div>
+<h2>5. 代码入口速查（文件 · 方法）</h2>
+<p>后端路径相对 <code>backend/app/modules/integration_hub/</code>，前端相对 <code>frontend/src/pages/</code>。</p>
+<table>
+<tr><th>功能块</th><th>后端入口</th><th>前端入口</th></tr>
+<tr><td>§1 连接器 CRUD / 凭证绑定（API-160…164、106、167）</td><td>router.py：<code>api_160_list_connectors</code> / <code>api_162_create_connector</code> / <code>api_163_patch_connector</code> / <code>api_106_bind_credential_ref</code> / <code>api_167_put_ci_trigger_bindings</code>；service.py：<code>bind_credential_ref_for_caller</code>、<code>resolve_env_ref</code>（env: 引用解析）、<code>put_ci_trigger_bindings_for_caller</code>；合法类型 <code>VALID_CONNECTOR_TYPES</code> 在 repository.py</td><td>IntegrationPage.tsx（P03）；AdminIntegrationPage.tsx（P25）</td></tr>
+<tr><td>§2 入站 Webhook（API-090）</td><td>router.py <code>api_090_inbound_webhook</code> → service.py：<code>process_inbound_webhook</code>（归属 / <code>derive_observation_key</code> 去重 / 落观察 / 分派）、<code>verify_github_hmac</code>（HMAC-SHA256，失败仍写审计 <code>inbound_webhook.hmac_failed</code>）；分派到 run_command.apply_ci_observation / release_command.apply_release_observation</td><td>—（外部系统调用，无页面）</td></tr>
+<tr><td>§3 Jira 出站写（审批后执行钩子，FR-14）</td><td>command_port.py：<code>execute_jira_write_after_approval</code> / <code>record_poll_observation</code>；jira_write_stub.py：<code>sync_jira_write_stub</code> / <code>derive_external_request_id</code> / <code>derive_issue_key</code>；发起方 approval_policy/service.py <code>submit_approval_decision</code></td><td>TestRunDetailPage.tsx（P09 一键 Jira 缺陷 → api.post API-120）</td></tr>
+<tr><td>§3 ApiToken 签发 / 吊销（API-170…172）</td><td>service.py：<code>issue_api_token_for_caller</code> / <code>revoke_api_token_for_caller</code>、认证校验 <code>authenticate_api_token</code> / <code>authenticate_api_token_by_prefix</code>（argon2 哈希比对）；模型 <code>ApiToken</code> 在 models.py</td><td>AdminIntegrationPage.tsx（P25，明文仅签发响应出现一次）</td></tr>
+</table>
+
 <div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_090_160_164_106_integration.py tests/test_api_jira_write.py -q</code>，观察观察表 → Inbox → 命令的三段式。</div>
 
 <div class="pager"><a href="quality-gates.html">← 上一篇</a><a href="quota-governance.html">下一篇：quota_governance →</a></div>
