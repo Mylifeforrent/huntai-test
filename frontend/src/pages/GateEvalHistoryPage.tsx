@@ -204,6 +204,28 @@ export function GateEvalHistoryPage() {
       {selectedId && detailQuery.data?.data ? (
         <div className="mt-4 rounded-md border p-4 text-sm">
           <p className="font-medium">评估明细（API-145）</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(() => {
+              const details = detailQuery.data.data.threshold_details ?? {};
+              const unmeasured = Object.entries(details)
+                .filter((entry) => {
+                  const value = entry[1];
+                  return typeof value === "object" && value !== null && (value as Record<string, unknown>).not_measured === true;
+                })
+                .map(([key]) => key);
+              if (unmeasured.length === 0) return null;
+              return (
+                <span className="text-xs text-muted-foreground">
+                  未测量阈值（无数据源，不默认通过）：
+                  {unmeasured.map((key) => (
+                    <Badge key={key} variant="outline" className="mr-1">
+                      {key}
+                    </Badge>
+                  ))}
+                </span>
+              );
+            })()}
+          </div>
           <pre className="mt-2 overflow-auto text-xs">
             {JSON.stringify(detailQuery.data.data.threshold_details ?? {}, null, 2)}
           </pre>
