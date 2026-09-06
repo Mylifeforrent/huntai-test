@@ -139,7 +139,12 @@ export const PAGE_APIS = {
     { id: "API-154", method: "POST", path: "/api/v1/release-tasks/{release_task_id}/cancel", summary: "取消任务" },
     { id: "API-155", method: "GET", path: "/api/v1/release-tasks/{release_task_id}/readiness", summary: "Readiness Gate" },
   ],
-  P18: [{ id: "API-190", method: "GET", path: "/api/v1/copilot-sessions", summary: "Copilot 会话" }],
+  P18: [
+    { id: "API-190", method: "GET", path: "/api/v1/copilot-sessions", summary: "Copilot 会话列表" },
+    { id: "API-191", method: "POST", path: "/api/v1/copilot-sessions", summary: "创建会话" },
+    { id: "API-192", method: "POST", path: "/api/v1/copilot-sessions/{session_id}/messages", summary: "A6 提问" },
+    { id: "API-193", method: "GET", path: "/api/v1/copilot-sessions/{session_id}", summary: "会话详情" },
+  ],
   P19: [{ id: "API-194", method: "GET", path: "/api/v1/skills", summary: "技能列表" }],
   P20: [
     { id: "API-026", method: "GET", path: "/api/v1/evidence-objects", summary: "证据检索" },

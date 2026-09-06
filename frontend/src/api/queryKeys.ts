@@ -30,6 +30,7 @@ export const queryKeys = {
   modelRoutes: ["model-routes"] as const,
   aiInvocationLogs: (params: Record<string, string>) => ["ai-invocation-logs", params] as const,
   aiInvocationLog: (id: string) => ["ai-invocation-logs", id] as const,
+  copilotSessions: ["copilot-sessions"] as const,
   connectors: (params: Record<string, string>) => ["connectors", params] as const,
   apiTokens: ["api-tokens"] as const,
   releaseTasks: (params: Record<string, string>) => ["release-tasks", params] as const,
