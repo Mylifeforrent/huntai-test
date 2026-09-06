@@ -133,6 +133,10 @@ export const PAGE_APIS = {
   ],
   P17: [
     { id: "API-150", method: "GET", path: "/api/v1/release-tasks", summary: "Release 任务" },
+    { id: "API-151", method: "GET", path: "/api/v1/release-tasks/{release_task_id}", summary: "任务详情（含 A5 只读）" },
+    { id: "API-152", method: "POST", path: "/api/v1/release-tasks", summary: "圈定版本创建" },
+    { id: "API-153", method: "POST", path: "/api/v1/release-tasks/{release_task_id}/retries", summary: "失败幂等重试" },
+    { id: "API-154", method: "POST", path: "/api/v1/release-tasks/{release_task_id}/cancel", summary: "取消任务" },
     { id: "API-155", method: "GET", path: "/api/v1/release-tasks/{release_task_id}/readiness", summary: "Readiness Gate" },
   ],
   P18: [{ id: "API-190", method: "GET", path: "/api/v1/copilot-sessions", summary: "Copilot 会话" }],
