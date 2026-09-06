@@ -520,6 +520,37 @@ async def _start_test_run_core(
         str(case["version_id"]) for case in cases if case.get("version_id") is not None
     ]
 
+    perf_cases = [case for case in cases if case.get("case_type") == "performance"]
+    if perf_cases:
+        # FR-11: perf runs are script-source, homogeneous, whitelist-gated.
+        if len(perf_cases) != len(cases) or execution_source != "script":
+            raise ValueError("validation")
+        whitelist = (
+            params_redacted.get("perf_whitelist") if isinstance(params_redacted, dict) else None
+        )
+        base_url = (
+            str(params_redacted.get("TARGET_ENV", "")) if isinstance(params_redacted, dict) else ""
+        )
+        if (
+            not isinstance(whitelist, list)
+            or not whitelist
+            or not base_url
+            or not any(base_url.startswith(str(prefix)) for prefix in whitelist)
+        ):
+            # AC-051: whitelist-miss targets are denied outright, no approval.
+            raise ValueError("perf_policy")
+        if (
+            await repo.find_active_perf_run_for_scenario(
+                session,
+                organization_id=org_id,
+                test_case_id=uuid.UUID(str(perf_cases[0]["id"])),
+                exclude_run_id=uuid.uuid4(),
+            )
+            is not None
+        ):
+            # AC-054: accepted but queued behind the in-flight scenario run.
+            snapshot["perf_queued"] = True
+
     run = await repo.create_test_run(
         session,
         organization_id=org_id,

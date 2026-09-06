@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Index, Integer, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -149,3 +158,34 @@ class CommandIdempotencyRecord(Base):
     response_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
+class PerfBaseline(Base):
+    __tablename__ = "perf_baselines"
+    __table_args__ = (
+        Index("ix_perf_baselines_org_scenario", "organization_id", "scenario_test_case_id"),
+        Index(
+            "uq_perf_baselines_active_scenario",
+            "organization_id",
+            "scenario_test_case_id",
+            unique=True,
+            postgresql_where=text("is_active IS TRUE"),
+        ),
+        {"schema": "test_assets"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    scenario_test_case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("test_assets.test_cases.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    metrics_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    tolerance: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    latest_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

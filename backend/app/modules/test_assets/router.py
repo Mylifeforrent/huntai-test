@@ -22,6 +22,7 @@ from app.core.errors import (
 )
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
+from app.modules.test_assets import perf_baseline_service
 from app.modules.test_assets import repository as repo
 from app.modules.test_assets.service import (
     TestCaseCreateInput,
@@ -703,3 +704,121 @@ async def api_205_register_import_source(
         _map_write_error(trace_id, exc)
     await db.commit()
     return payload
+
+
+class PerfBaselineCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_test_case_id: uuid.UUID
+    metrics_snapshot: dict[str, Any]
+    tolerance: dict[str, Any]
+    expected_active_version: int | None = Field(default=None, ge=1)
+
+
+class PerfBaselineDeactivate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+
+
+@router.get("/perf-baselines")
+async def api_056_list_perf_baselines(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+    scenario_test_case_id: Annotated[str, Query()],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        scenario_id = uuid.UUID(scenario_test_case_id)
+    except ValueError as exc:
+        raise validation_failed(trace_id) from exc
+    try:
+        payload = await perf_baseline_service.list_perf_baselines_for_caller(
+            db, ctx, scenario_test_case_id=scenario_id
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/perf-baselines/{perf_baseline_id}")
+async def api_059_get_perf_baseline(
+    request: Request,
+    perf_baseline_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await perf_baseline_service.get_perf_baseline_for_caller(
+            db, ctx, perf_baseline_id=perf_baseline_id
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {"data": payload}
+
+
+@router.post("/perf-baselines", status_code=201)
+async def api_057_create_perf_baseline(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(PerfBaselineCreate, raw, trace_id)
+    assert isinstance(body, PerfBaselineCreate)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await perf_baseline_service.create_perf_baseline_for_caller(
+            db,
+            ctx,
+            scenario_test_case_id=body.scenario_test_case_id,
+            metrics_snapshot=body.metrics_snapshot,
+            tolerance=body.tolerance,
+            expected_active_version=body.expected_active_version,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.post("/perf-baselines/{perf_baseline_id}/deactivate")
+async def api_058_deactivate_perf_baseline(
+    request: Request,
+    perf_baseline_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(PerfBaselineDeactivate, raw, trace_id)
+    assert isinstance(body, PerfBaselineDeactivate)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    try:
+        payload = await perf_baseline_service.deactivate_perf_baseline_for_caller(
+            db,
+            ctx,
+            perf_baseline_id=perf_baseline_id,
+            expected_version=body.expected_version,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return {"data": payload}

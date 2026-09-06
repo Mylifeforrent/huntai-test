@@ -11,6 +11,7 @@ dependencies = [
     "authlib==1.7.2",
     "fastapi==0.141.1",
     "httpx==0.28.1",
+    "locust>=2.46.4",
     "playwright==1.62.0",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
@@ -51,5 +52,5 @@ strict = true
 packages = ["app"]
 
 [[tool.mypy.overrides]]
-module = ["alembic.*", "authlib.*", "sse_starlette.*"]
+module = ["alembic.*", "authlib.*", "psutil.*", "sse_starlette.*"]
 ignore_missing_imports = true

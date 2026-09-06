@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,11 +65,28 @@ async def _evaluate_run(
     if is_partial_report(result_summary=summary, case_results=case_results):
         return "partial_report"
 
+    perf_raw = summary.get("perf") if isinstance(summary, dict) else None
+    perf_run = (
+        isinstance(summary, dict)
+        and summary.get("execution_source") == "perf"
+        or isinstance(perf_raw, dict)
+    )
+    perf_metrics: dict[str, Any] | None = None
+    if perf_run:
+        # AC-057: a perf run without metrics must not silently pass.
+        if not isinstance(perf_raw, dict) or (
+            not isinstance(perf_raw.get("p95_ms"), (int, float))
+            and not isinstance(perf_raw.get("error_rate"), (int, float))
+        ):
+            return "perf_report_missing"
+        perf_metrics = perf_raw
+
     pass_rate, pass_detail = compute_pass_rate(case_results)
     threshold_details, result = build_threshold_details(
         thresholds=policy.thresholds,
         pass_rate=pass_rate,
         pass_detail=pass_detail,
+        perf_metrics=perf_metrics,
     )
     if result not in VALID_INSERT_RESULTS:
         return "policy_unmet"

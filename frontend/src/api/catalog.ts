@@ -127,13 +127,24 @@ export const PAGE_APIS = {
   ],
   P16: [
     { id: "API-056", method: "GET", path: "/api/v1/perf-baselines", summary: "性能基线" },
+    { id: "API-057", method: "POST", path: "/api/v1/perf-baselines", summary: "创建基线" },
+    { id: "API-062", method: "POST", path: "/api/v1/test-runs", summary: "发起压测（统一 TestRun）" },
     { id: "API-199", method: "POST", path: "/api/v1/organizations/current/capability-controls/tighten", summary: "kill switch 关停" },
   ],
   P17: [
     { id: "API-150", method: "GET", path: "/api/v1/release-tasks", summary: "Release 任务" },
+    { id: "API-151", method: "GET", path: "/api/v1/release-tasks/{release_task_id}", summary: "任务详情（含 A5 只读）" },
+    { id: "API-152", method: "POST", path: "/api/v1/release-tasks", summary: "圈定版本创建" },
+    { id: "API-153", method: "POST", path: "/api/v1/release-tasks/{release_task_id}/retries", summary: "失败幂等重试" },
+    { id: "API-154", method: "POST", path: "/api/v1/release-tasks/{release_task_id}/cancel", summary: "取消任务" },
     { id: "API-155", method: "GET", path: "/api/v1/release-tasks/{release_task_id}/readiness", summary: "Readiness Gate" },
   ],
-  P18: [{ id: "API-190", method: "GET", path: "/api/v1/copilot-sessions", summary: "Copilot 会话" }],
+  P18: [
+    { id: "API-190", method: "GET", path: "/api/v1/copilot-sessions", summary: "Copilot 会话列表" },
+    { id: "API-191", method: "POST", path: "/api/v1/copilot-sessions", summary: "创建会话" },
+    { id: "API-192", method: "POST", path: "/api/v1/copilot-sessions/{session_id}/messages", summary: "A6 提问" },
+    { id: "API-193", method: "GET", path: "/api/v1/copilot-sessions/{session_id}", summary: "会话详情" },
+  ],
   P19: [{ id: "API-194", method: "GET", path: "/api/v1/skills", summary: "技能列表" }],
   P20: [
     { id: "API-026", method: "GET", path: "/api/v1/evidence-objects", summary: "证据检索" },

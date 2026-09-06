@@ -150,6 +150,26 @@ async def users_share_project(
     return result.first() is not None
 
 
+async def caller_is_org_member(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> str | None:
+    """Return the user's strongest membership role in the org (None = no membership)."""
+    result = await session.execute(
+        select(ProjectMember.role).where(
+            ProjectMember.organization_id == organization_id,
+            ProjectMember.user_id == user_id,
+        )
+    )
+    roles = {str(role) for (role,) in result.all()}
+    for role in ("owner", "admin", "tester", "viewer"):
+        if role in roles:
+            return role
+    return None
+
+
 async def caller_is_owner_or_admin(
     session: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID
 ) -> bool:

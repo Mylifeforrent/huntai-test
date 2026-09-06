@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.test_assets.models import (
     CommandIdempotencyRecord,
     ImportSource,
+    PerfBaseline,
     TestCase,
     TestCaseVersion,
     TestPlan,
@@ -394,3 +395,53 @@ async def replace_plan_cases(
             )
         )
     await session.flush()
+
+
+async def list_perf_baselines(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    scenario_test_case_id: uuid.UUID | None = None,
+    active_only: bool = False,
+) -> list[PerfBaseline]:
+    query = select(PerfBaseline).where(PerfBaseline.organization_id == organization_id)
+    if scenario_test_case_id is not None:
+        query = query.where(PerfBaseline.scenario_test_case_id == scenario_test_case_id)
+    if active_only:
+        query = query.where(PerfBaseline.is_active.is_(True))
+    query = query.order_by(PerfBaseline.created_at.desc(), PerfBaseline.id.desc())
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_perf_baseline(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    perf_baseline_id: uuid.UUID,
+) -> PerfBaseline | None:
+    result = await session.execute(
+        select(PerfBaseline).where(
+            PerfBaseline.organization_id == organization_id,
+            PerfBaseline.id == perf_baseline_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_active_perf_baseline_for_scenario(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    scenario_test_case_id: uuid.UUID,
+) -> PerfBaseline | None:
+    result = await session.execute(
+        select(PerfBaseline)
+        .where(
+            PerfBaseline.organization_id == organization_id,
+            PerfBaseline.scenario_test_case_id == scenario_test_case_id,
+            PerfBaseline.is_active.is_(True),
+        )
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()

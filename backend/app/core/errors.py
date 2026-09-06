@@ -106,6 +106,30 @@ def policy_deny(trace_id: str, message: str = "Policy denied") -> AppError:
     )
 
 
+def ext_read_failed(trace_id: str, message: str = "External scope read failed") -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-EXT-001",
+        error_class="business",
+        subclass="external_read",
+        message=message,
+        retryable=False,
+    )
+
+
+def ext_unknown_result(
+    trace_id: str, message: str = "External result unknown; reconcile first"
+) -> AppError:
+    return AppError(
+        status_code=409,
+        code="HT-EXT-002",
+        error_class="business",
+        subclass="external_unknown",
+        message=message,
+        retryable=False,
+    )
+
+
 def policy_undeclared(trace_id: str, message: str = "Undeclared side effect level") -> AppError:
     return AppError(
         status_code=403,

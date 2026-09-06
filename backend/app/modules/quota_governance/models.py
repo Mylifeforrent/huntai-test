@@ -29,3 +29,4 @@ class OrgQuota(Base):
     token_consumed: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
     executor_slot_quota: Mapped[int] = mapped_column(Integer, nullable=False)
     perf_concurrency_quota: Mapped[int] = mapped_column(Integer, nullable=False)
+    perf_concurrency_in_use: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

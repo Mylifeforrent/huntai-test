@@ -4,10 +4,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.modules.approval_policy import repository as repo
+from app.modules.approval_policy.models import ApprovalRequest
 from app.modules.approval_policy.policy_gate import resolve_side_effect_level
 from app.modules.approval_policy.service import (
     build_card_payload,
@@ -79,3 +81,83 @@ async def create_env_register_approval(
         expected_target_version=None,
     )
     return approval.id
+
+
+async def find_pending_perf_high_risk(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+) -> uuid.UUID | None:
+    result = await session.execute(
+        select(ApprovalRequest.id).where(
+            ApprovalRequest.organization_id == organization_id,
+            ApprovalRequest.action_type == "perf_high_risk",
+            ApprovalRequest.target_object_type == "TestRun",
+            ApprovalRequest.target_object_id == test_run_id,
+            ApprovalRequest.status == "PENDING",
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_perf_high_risk_approval(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    organization_id: uuid.UUID,
+    created_by: uuid.UUID | None,
+    project_id: uuid.UUID,
+    test_run_id: uuid.UUID,
+    scenario: dict[str, Any],
+    approval_hash: str,
+) -> tuple[uuid.UUID, str]:
+    """Create the perf_high_risk approval; returns (approval_id, param_hash)."""
+    initiator = created_by
+    if initiator is None:
+        raise ValueError("state")
+    candidates = await identity_query.list_project_owner_admin_user_ids(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+        exclude_user_id=initiator,
+    )
+    if not candidates:
+        raise ValueError("state")
+    now = datetime.now(UTC)
+    payload = {"scenario": scenario, "test_run_id": str(test_run_id)}
+    param_hash = compute_param_hash(
+        action_type="perf_high_risk",
+        target_object_type="TestRun",
+        target_object_id=test_run_id,
+        project_id=project_id,
+        payload=payload,
+        expected_target_version=None,
+    )
+    card_payload = build_card_payload(
+        action_type="perf_high_risk",
+        target_object_type="TestRun",
+        target_object_id=test_run_id,
+        payload=payload,
+        side_effect_level="L3",
+        param_hash=param_hash,
+    )
+    row = await repo.create_approval_request(
+        session,
+        organization_id=organization_id,
+        created_at=now,
+        created_by=initiator,
+        action_type="perf_high_risk",
+        target_object_type="TestRun",
+        target_object_id=test_run_id,
+        action_payload=payload,
+        param_hash=param_hash,
+        card_payload=card_payload,
+        side_effect_level="L3",
+        initiator_id=initiator,
+        approver_id=candidates[0],
+        expires_at=now + timedelta(seconds=settings.approval_ttl_seconds),
+        project_id=project_id,
+        expected_target_version=None,
+    )
+    return row.id, param_hash

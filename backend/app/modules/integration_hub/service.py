@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import uuid
@@ -96,6 +97,14 @@ def serialize_delivery(observation: ExternalObservation) -> dict[str, Any]:
         "payload_ref": observation.payload_ref,
         "accepted": observation.signature_ok,
     }
+
+
+def _parse_release_webhook_body(body: bytes) -> dict[str, Any]:
+    try:
+        parsed = json.loads(body.decode("utf-8")) if body else {}
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def resolve_env_ref(settings: Settings, ref: str) -> str | None:
@@ -462,6 +471,26 @@ async def process_inbound_webhook(
                 request_hash=request_hash,
             ),
         )
+        if connector.type == "release":
+            from app.modules.release_orchestration import command_port as release_command
+
+            release_body = _parse_release_webhook_body(body)
+            await release_command.apply_release_observation(
+                session,
+                organization_id=org_id,
+                body=release_body,
+                request_hash=request_hash,
+            )
+            return (
+                {
+                    "accepted": True,
+                    "observation_id": str(existing.id),
+                    "duplicate": False,
+                },
+                202,
+                None,
+            )
+
         from app.modules.run_orchestration import command_port as run_command
 
         resume_run_id = await run_command.apply_ci_observation(
@@ -513,6 +542,26 @@ async def process_inbound_webhook(
             request_hash=request_hash,
         ),
     )
+    if connector.type == "release":
+        from app.modules.release_orchestration import command_port as release_command
+
+        release_body = _parse_release_webhook_body(body)
+        await release_command.apply_release_observation(
+            session,
+            organization_id=org_id,
+            body=release_body,
+            request_hash=request_hash,
+        )
+        return (
+            {
+                "accepted": True,
+                "observation_id": str(observation.id),
+                "duplicate": False,
+            },
+            202,
+            None,
+        )
+
     from app.modules.run_orchestration import command_port as run_command
 
     resume_run_id = await run_command.apply_ci_observation(
