@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · quota_governance</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › quota_governance</div>
+<h1>quota_governance · 配额与预算</h1>
+<p>模块位置：<code>backend/app/modules/quota_governance/</code>。管「花多少、占多少」：组织级 OrgQuota（AI token 预算 + 执行资源配额）。</p>
+
+<h2>1. OrgQuota 字段</h2>
+<table>
+<tr><th>字段</th><th>含义</th><th>谁消费</th></tr>
+<tr><td>token_budget / token_reserved / token_consumed</td><td>AI token 预算与占用</td><td>LLM 工厂每次 invoke 前检查；耗尽 → <code>HT-QUOTA-001</code>（不调模型）</td></tr>
+<tr><td>executor_slot_quota</td><td>执行 slot</td><td>TestRun 受理</td></tr>
+<tr><td>perf_concurrency_quota / perf_concurrency_in_use</td><td>压测并发预算与当前占用</td><td>perf worker VALIDATING 占用（row lock），终态释放</td></tr>
+</table>
+
+<h2>2. 使用姿势（跨模块走 port）</h2>
+<pre><code># 占用：with_for_update 行锁，不足返回 False（调用方落 FAILED/429）
+reserved = await quota_command.reserve_perf_concurrency(session, organization_id=...)
+# 释放：终态路径调用，max(0, in_use - slots) 幂等
+await quota_command.release_perf_concurrency(session, organization_id=...)
+# 投影：API-018 quota-view / API-017 org-quotas/current 返回配额与 in_use
+exhausted = await quota_query.token_budget_exhausted(session, organization_id=...)</code></pre>
+<ul>
+<li>检查在<b>受理/派发时</b>，不在前端；前端只显示余量提示（quota_hint），权威扣减在命令侧。</li>
+<li>超限错误码：<code>HT-QUOTA-001</code>（资源/预算不足，可条件重试）、<code>HT-QUOTA-002</code>（导出/打包类超限）。</li>
+</ul>
+
+<h2>3. 与 kill switch 的分工</h2>
+<table>
+<tr><th>诉求</th><th>用哪个</th></tr>
+<tr><td>「这个月 token 花完了」</td><td>OrgQuota 预算（经济约束）</td></tr>
+<tr><td>「出事故了立刻停掉 Copilot/压测」</td><td>API-199 tighten（安全约束，L1 即时）</td></tr>
+</table>
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_017_018_183_199_quota_kill_switch.py -q</code>，观察配额耗尽后的 429 与 kill switch 后的拒绝路径。</div>
+
+<div class="pager"><a href="integration-hub.html">← 上一篇</a><a href="release-orchestration.html">下一篇：release_orchestration →</a></div>
+</div></body></html>

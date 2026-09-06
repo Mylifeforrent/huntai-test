@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · frontend</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › frontend</div>
+<h1>frontend · 页面与前端纪律</h1>
+<p>位置：<code>frontend/</code>。React 19 + TypeScript（strict，禁止 any）+ Vite + Tailwind CSS 4；shadcn/ui 组件<b>源码内置</b>（components/ui，非 npm 黑盒）；服务端状态用 TanStack Query。</p>
+
+<h2>1. 页面地图（P01–P25，禁止新增 P26+）</h2>
+<table>
+<tr><th>页面</th><th>路由</th><th>主要 API</th></tr>
+<tr><td>P01 工作台</td><td><code>/</code></td><td>API-020 聚合</td></tr>
+<tr><td>P05 用例库 / P13 详情</td><td><code>/projects/:id/cases</code></td><td>API-030…039、050–055</td></tr>
+<tr><td>P08 执行发起 / P09 TestRun / P14 Agent</td><td><code>/test-center/...</code></td><td>API-062/061/210、067/068</td></tr>
+<tr><td>P10 审批中心</td><td><code>/approvals</code></td><td>API-110…112、120</td></tr>
+<tr><td>P11/P12 门禁策略/历史</td><td><code>/gates/...</code></td><td>API-140…146</td></tr>
+<tr><td>P15/P25 环境/集成</td><td><code>/environments</code>、<code>/admin/integrations</code></td><td>API-100–106、160–167</td></tr>
+<tr><td>P16 性能压测</td><td><code>/test-center/performance</code></td><td>API-062、056/057、199</td></tr>
+<tr><td>P17 Release</td><td><code>/releases</code></td><td>API-150…155、120</td></tr>
+<tr><td>P18 Copilot</td><td><code>/assistant</code></td><td>API-190…193</td></tr>
+<tr><td>P20 证据中心 / P24 审计</td><td><code>/evidence</code>、<code>/admin/audit</code></td><td>API-026–028、223 / 024–025</td></tr>
+</table>
+
+<h2>2. 三条铁纪律</h2>
+<div class="warn">
+<b>① 前端不是安全边界</b>：状态机、门禁、配额、聚类、param_hash、幂等键全部后端裁决；前端只渲染 + 提示性校验。<br>
+<b>② 不直连外部系统</b>：Jira/GitHub/CI/Release 一律经后端；不持有外部凭证；会话 Cookie 不进 localStorage。<br>
+<b>③ 受理 ≠ 完成</b>：收到 202 只显示「受理中」；网络未决先 GET 对账，禁止假定成功/失败。
+</div>
+
+<h2>3. 代码结构与惯例</h2>
+<pre><code>src/
+  api/        client.ts（统一 fetch + 错误信封 + 幂等键自动生成 + getBlob）
+              catalog.ts（页面→API 清单）  queryKeys.ts  types.ts
+  pages/      每 P 页一个 PascalCase.tsx + 同名 .test.tsx（组件交互必须有测试）
+  components/domain/   PageState(QueryGate/PageHeader/EmptyState)、StatusBadge、EvidenceViewer
+  hooks/      useUrlState（筛选/分页进 URL）、useSession
+  lib/        utils</code></pre>
+<pre><code>// 统一 API 调用：apiId 用于错误归因；POST 自动带 Idempotency-Key
+const data = await api.post&lt;ResourceEnvelope&lt;T&gt;&gt;("API-152", "/api/v1/release-tasks",
+    body, newIdempotencyKey());
+// 下载一律走 blob（代理通道），禁止拼直链/预签名 URL
+const blob = await api.getBlob("API-223", `/api/v1/export-packages/${id}/content`);</code></pre>
+
+<h2>4. UI 纪律</h2>
+<ul>
+<li><b>七态基线</b>：每页覆盖默认/加载/空数据/无结果/错误/无权限/成功——用 <code>QueryGate</code> 统一渲染。</li>
+<li><b>列表筛选/排序/分页必须进 URL</b>（useUrlState），刷新后可还原。</li>
+<li><b>SSE 只是 hint</b>：进度条/提示用 SSE，终态/资格一律 GET 对账（「权威状态以 GET 为准」要写在 UI 上）。</li>
+<li>等待态（WAITING_APPROVAL / WAITING_EXTERNAL）不因耗时隐藏；风险等级 L0–L4 用色标。</li>
+<li>桌面优先：≥1280 全功能；1024–1279 可用；&lt;1024 只读。</li>
+</ul>
+
+<h2>5. 新手任务</h2>
+<div class="tip">读 <code>pages/EvidenceCenterPage.tsx</code>（列表+导出全链路的最小完整样例）→ 跑 <code>npm run test -- --run src/pages/EvidenceCenterPage.test.tsx</code> → 仿照它给一个缺测试的页面补一条交互测试。</div>
+
+<div class="pager"><a href="ai-governance.html">← 上一篇</a><a href="dev-workflow.html">下一篇：开发工作流 →</a></div>
+</div></body></html>

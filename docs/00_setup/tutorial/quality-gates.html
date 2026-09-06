@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · quality_gates</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › quality_gates</div>
+<h1>quality_gates · 质量门禁</h1>
+<p>模块位置：<code>backend/app/modules/quality_gates/</code>。管「结果能不能放行」：QualityGatePolicy（策略）+ GateEvaluation（评估结论）+ GitHub Check Run 三段式回写。</p>
+
+<h2>1. 两个对象，职责分离</h2>
+<table>
+<tr><th>对象</th><th>内容</th><th>纪律</th></tr>
+<tr><td>QualityGatePolicy</td><td>项目级阈值三件套 <code>{min_pass_rate, max_p95_ms, max_error_rate}</code> + 模式 <code>report_only / blocking</code> + version</td><td>切 blocking 必须 <code>confirm_blocking=true</code> 显式开启（禁止隐式升阻断）</td></tr>
+<tr><td>GateEvaluation</td><td>单次评估：result（<b>仅 pass/fail/waived</b>）、threshold_details（逐阈值实测）、<b>policy_snapshot</b>、check_run_ref、waiver_approval_id</td><td>append-only；策略修改<b>不改写</b>历史评估（快照冻结）</td></tr>
+</table>
+
+<h2>2. 评估管线（一条，无独立分支）</h2>
+<pre><code>TestRun 终态（script / external_ci / performance）→ schedule_gate_evaluation
+  ├─ agent 来源        → 不建行，unevaluated_reason=agent_source
+  ├─ CANCELLED/TIMEOUT → 不建行，cancelled_or_timeout
+  ├─ 报告 partial      → 不建行，partial_report
+  ├─ 项目缺策略        → 不建行，policy_unmet
+  ├─ 压测 run 无指标   → 不建行，perf_report_missing
+  └─ 否则实测：pass_rate + p95 + error_rate → details + result（pass/fail）
+       → Check Run 三段式（queued → in_progress → completed）
+            conclusion：pass→success；fail→blocking=failure / report_only=neutral
+       → CAS 挂到 TestRun.gate_evaluation_id（竞态则回删评估行）</code></pre>
+<div class="warn"><b>缺配不得默认通过</b>：无 GateEvaluation + 明确 <code>unevaluated_reason</code>；<code>not_evaluated</code> 永远不是合法 result 枚举。</div>
+
+<h2>3. 仅报告 ⇄ 阻断（M2 Gate）</h2>
+<pre><code>PATCH /api/v1/quality-gate-policies/{id}
+{"expected_version": 3, "mode": "blocking", "confirm_blocking": true}</code></pre>
+<ul>
+<li><b>report_only</b>：评估如实记 fail，但 Check Run conclusion=<code>neutral</code>，不阻断 CI。</li>
+<li><b>blocking</b>：fail → <code>failure</code>，阻断 CI exit。</li>
+<li>切换后新评估用新模式，历史评估行与其 conclusion 永不改写。</li>
+</ul>
+
+<h2>4. 豁免（gate_waiver）</h2>
+<p>fail 评估可由 owner/admin 经 API-120 发起 <code>gate_waiver</code> 审批（confirm:true），批准后挂 <code>waiver_approval_id</code>——<code>result</code> 保持 fail 不改，检索时按豁免过滤（result=waived 视图）。</p>
+
+<h2>5. 压测指标接入（FR-12 / M3）</h2>
+<pre><code># perf worker 终态后 result_summary.perf = {"p95_ms": ..., "error_rate": ..., ...}
+# 同一管线内实测判定：actual &lt;= threshold 才 pass；任一超阈 → fail
+# 压测 run 无指标 → perf_report_missing（fail-close，不默认通过）</code></pre>
+
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_144_146_gate_evaluations.py -q</code>，重点读 <code>test_ac_062_patch_policy_does_not_rewrite_historical_evaluation</code>。</div>
+
+<div class="pager"><a href="approval-policy.html">← 上一篇</a><a href="integration-hub.html">下一篇：integration_hub →</a></div>
+</div></body></html>

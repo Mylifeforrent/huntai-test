@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · approval_policy</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › approval_policy</div>
+<h1>approval_policy · 审批与副作用分级</h1>
+<p>模块位置：<code>backend/app/modules/approval_policy/</code>。管「什么动作需要人点头」：ApprovalRequest 审批中心 + Policy Gate 副作用分级（FR-17）。</p>
+
+<h2>1. 副作用分级 L0–L4 与 Policy Gate</h2>
+<pre><code>Tool Router（schema 校验 + 租户/角色）→ Policy Gate（按 sideEffectLevel 裁决）
+  L0 / L1  → ALLOW
+  L2       → REQUIRE_APPROVAL（创建 ApprovalRequest，等人工）
+  L3 / L4  → REQUIRE_APPROVAL（并按窗口要求再认证）
+  未声明   → DENY（默认拒绝！）
+  白名单外 → DENY + 记录安全事件（不进审批）</code></pre>
+<table>
+<tr><th>action_ref</th><th>级别</th><th>用途</th></tr>
+<tr><td>jira_write</td><td>L2</td><td>创建 Jira 缺陷（自动附证据）</td></tr>
+<tr><td>heal_apply</td><td>L3</td><td>应用定位器自愈（新 TestCaseVersion）</td></tr>
+<tr><td>perf_high_risk</td><td>L3</td><td>高危压测配置执行（白名单外直接 DENY）</td></tr>
+<tr><td>env_register</td><td>L3</td><td>注册执行环境（ACTIVE 仅在 EXECUTED+ok 后）</td></tr>
+<tr><td>gate_waiver</td><td>L3</td><td>门禁豁免（不改 result，挂 waiver_approval_id）</td></tr>
+<tr><td>kill_switch_restore</td><td>L3</td><td>恢复被关停的能力（放开必须走审批）</td></tr>
+<tr><td>release_push</td><td>L4</td><td>确认 Release 推送（内部 prepare，无生产发布 API）</td></tr>
+<tr><td>agent_tool_action</td><td>按声明</td><td>Agent 工具动作（manifest 上限 ≤L1，M2 试点）</td></tr>
+<tr><td>copilot_write</td><td>DISABLED</td><td>M4 前一律 DENY</td></tr>
+</table>
+
+<h2>2. 审批生命周期</h2>
+<pre><code>POST /api/v1/action-previews            （API-120：九要素卡片 + param_hash 绑定）
+  → PENDING（四眼：approver 从 owner/admin 候选中选，且 ≠ 发起人）
+POST /api/v1/approval-requests/{id}/decisions   （API-112：approve/reject + expected_version CAS）
+  approve → APPROVED → 执行钩子（各域 command_port）→ EXECUTED + execution_result=ok/failed
+  reject  → REJECTED（部分动作联动取消领域对象）
+  超期    → EXPIRED（懒过期；param_hash 失效也直接 EXPIRED）</code></pre>
+<div class="warn"><b>APPROVED ≠ EXECUTED + ok。</b>领域状态只能由执行钩子推进；模型声称「已获批准」不构成授权。</div>
+
+<h2>3. 执行钩子模式（跨模块协作的标准姿势）</h2>
+<pre><code># approval_policy/service.py 决策函数内
+if decision == "approve" and approval.action_type == "jira_write":
+    result = await integration_command.execute_jira_write_after_approval(
+        session, organization_id=..., approval_id=..., bound_hash=approval.param_hash, ...)
+# 各域在 command_port 暴露 after_approval 入口：
+#   test_assets.apply_heal_after_approval / release.prepare_release_task_after_approval
+#   run_orchestration.cas_resume_perf_after_approval ... </code></pre>
+
+<h2>4. 九要素审批卡片</h2>
+<p>卡片（<code>card_payload</code>）展示：动作与目标 / 前后内容 diff / 数据来源、模型与 Skill 版本 / 风险等级色标 + 成本估计 / 回滚能力 / 参数哈希。前端 P10 审批中心只渲染卡片，不做本地裁决。</p>
+
+<h2>5. Policy Gate 纯函数</h2>
+<pre><code>gate = evaluate_policy_gate(
+    action_type="agent_tool_action",
+    payload={"declared_side_effect_level": "L1"},
+    reauth_required=False)
+# → GateEvaluation(gate=ALLOW, side_effect_level="L1")
+# 未声明 → DENY(undeclared)；L2 → REQUIRE_APPROVAL；L3/L4 → REQUIRE_APPROVAL/REQUIRE_REAUTH</code></pre>
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_policy_gate.py tests/test_api_120_action_previews.py -q</code>，给 <code>evaluate_policy_gate</code> 手算三个输入验证理解。</div>
+
+<div class="pager"><a href="results-evidence.html">← 上一篇</a><a href="quality-gates.html">下一篇：quality_gates →</a></div>
+</div></body></html>

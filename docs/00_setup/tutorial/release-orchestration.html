@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · release_orchestration</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › release_orchestration</div>
+<h1>release_orchestration · Release 编排（FR-15）</h1>
+<p>模块位置：<code>backend/app/modules/release_orchestration/</code>。管「怎么把质量证据变成一次可审计的发布准备」——<b>平台只准备 release item，绝不执行生产发布</b>。</p>
+
+<h2>1. ReleaseTask 六态状态机</h2>
+<pre><code>[*] → DRAFT（Jira 版本圈定 + scope_snapshot 冻结）
+      ──Readiness 评估 + A5 草稿就绪──▶ PENDING_CONFIRM
+      ──release_push 审批批准（EXECUTED+ok）→ 内部 prepare──▶ SUBMITTED
+SUBMITTED ──webhook 观察（item 创建成功回传）──▶ READY   # READY ≠ 生产已发布
+SUBMITTED ──prepare 失败──▶ FAILED_RETRYABLE ──API-153 人工幂等重试──▶ SUBMITTED
+PENDING_CONFIRM / FAILED_RETRYABLE ──API-154──▶ CANCELLED（迟到 READY 只追加 divergence）</code></pre>
+
+<h2>2. 全链路 API</h2>
+<table>
+<tr><th>API</th><th>说明</th></tr>
+<tr><td>API-152 POST <code>/release-tasks</code></td><td>圈定版本 → DRAFT + 范围快照冻结（Jira 连接器缺失 → HT-EXT-001）</td></tr>
+<tr><td>API-150/151</td><td>列表 / 详情（快照、A5 只读、divergence、release_item）</td></tr>
+<tr><td>API-155</td><td>Readiness 投影：jira_scope / gate_evaluation / notes_draft 三项 + overall（后端评估，前端只呈现）</td></tr>
+<tr><td>API-120/112</td><td>release_push（L4）审批；批准 EXECUTED+ok → 内部 prepare（幂等键防重复创建外部 item）</td></tr>
+<tr><td>API-153</td><td>FAILED_RETRYABLE → 202 + Receipt → 后台重入 SUBMITTED；<code>HT-EXT-002</code> 禁盲重试</td></tr>
+<tr><td>API-154</td><td>取消（仅两态可取消）；CANCELLED 后迟到 READY 只追加 divergence</td></tr>
+</table>
+
+<h2>3. prepare 幂等（AC-067）</h2>
+<pre><code>prepare_key = sha256(f"{org}:{task_id}:{sha256(scope_snapshot)}")
+# item ref 表对 (organization_id, prepare_key) 唯一：
+#   命中 → 直接幂等成功，不再调用 Release 连接器（外部 item 永不重复创建）
+# prepare 是系统内部命令（审批执行钩子），没有「执行生产发布」产品 API</code></pre>
+
+<h2>4. A5 Release Notes 草稿（只读）</h2>
+<pre><code>{"summary": "...", "changes": [{"jira_key": "...", "type": "feature|fix|breaking", ...}],
+ "checklist": [{"item": "...", "status": "pass|fail|missing", "evidence_ref": "..."}],
+ "missing_inputs": ["jira_scope_issues"],   # 缺失项显式列出，禁止编造
+ "meta": {"ai_invocation_log_id": "...", "degraded": true}}</code></pre>
+<div class="warn"><b>AC-066</b>：A5 草稿就绪 ≠ 可以推送；未经 release_push 审批 + 确认，平台不会调用 Release 系统。</div>
+
+<h2>5. READY 由观察驱动</h2>
+<p>prepare 只把任务推进到 SUBMITTED 并登记 <code>release_item_refs</code>；<b>READY 只能来自 API-090 HMAC webhook 观察</b>（release 连接器分派到 <code>apply_release_observation</code>）。观察链保证「先验签、去重、落观察，再经命令推进领域状态」。</p>
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_150_155_release.py -q</code>，重点读重试幂等测试（stub 调用计数 == 2，item ref 恒 1 行）。</div>
+
+<div class="pager"><a href="quota-governance.html">← 上一篇</a><a href="ai-governance.html">下一篇：ai_governance →</a></div>
+</div></body></html>

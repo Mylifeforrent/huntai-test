@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · ai_governance</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › ai_governance</div>
+<h1>ai_governance · AI 治理与 Copilot</h1>
+<p>模块位置：<code>backend/app/modules/ai_governance/</code>。管「AI 怎么被调用、被记账、被约束」：LLM 工厂（唯一出口）、AIInvocationLog、ModelRoute、A1 生成、Copilot（A6）。</p>
+
+<h2>1. LLM 工厂：AI 的唯一入口</h2>
+<pre><code>output = await invoke(session, InvokeInput(
+    organization_id=..., user_id=..., task_type="general",
+    prompt_version="copilot-a6@1.0.0",      # Prompt 契约版本化
+    capability_id="A5",                     # A1–A8 能力编号
+    module="release_orchestration",         # 来源模块
+    copilot_session_id=...,                 # Copilot 会话关联（可空）
+    data_classification="Confidential"))
+# output: log_id / result(ok|refused|degraded) / model / usage / cost / latency</code></pre>
+<ul>
+<li><b>业务模块禁止直连模型厂商</b>；每次调用写 append-only <code>AIInvocationLog</code>（无 Prompt 列，input_ref 仅为脱敏 object_key）。</li>
+<li>invoke 前检查 kill switch（A1–A8 能力级 / 模块级 / 全局）与 token 预算；受限 → result=refused（结构化，不是异常）。</li>
+<li>Restricted 内容默认禁止出站；本地模型或拒绝处理。</li>
+</ul>
+
+<h2>2. A1–A8 能力一览</h2>
+<table>
+<tr><th>编号</th><th>能力</th><th>落点</th></tr>
+<tr><td>A1</td><td>用例生成（两步式，草稿先审后落库）</td><td>API-180–182 / P07</td></tr>
+<tr><td>A2</td><td>失败聚类与归因（7 值类别 + 置信度 + 阻塞判断）</td><td>聚类报告 / P09</td></tr>
+<tr><td>A3</td><td>定位器自愈建议（confidence ≥ 0.7 才可应用）</td><td>heal_apply 审批</td></tr>
+<tr><td>A4</td><td>（预留）</td><td>—</td></tr>
+<tr><td>A5</td><td>Release Notes 草稿（缺失项显式，禁止自动推送）</td><td>release_orchestration</td></tr>
+<tr><td>A6</td><td>Copilot 回答（citations + refused_policies 四键）</td><td>API-192</td></tr>
+<tr><td>A7</td><td>（预留）</td><td>—</td></tr>
+<tr><td>A8</td><td>Agent 执行轨迹（trace，args_hash 脱敏）</td><td>agent_worker</td></tr>
+</table>
+
+<h2>3. Copilot 最小版（FR-16 / P18）</h2>
+<pre><code>POST /api/v1/copilot-sessions                       # 191 创建（tester+；viewer 拒；技能指针 M4 前拒）
+GET  /api/v1/copilot-sessions                       # 190 仅本人会话
+POST /api/v1/copilot-sessions/{id}/messages         # 192 A6 提问：
+  kill switch（copilot 模块 / A6 能力关停）→ 403 HT-POL-001   # 命令真实失败，不是藏按钮
+  token 预算耗尽 → 429 HT-QUOTA-001
+  内容中跨项目/跨租户资源引用 → 100% 剥离记 refused_policies（AC-068）
+  白名单只读工具 query_test_assets（锚定项目 + RBAC）
+  → A6 四键：answer / citations / tool_calls / refused_policies
+GET  /api/v1/copilot-sessions/{id}                  # 193 仅所有者，messages 最小化</code></pre>
+<ul>
+<li>L2+ 意图 → 拒绝（<code>copilot_write</code> DISABLED，M4 才开放）；只读工具不改变任何控制流。</li>
+<li>无引用的关键事实不得当已核实结论；工具失败要声明无法获取，不猜测。</li>
+</ul>
+
+<h2>4. ModelRoute（模型路由）</h2>
+<p>按 task_type 配置 provider/model/白名单/成本上限/fallback（API-196–198，P22）；工厂据此选模型名并计量成本到 AIInvocationLog（喂给 P21 成本看板与 OrgQuota）。</p>
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_190_193_copilot.py -q</code>，并检查 <code>AIInvocationLog.copilot_session_id</code> 确实落了行。</div>
+
+<div class="pager"><a href="release-orchestration.html">← 上一篇</a><a href="frontend-guide.html">下一篇：frontend →</a></div>
+</div></body></html>

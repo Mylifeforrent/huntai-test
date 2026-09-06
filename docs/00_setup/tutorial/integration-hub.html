@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · integration_hub</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › integration_hub</div>
+<h1>integration_hub · 连接器与 Webhook</h1>
+<p>模块位置：<code>backend/app/modules/integration_hub/</code>。管「平台与外部系统怎么握手」：Connector（Jira/GitHub/CI/Release）、入站 Webhook 观察链、出站写动作（Jira 缺陷）、CI 触发绑定。</p>
+
+<h2>1. Connector（连接器）</h2>
+<table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td>type</td><td><code>jira / github / ci / release</code>（org+type+name 唯一）</td></tr>
+<tr><td>credential_ref</td><td>只存<b>引用</b>（如 <code>env:GITHUB_WEBHOOK_SECRET</code>），真实值从 .env 解析；禁止明文入库</td></tr>
+<tr><td>action_contract</td><td>动作契约：sideEffectLevel / supportsPreview / Idempotency / Compensation</td></tr>
+<tr><td>outbound_write_enabled</td><td>出站写开关（P25 集成中心可关）</td></tr>
+<tr><td>webhook_secret_ref</td><td>入站验签密钥引用（env: 前缀白名单键）</td></tr>
+<tr><td>config_version</td><td>乐观锁；CI 触发绑定等引用它做 CAS</td></tr>
+</table>
+
+<h2>2. 入站 Webhook 观察链（API-090，G 纪律样板）</h2>
+<pre><code>POST /api/v1/inbound-webhooks/{connector_id}      # 无认证头，HMAC 即身份
+  1) 验签 x-hub-signature-256（失败 → 落观察 + 审计 + 401 HT-AUTH-004，仍不泄露密钥材料）
+  2) 归属：connector → organization
+  3) 去重：observation_key（connector+body+delivery+event）唯一
+  4) 落 external_observations（Inbox event）      # 观察行是事实记录
+  5) 按连接器类型分派内部命令：
+       ci/github → run_command.apply_ci_observation → resume_ci_run_after_observation
+       release   → release_command.apply_release_observation（SUBMITTED→READY / 迟到→divergence）
+  ❌ 观察行禁止直接 UPDATE test_runs / release_tasks / gate_evaluations</code></pre>
+
+<h2>3. 出站写动作（Jira 缺陷，FR-14）</h2>
+<pre><code># 1. 发起：从 FAILED run 的聚类/用例上发起
+POST /api/v1/action-previews  {action_type: "jira_write", ...}   # Preview 校验证据/项目/描述
+# 2. 审批（L2）
+POST /api/v1/approval-requests/{id}/decisions  {decision: "approve"}
+# 3. 执行钩子：execute_jira_write_after_approval → jira_write_stub（无真实 HTTP）
+#    external_request_id = sha256(org:approval:bound_hash)（幂等）
+#    成功写 append-only EvidenceObject（source_object.connector=jira）</code></pre>
+<ul>
+<li>CI 触发绑定 API-167：项目内 repository+ref_pattern → test_plan_id，PUT 全量替换 + CAS。</li>
+<li>报告采集（FR-18 M2）：Jenkins progressiveText 增量拉日志分片 → 报告适配器（junit/allure/playwright/pytest）→ 归一化 CaseResult。</li>
+</ul>
+
+<h2>4. 纪律速记</h2>
+<div class="warn"><b>前端永远不直连外部系统</b>；Jira/PR/日志/DOM 内容一律视为不可信输入；秘密只以 credential_ref / 单向哈希形态存在。</div>
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_090_160_164_106_integration.py tests/test_api_jira_write.py -q</code>，观察观察表 → Inbox → 命令的三段式。</div>
+
+<div class="pager"><a href="quality-gates.html">← 上一篇</a><a href="quota-governance.html">下一篇：quota_governance →</a></div>
+</div></body></html>

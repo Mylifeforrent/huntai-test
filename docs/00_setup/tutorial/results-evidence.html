@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · results_evidence</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › results_evidence</div>
+<h1>results_evidence · 结果与证据链</h1>
+<p>模块位置：<code>backend/app/modules/results_evidence/</code>。管「跑出了什么 + 拿什么证明」：CaseResult / StepRun / Artifact / EvidenceObject / FailureCluster，以及证据中心检索与导出、审计检索。</p>
+
+<h2>1. 结果三件套</h2>
+<table>
+<tr><th>对象</th><th>内容</th><th>要点</th></tr>
+<tr><td>CaseResult</td><td>用例级结果（outcome、is_partial、normalized_summary、数据分级）</td><td>唯一约束 (org, run, case, attempt_seq)；外部 CI 分片用 chunk_key 去重</td></tr>
+<tr><td>StepRun</td><td>步骤级（action、assertion_results、observation_ref、token_usage）</td><td>agent 步骤只存 tool + args_hash，无参数原文（脱敏纪律）</td></tr>
+<tr><td>Artifact</td><td>制品元数据（object_key、checksum、kind、classification）</td><td><b>大二进制不进 PostgreSQL</b>；正文在本地卷（M0/M3 无 MinIO）</td></tr>
+</table>
+
+<h2>2. 引用 ≠ 授权（G5 铁律）</h2>
+<div class="warn"><b><code>object_key</code> / <code>artifact_id</code> / <code>content_ref</code> 永远不是下载令牌。</b>唯一浏览器下载通道是后端代理：</div>
+<pre><code>GET /api/v1/artifacts/{artifact_id}/content            # API-221，每次重验租户/RBAC/分级/checksum
+GET /api/v1/export-packages/{receipt_id}/content       # API-223，仅 status=succeeded 且 tester+
+# Restricted 正文：代理路径直接 403 HT-POL-001，永不预签名/302</code></pre>
+
+<h2>3. EvidenceObject 与证据中心（P20）</h2>
+<pre><code>{"claim": "登录接口 5xx",                       # 结论陈述（Confidential 最小化）
+ "source_object": {"connector": "jira", "resource": "...", "timestamp": "..."},
+ "content_ref": "&lt;object_key&gt;",                # 稳定引用，非令牌
+ "subject_type": "case_result", "subject_id": "...",
+ "data_classification": "Confidential"}</code></pre>
+<ul>
+<li><b>append-only</b>：EvidenceObject 禁止原地覆盖（还有 AuditEvent / GateEvaluation / AIInvocationLog / 已发布 SkillVersion）。</li>
+<li>API-026/027 检索与详情（Sess，项目四角色；无法解析项目归属的组织级证据仅 owner/admin）；subject_type+subject_id 必须成对传。</li>
+<li>API-028 导出受理（202 + 回执）→ 后台打包（zip/md/json，只物化元数据，<b>Restricted 整单拒绝</b>）→ 完成后 API-223 代理下载。受理回执与 SSE 都 ≠ 导出完成（AC-096）。</li>
+</ul>
+
+<h2>4. 失败聚类（FR-06/07）</h2>
+<ul>
+<li>终态 run 有 failed CaseResult → 自动调度 A2 聚类：<code>failure_clusters</code>（category 七值枚举 / confidence / blocking_judgment / evidence_refs / unclustered_refs）。</li>
+<li>AI 降级时走规则聚类（confidence 0.3，<code>AIInvocationLog.result=degraded</code>）——平台功能不受影响，只是 AI 增强降级。</li>
+<li>人工修正走 API-132（留 correction_history 历史留痕）；相似失败 API-133。</li>
+<li>定位器自愈（FR-10）：locator_stale 簇 → A3 建议（confidence ≥ 0.7 才可应用）→ heal_apply 审批 → 新 TestCaseVersion。</li>
+</ul>
+
+<h2>5. 本地卷对象存储</h2>
+<pre><code># object_store.py：确定性 object_key + 路径安全 + checksum
+key = generate_object_key(organization_id=..., artifact_id=..., filename="trace.zip")
+checksum = write_bytes(object_key=key, data=data)     # sha256 落库
+assert verify_checksum(key, checksum)                  # 下载前必验，不符 → HT-VAL-003</code></pre>
+
+<h2>6. 审计检索（P24）</h2>
+<p><code>AuditEvent</code> append-only，API-024 全字段检索（actor / request_hash / approval / resource / external_request_id…）。副作用动作的关键节点都会写审计——「每个副作用可归因」是产品原则。</p>
+<div class="tip"><b>新手任务</b>：跑 <code>uv run pytest tests/test_api_220_221_artifacts.py -q</code> 与 <code>tests/test_api_026_027_028_223_evidence.py -q</code>，观察「跨租户 404 / Restricted 403 / 受理≠完成」三条断言。</div>
+
+<div class="pager"><a href="run-orchestration.html">← 上一篇</a><a href="approval-policy.html">下一篇：approval_policy →</a></div>
+</div></body></html>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · test_assets</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › test_assets</div>
+<h1>test_assets · 用例 / 计划 / 基线</h1>
+<p>模块位置：<code>backend/app/modules/test_assets/</code>。管的是「测什么」：用例（TestCase）、测试计划（TestPlan）、性能基线（PerfBaseline）与导入源（ImportSource）。</p>
+
+<h2>1. TestCase：生命周期与版本</h2>
+<pre><code>DRAFT ──submit-review──▶ PENDING_REVIEW ──review(approve)──▶ ACTIVE
+   ▲                          │
+   │                     review(reject)
+   └──────────── 回到 DRAFT ◀─┘        ACTIVE ──失效判定──▶ validity=invalid</code></pre>
+<ul>
+<li>每次变更产生不可变 <code>TestCaseVersion</code>（version_seq 递增，快照含 steps/assertions/locator_health）；<code>current_version_id</code> 指向当前版本。</li>
+<li><code>case_type ∈ {api, web, performance, referenced}</code>；<code>execution_mode ∈ {script, agent}</code>。执行时二者必须匹配（API-062 校验）。</li>
+<li><b>ai-generated 标签</b>：AI 生成的用例在后端打标；ACTIVE 前置人工评审（FR-05）。</li>
+<li><b>ai-generated</b> 的用例被聚类修正（heal_apply）时走「审批 → 新 Version + CAS」，且回滚指针 API-039 可退回上一版本。</li>
+</ul>
+
+<h2>2. 关键 API</h2>
+<table>
+<tr><th>API</th><th>方法/路径</th><th>说明</th></tr>
+<tr><td>API-030/031</td><td>GET <code>/test-cases[/{id}]</code></td><td>列表/详情（筛选进 URL：case_type、tags、q…）</td></tr>
+<tr><td>API-032</td><td>POST <code>/test-cases</code></td><td>创建草稿（幂等键必带）</td></tr>
+<tr><td>API-034/035</td><td>POST <code>.../submit-review | /review</code></td><td>提交评审 / 评审决策（CAS expected_version）</td></tr>
+<tr><td>API-037/038</td><td>GET <code>.../versions</code></td><td>版本列表/快照（不可变）</td></tr>
+<tr><td>API-039</td><td>POST <code>.../rollback</code></td><td>回滚到上一版本（heal 后用）</td></tr>
+<tr><td>API-050–055</td><td><code>/test-plans</code></td><td>TestPlan CRUD / 绑用例集 / 定时绑定</td></tr>
+<tr><td>API-056–059</td><td><code>/perf-baselines</code></td><td>性能基线（同场景唯一活跃，创建自动 CAS 停用旧活跃）</td></tr>
+<tr><td>API-200/205</td><td><code>/test-cases/imports</code>、<code>/import-sources</code></td><td>Excel/OpenAPI/Postman/curl 导入（隔离+校验+checksum）</td></tr>
+</table>
+
+<h2>3. 引用型用例（referenced）与 Job 契约</h2>
+<p>引用型用例不托管脚本，只声明「目标 Job + 参数 + 采集配置 + 门禁阈值映射」，实际执行在外部 CI（Jenkins）。平台侧保存的是 Job 引用，运行结果经归一化统一为 TestRun（见 <a href="run-orchestration.html">执行编排</a>）。</p>
+
+<h2>4. PerfBaseline 语义</h2>
+<pre><code>{"scenario_test_case_id": "&lt;performance 用例&gt;",
+ "metrics_snapshot": {"p95_ms": 120.0},   // 创建后不可变
+ "tolerance": {"rt": 0.2},                // RT/TPS 容忍度
+ "is_active": true}                        // 同场景唯一活跃（partial unique index）</code></pre>
+<ul>
+<li>创建新活跃基线时 <b>CAS 停用旧活跃</b>；带 <code>expected_active_version</code> 可做乐观锁（不符 → <code>HT-VER-001</code>）。</li>
+<li>压测发起走 API-062，<b>不</b>走基线接口；基线对比数据在 API-059 供人审，不参与门禁自动判定。</li>
+</ul>
+
+<h2>5. 可变聚合一律 CAS</h2>
+<pre><code># PATCH /test-cases/{id}  携带 expected_version，服务端 with_for_update 后比对
+if case.aggregate_version != expected_version:
+    raise ValueError("version")   # → 409 HT-VER-001</code></pre>
+<div class="tip"><b>新手任务</b>：用 <code>tests/test_run_helpers.py::create_active_script_case</code> 的流程手工走一遍「创建 → 提交评审 → 批准 → ACTIVE」，再用 <code>uv run pytest tests/test_api_030_035_test_cases.py -q</code> 对照。</div>
+
+<div class="pager"><a href="identity-tenancy.html">← 上一篇</a><a href="run-orchestration.html">下一篇：run_orchestration →</a></div>
+</div></body></html>

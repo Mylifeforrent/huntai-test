@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · 开发工作流与红线</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › 开发工作流</div>
+<h1>开发工作流与仓库红线</h1>
+<p>本页汇总日常开发必用：分支/提交规范、测试与验证、错误码、以及 20 条红线速查。</p>
+
+<h2>1. 分支与提交</h2>
+<pre><code>feat|fix/&lt;slug&gt;      # 代码分支；里程碑级可用 feat/M3 这类粗粒度分支
+&lt;type&gt;(&lt;scope&gt;): &lt;中文祈使句 ≤72 字，不加句号&gt;
+# type ∈ feat fix docs style refactor test chore perf ci build revert
+# 例：feat(backend): 落地压测编排与性能基线（FR-11）
+# 依赖锁文件（uv.lock / package-lock）变更必须独立成 commit
+# pre-commit（含 gitleaks）必须通过；禁止 --no-verify</code></pre>
+
+<h2>2. 验证命令（合入前必须真跑、零失败）</h2>
+<pre><code>cd backend  &amp;&amp; uv run ruff check . &amp;&amp; uv run ruff format --check . &amp;&amp; uv run mypy app &amp;&amp; uv run pytest
+cd frontend &amp;&amp; npm run lint &amp;&amp; npx tsc --noEmit &amp;&amp; npm run build &amp;&amp; npm run test</code></pre>
+<table>
+<tr><th>测试要求</th><th>说明</th></tr>
+<tr><td>service/domain 新函数</td><td>至少 1 条正例；含分支或外部调用再加 1 条异常路径</td></tr>
+<tr><td>API 端点</td><td>至少 1 条 happy-path（httpx AsyncClient，见 tests/）</td></tr>
+<tr><td>修 bug</td><td>先写复现测试再修</td></tr>
+</table>
+
+<h2>3. 错误码速查（ErrorEnvelope：code/class/subclass/message/retryable/trace_id）</h2>
+<table>
+<tr><th>场景</th><th>HTTP</th><th>code</th></tr>
+<tr><td>未认证</td><td>401</td><td>HT-AUTH-001（禁止伪装 404）</td></tr>
+<tr><td>需再认证（L3+ 窗口）</td><td>401</td><td>HT-AUTH-002</td></tr>
+<tr><td>HMAC 验签失败</td><td>401/403</td><td>HT-AUTH-004（仍写审计）</td></tr>
+<tr><td>同租户无权限 / 四眼违例</td><td>403</td><td>HT-IAM-001 / 002</td></tr>
+<tr><td>跨租户 / 不可感知</td><td>404</td><td>HT-RES-001（禁止 403 探测存在性）</td></tr>
+<tr><td>Policy 拒绝 / 白名单外压测</td><td>403</td><td>HT-POL-001 / 002</td></tr>
+<tr><td>CAS 版本冲突</td><td>409</td><td>HT-VER-001</td></tr>
+<tr><td>状态不允许</td><td>409</td><td>HT-STATE-001</td></tr>
+<tr><td>幂等冲突 / 外部 unknown</td><td>409</td><td>HT-IDEM-001 / HT-EXT-002</td></tr>
+<tr><td>配额不足</td><td>429</td><td>HT-QUOTA-001</td></tr>
+<tr><td>schema 校验失败</td><td>400</td><td>HT-VAL-004</td></tr>
+</table>
+
+<h2>4. 红线速查（全 20 条见根 AGENTS.md §7）</h2>
+<div class="warn">
+① 秘密/.env 值/PII 不入仓库、日志、Prompt。② 冻结文档改动需 change_log + 用户批准 + 展示 diff。③ 验证零失败才可提交，禁止 --no-verify。④ 新依赖需批准+审计+落锁，锁文件独立 commit。⑤ 禁 pip/poetry/pnpm/yarn。⑥ 不硬编码配置。⑦ 前端不直连外部系统、凭证不落 localStorage。⑧ 前端不推演状态机/门禁/幂等键。⑨ Restricted 不进日志/Trace/Artifact/错误体。⑩ AI 必经 AIInvocationLog，业务模块禁连模型厂商。⑪ Agent 结果不进门禁；L2+ 必须审批。⑫ SSE 不是命令通道；禁 WebSocket/GraphQL/gRPC；未到期不启用 MinIO/Redis/Temporal/Vault。⑬ 不删 Starlette 显式依赖；禁 React Router loader/action；shadcn 保持源码内置。⑭ 不新增第 24 对象 / P26+ / 未登记编号。⑮ 不自行裁决 [CONFLICT]。⑯ 禁止对 unknown 盲重试。⑰ 跨租户 404、无租户拒绝。⑱ MCP 三份清单一致。⑲ docs/ 阶段目录结构不动。⑳ 切片合入前回写 Stage 10 进度。
+</div>
+
+<h2>5. 切片工作流（本仓库的实际节奏）</h2>
+<pre><code>1. 领切片：ai_context.md §4 里程碑表（S-Mx-yy，状态 未做）
+2. 读契约：prd（US/FR/AC）→ problem_model（对象/状态机）→ api_spec（端点）→ data_model（表）
+3. 出 Plan：目标/不做/文件/步骤/验证 → 用户确认
+4. 实现：先契约后代码；跨模块只走 query/command port（返回 dict，不借 ORM）
+5. 验证：双端四连命令全绿
+6. 回写：ai_context.md 状态列（未做/部分完成/完成）+ context/mN.md 要点与残留
+7. 提交：type(scope) 中文祈使句；推送后按里程碑 --no-ff 合回 main</code></pre>
+
+<h2>6. 数据库迁移</h2>
+<pre><code># backend/alembic/versions/0001…0025，命名：序号_主题.py
+# revision 链必须单线；新表建在对应模块 schema 下（如 release_orchestration）
+# 测试套件真实执行 alembic upgrade head —— 迁移错误会在 pytest 里暴露
+uv run alembic upgrade head</code></pre>
+
+<div class="tip"><b>恭喜</b>：读到这里你已经覆盖了入职所需的全部骨架。接下来最好的学习方式是挑一个 <code>tests/</code> 目录里的测试文件，顺着断言去读对应的实现。</div>
+
+<div class="pager"><a href="frontend-guide.html">← 上一篇</a><a href="index.html">回到总览 →</a></div>
+</div></body></html>

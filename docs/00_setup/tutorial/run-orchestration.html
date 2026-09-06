@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · run_orchestration</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › run_orchestration</div>
+<h1>run_orchestration · 执行编排（核心模块）</h1>
+<p>模块位置：<code>backend/app/modules/run_orchestration/</code>。管「怎么跑」：TestRun 十态状态机、四条执行路径（script 接口 / Playwright Web / Agent / 外部 CI / 压测）、Worker 子进程、回执与 SSE。</p>
+
+<h2>1. TestRun 十态（唯一权威在后端）</h2>
+<pre><code>[*] → PENDING → VALIDATING → RUNNING ─┬─▶ SUCCEEDED / FAILED（终态）
+                    │                  ├─▶ WAITING_APPROVAL（遇 L2+ 动作；批准→RUNNING）
+                    │                  ├─▶ WAITING_EXTERNAL（外部 CI；观察回填）
+                    │                  └─▶ STOPPING ─▶ CANCELLED
+                    └─▶ FAILED（校验失败/环境不可用等）
+RUNNING 超过心跳窗口 ──僵尸回收──▶ TIMEOUT</code></pre>
+<ul>
+<li><b>受理 ≠ 完成</b>：API-062 返回 200 + 回执只是「已受理」；终态以 API-061 GET 为准，SSE（API-210）只是 hint。</li>
+<li><b>取消 ≠ 已取消</b>：RUNNING 中取消先到 STOPPING（持久化 <code>stop_signal_at</code>），worker 消费信号后才落 CANCELLED。</li>
+<li>自动重试只适用于功能回归 run；<b>压测与 Agent 任务禁止自动重试</b>。</li>
+</ul>
+
+<h2>2. 四条执行路径（都在 VALIDATING 后分叉）</h2>
+<table>
+<tr><th>路径</th><th>执行者</th><th>要点</th></tr>
+<tr><td>script · api</td><td>进程内 httpx runner</td><td>六类断言、双层变量（params 覆盖步骤）、partial 检测</td></tr>
+<tr><td>script · web</td><td><code>playwright_worker</code> 子进程</td><td>截图/视频/Trace 三件套；失败 web 步骤 <code>observation_ref</code> 指向 trace</td></tr>
+<tr><td>agent</td><td><code>agent_worker</code> 子进程</td><td>Tool Router（白名单→Policy Gate）→ A8 轨迹 Artifact；连续 3 次 DENY 自动终止；<b>不进门禁</b></td></tr>
+<tr><td>external_ci</td><td>Jenkins + 轮询/webhook</td><td>Job 契约、日志分片增量拉取、报告适配器（junit/allure/playwright/pytest）归一化</td></tr>
+<tr><td>performance</td><td><code>perf_worker</code> 子进程（包装 Locust）</td><td>白名单外 HT-POL-002 直接拒；场景互斥排队；并发预算；kill switch 60s 熔断；abort_on_breach；压力机自监控</td></tr>
+</table>
+
+<h2>3. Worker 子进程模式（本仓库最重要的模式）</h2>
+<pre><code># executor.py 统一写法
+proc = await asyncio.create_subprocess_exec(
+    sys.executable, "-m", "app.modules.run_orchestration.&lt;worker&gt;", payload_path,
+    cwd=str(Path(__file__).resolve().parents[3]))
+out, err = await proc.communicate()      # worker 自行写库（CaseResult/StepRun/Artifact）</code></pre>
+<ul>
+<li>worker 是独立进程，<b>没有</b> asyncio.create_task 跑 DB 的写法（仓库红线）。</li>
+<li>长生命周期任务（压测）为 fire-and-forget：executor 派生后即返回，避免受理请求被内联阻塞；收尾（终态/配额释放/门禁/排队晋升）由 worker 自己完成。</li>
+<li>心跳：<code>update_test_run_status(..., heartbeat=True)</code>；僵尸回收 <code>reclaim_stale_active_runs</code> 把超时 RUNNING 打成 TIMEOUT。</li>
+</ul>
+
+<h2>4. 受理纪律：幂等键 + 回执</h2>
+<pre><code>POST /api/v1/test-runs
+Idempotency-Key: &lt;uuid&gt;        # 必带；同 key 同哈希=重放原响应，不同哈希=409 HT-IDEM-001
+
+→ 200 {"data": {"id": "...", "receipt": {"id": "receipt-uuid", "status": "accepted", ...}}}
+
+GET /api/v1/command-receipts/{receipt_id}          # 回执查询（通用）
+GET /api/v1/test-runs/{run_id}/events              # SSE 进度（只读 hint，禁止当命令通道）</code></pre>
+<p><code>command_receipts</code> 表由 run_orchestration 托管，其他模块（证据导出、Release 重试）通过 <code>command_port.create_command_receipt_for_command</code> 跨模块落回执——<b>跨模块只走 port（返回 dict），禁止 import 他模块 ORM</b>。</p>
+
+<h2>5. 压测特有纪律（FR-11）</h2>
+<table>
+<tr><th>机制</th><th>行为</th></tr>
+<tr><td>白名单</td><td>TARGET_ENV 必须命中场景参数 <code>perf_whitelist</code> 前缀；否则受理直接 <code>HT-POL-002</code>，不建审批</td></tr>
+<tr><td>场景互斥</td><td>同场景已有在途 run → 新 run 保持 PENDING（<code>perf_queued</code>）；终态后由 worker 晋升一个，永不并行施压</td></tr>
+<tr><td>并发预算</td><td><code>OrgQuota.perf_concurrency_in_use</code> 占用/释放；耗尽 → run FAILED（perf_quota_exhausted）</td></tr>
+<tr><td>kill switch</td><td>worker 每 5s 查 <code>tightened_modules</code> 含 <code>performance</code> → 终止 Locust → CANCELLED（60s 窗口内）</td></tr>
+<tr><td>abort_on_breach</td><td>实时 p95/错误率超场景阈值 → 停止施压 → FAILED</td></tr>
+<tr><td>压力机自监控</td><td>psutil 采 CPU；施压机饱和与「目标慢」分开判定，写 perf_report</td></tr>
+</table>
+
+<h2>6. 新手任务</h2>
+<div class="tip">读 <code>executor.py::run_test_run_background</code> 的分叉结构 → 跑 <code>uv run pytest tests/test_api_060_063_test_runs.py -q</code> → 观察 STOPPING/stop_signal_at 的消费路径（<code>complete_stopping_run</code>）。</div>
+
+<div class="pager"><a href="test-assets.html">← 上一篇</a><a href="results-evidence.html">下一篇：results_evidence →</a></div>
+</div></body></html>

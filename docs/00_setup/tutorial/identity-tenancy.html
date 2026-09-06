@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HuntAI Test 教程 · identity_tenancy</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--accent:#2563eb;--bg:#f8fafc;--card:#ffffff;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.wrap{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-size:1.7em;border-bottom:3px solid var(--accent);padding-bottom:8px}h2{font-size:1.3em;margin-top:2em;border-left:4px solid var(--accent);padding-left:10px}h3{font-size:1.1em;margin-top:1.5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em}
+code{background:#eef2ff;padding:1px 5px;border-radius:4px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#eff6ff}
+.tip,.warn{border-radius:8px;padding:12px 14px;margin:14px 0}.tip{background:#ecfdf5;border:1px solid #a7f3d0}.warn{background:#fef2f2;border:1px solid #fecaca}
+.tip b{color:#047857}.warn b{color:#b91c1c}
+nav.toc{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 18px;margin:18px 0}
+.muted{color:var(--muted)}.crumb{font-size:.85em;color:var(--muted);margin-bottom:14px}.pager{display:flex;justify-content:space-between;margin-top:40px}
+</style>
+</head>
+<body><div class="wrap">
+<div class="crumb"><a href="index.html">总览</a> › identity_tenancy</div>
+<h1>identity_tenancy · 租户、认证与 RBAC</h1>
+<p>模块位置：<code>backend/app/modules/identity_tenancy/</code>。它是所有请求的第一道门：会话是谁、属于哪个组织、在项目里是什么角色，都从这里来。</p>
+
+<h2>1. 核心对象</h2>
+<table>
+<tr><th>对象</th><th>说明</th></tr>
+<tr><td><b>Organization</b></td><td>租户。所有业务表都带 <code>organization_id</code>，查询必须带租户上下文</td></tr>
+<tr><td><b>User</b></td><td>由 IdP（OIDC）登录引入，本地只存 <code>idp_subject</code> 映射，不存密码</td></tr>
+<tr><td><b>Project / ProjectMember</b></td><td>项目及成员；角色（owner / admin / tester / viewer）挂在<b>项目成员关系</b>上，不是全局角色</td></tr>
+<tr><td><b>AuthSession</b></td><td>服务端会话；HttpOnly + Secure + SameSite Cookie，禁止写 localStorage</td></tr>
+<tr><td><b>ApiToken</b></td><td>机器身份：Bearer 头，库内只存 argon2 哈希，scopes ⊆ read/write/execute/delete，project_ids 白名单</td></tr>
+<tr><td><b>OrgQuota / capability_controls</b></td><td>组织级配额与 kill switch（见 <a href="quota-governance.html">quota_governance</a>）</td></tr>
+</table>
+
+<h2>2. 认证通道（三条，各走各的门）</h2>
+<table>
+<tr><th>通道</th><th>流程</th><th>关键纪律</th></tr>
+<tr><td>OIDC 会话（浏览器）</td><td>API-001 <code>/auth/oidc/start</code> 生成 state+nonce+PKCE → IdP 登录 → API-002 callback 校验 → 发 Cookie</td><td>callback 必须校验 state/nonce/PKCE；浏览器永远不接触 IdP token 明文</td></tr>
+<tr><td>ApiToken（机器）</td><td><code>Authorization: Bearer ht_...</code>，经 <code>require_session_or_token_*</code> 依赖项认证</td><td>明文只在签发响应出现一次；scopes 与 project_ids 限权；禁止替代审批/Policy Gate</td></tr>
+<tr><td>HMAC（入站 Webhook）</td><td>API-090 <code>/inbound-webhooks/{connector_id}</code>，先验签再归属、去重、落观察</td><td>观察行禁止直接改 TestRun / release_tasks 等领域表</td></tr>
+</table>
+
+<h2>3. RBAC：角色怎么参与鉴权</h2>
+<pre><code># 服务端每请求强制；前端置灰只是体验，不是安全边界
+role = await identity_query.get_project_membership_role(
+    session, organization_id=..., project_id=..., user_id=...
+)
+if role is None:            # 跨租户/跨项目：一律 404，不泄露存在性
+    raise ValueError("not_found")
+if role not in WRITE_ROLES: # 同租户但角色不够：403 HT-IAM-001
+    raise ValueError("forbidden")</code></pre>
+<table>
+<tr><th>角色</th><th>读</th><th>写（用例/计划/Release）</th><th>发起执行/压测</th><th>审批/管理</th></tr>
+<tr><td>owner / admin</td><td>✅</td><td>✅</td><td>✅</td><td>✅（且审批人 ≠ 发起人）</td></tr>
+<tr><td>tester</td><td>✅</td><td>✅</td><td>✅</td><td>❌（可发起审批）</td></tr>
+<tr><td>viewer</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+</table>
+<div class="warn"><b>fail-close 纪律</b>：凡是契约标注 TBD 的权限问题（如「viewer 能否导出」），一律拒绝并返回 <code>HT-IAM-001</code>，绝不发明默认放行。</div>
+
+<h2>4. 会话与再认证（step-up）</h2>
+<ul>
+<li>Cookie 名称 / TTL 由 <code>.env</code>（<code>SESSION_COOKIE_NAME</code>、<code>SESSION_TTL_SECONDS</code>）注入，代码不硬编码。</li>
+<li>L3+ 高危动作超时窗口内要求再认证：返回 <code>401 + HT-AUTH-002</code>（<code>REQUIRE_REAUTH</code>）；完成后同一 <code>Idempotency-Key</code> 仅当请求哈希不变才可重放。</li>
+<li>登录态本身也是资源：API-003 登出、API-004 再认证、API-005 <code>/me</code> 返回用户 + 组织 + 成员关系。</li>
+</ul>
+
+<h2>5. kill switch（组织级关停）</h2>
+<p>API-199 <code>POST /organizations/current/capability-controls/tighten</code>（L1，即时生效，不走审批）：</p>
+<pre><code>{
+  "expected_version": &lt;org.aggregate_version&gt;,
+  "target": {"level": "module", "module": "copilot"},   // 模块码：copilot / performance ...
+  "reason": "incident"
+}</code></pre>
+<ul>
+<li><b>关停（收紧）= L1 即时</b>；<b>恢复（放开）= L3</b>，必须走 <code>kill_switch_restore</code> 审批，禁止用 tighten 放开。</li>
+<li>效果落 <code>organizations.capability_controls</code>（<code>tightened_modules</code> / <code>tightened_capabilities</code> 等），各模块在动作前自查——Copilot 提问、压测施压进程都会因此真实失败（AC-069）。</li>
+</ul>
+
+<h2>6. 新手任务</h2>
+<div class="tip">读 <code>tests/test_api_001_oidc_start.py</code> → <code>test_api_013_members.py</code>，跑 <code>uv run pytest tests/test_api_005_me.py -q</code>，观察 <code>/me</code> 返回的组织与成员关系结构。</div>
+
+<div class="pager"><a href="index.html">← 总览</a><a href="test-assets.html">下一篇：test_assets →</a></div>
+</div></body></html>
