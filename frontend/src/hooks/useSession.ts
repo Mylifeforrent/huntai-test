@@ -4,8 +4,10 @@ import { api } from "@/api/client";
 import { ApiError } from "@/api/errors";
 import { queryKeys } from "@/api/queryKeys";
 import {
+  clearOidcFailureInUrl,
   currentReturnPath,
   isAuthRedirectInProgress,
+  isOidcFailureRecovery,
   shouldBlockAuthenticatedShell,
   startOidcLogin,
 } from "@/api/session";
@@ -32,6 +34,7 @@ export function useSession() {
       return;
     }
     if (meQuery.isSuccess) {
+      clearOidcFailureInUrl();
       setPhase("ready");
       setBlockError(null);
       return;
@@ -47,16 +50,19 @@ export function useSession() {
       return;
     }
 
-    if (error instanceof ApiError) {
-      const code = error.body?.code;
-      if (code === "HT-AUTH-001" || code === "HT-AUTH-003") {
-        setPhase("redirecting");
-        void startOidcLogin(currentReturnPath()).catch((redirectError) => {
-          setBlockError(redirectError);
-          setPhase("blocked");
-        });
-        return;
-      }
+    if (isOidcFailureRecovery() || (error instanceof ApiError && error.body?.code === "HT-AUTH-003")) {
+      setBlockError(error);
+      setPhase("blocked");
+      return;
+    }
+
+    if (error instanceof ApiError && error.body?.code === "HT-AUTH-001") {
+      setPhase("redirecting");
+      void startOidcLogin(currentReturnPath()).catch((redirectError) => {
+        setBlockError(redirectError);
+        setPhase("blocked");
+      });
+      return;
     }
 
     setBlockError(error);

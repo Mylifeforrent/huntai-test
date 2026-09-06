@@ -27,6 +27,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.core.config import get_settings
 
 MOCK_SUBJECT = "local-dev-user"
+# Local mock only (loopback). Not a HuntAI product password and not stored in the app DB.
+MOCK_PASSWORD = "local-dev"
+MOCK_SSO_COOKIE = "huntai_mock_sso"
 CODE_TTL = timedelta(minutes=5)
 ID_TOKEN_TTL = timedelta(minutes=5)
 
@@ -106,8 +109,80 @@ def jwks() -> dict[str, list[dict[str, Any]]]:
     return {"keys": [_public_jwk_dict]}
 
 
+def _issue_code_redirect(
+    *,
+    redirect_uri: str,
+    state: str,
+    nonce: str,
+    code_challenge: str,
+    client_id: str,
+    set_sso_cookie: bool,
+) -> RedirectResponse:
+    code = secrets.token_urlsafe(32)
+    _codes[code] = AuthCode(
+        redirect_uri=redirect_uri,
+        nonce=nonce,
+        code_challenge=code_challenge,
+        client_id=client_id,
+        expires_at=datetime.now(UTC) + CODE_TTL,
+    )
+    query = urlencode({"code": code, "state": state})
+    response = RedirectResponse(url=f"{redirect_uri}?{query}", status_code=302)
+    if set_sso_cookie:
+        response.set_cookie(MOCK_SSO_COOKIE, "1", httponly=True, samesite="lax")
+    return response
+
+
+def _login_form(
+    *,
+    redirect_uri: str,
+    state: str,
+    nonce: str,
+    code_challenge: str,
+    client_id: str,
+    message: str,
+    error: str = "",
+) -> HTMLResponse:
+    error_html = f"<p style='color:#b42318'>{escape(error)}</p>" if error else ""
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Mock IdP</title></head>
+<body style="font-family:sans-serif;max-width:32rem;margin:4rem auto;line-height:1.5">
+  <h1>本地 Mock 身份提供商</h1>
+  <p>这不是 HuntAI 产品登录页。企业 SSO 上线后由真实 IdP 替换。</p>
+  <p>{escape(message)}</p>
+  <p>合成账号 <code>{escape(MOCK_SUBJECT)}</code>
+     须与库中 <code>users.idp_subject</code> 一致（无 JIT）。
+     合成口令仅 mock 进程内比对，不是产品密钥。</p>
+  {error_html}
+  <form method="post" action="/authorize/complete">
+    <input type="hidden" name="redirect_uri" value="{escape(redirect_uri, quote=True)}">
+    <input type="hidden" name="state" value="{escape(state, quote=True)}">
+    <input type="hidden" name="nonce" value="{escape(nonce, quote=True)}">
+    <input type="hidden" name="code_challenge" value="{escape(code_challenge, quote=True)}">
+    <input type="hidden" name="client_id" value="{escape(client_id, quote=True)}">
+    <p><label>用户名 <input name="username" autocomplete="username"></label></p>
+    <p>
+      <label>密码
+        <input name="password" type="password" autocomplete="current-password">
+      </label>
+    </p>
+    <button type="submit" style="padding:.6rem 1rem">使用企业账号登录</button>
+  </form>
+  <form method="get" action="/authorize/fail" style="margin-top:1.5rem">
+    <input type="hidden" name="redirect_uri" value="{escape(redirect_uri, quote=True)}">
+    <input type="hidden" name="state" value="{escape(state, quote=True)}">
+    <button type="submit">模拟 SSO 失败返回应用</button>
+  </form>
+</body>
+</html>"""
+    )
+
+
 @app.get("/authorize")
 def authorize(
+    request: Request,
     response_type: str = Query(default=""),
     client_id: str = Query(default=""),
     redirect_uri: str = Query(default=""),
@@ -116,7 +191,8 @@ def authorize(
     code_challenge: str = Query(default=""),
     code_challenge_method: str = Query(default=""),
     scope: str = Query(default=""),
-) -> HTMLResponse:
+    prompt: str = Query(default=""),
+) -> HTMLResponse | RedirectResponse:
     _ = scope
     settings = get_settings()
     errors: list[str] = []
@@ -135,49 +211,74 @@ def authorize(
         body = "<br>".join(errors)
         return HTMLResponse(f"<h1>Mock IdP 拒绝授权</h1><p>{body}</p>", status_code=400)
 
-    return HTMLResponse(
-        f"""<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><title>Mock IdP</title></head>
-<body style="font-family:sans-serif;max-width:32rem;margin:4rem auto;line-height:1.5">
-  <h1>本地 Mock 身份提供商</h1>
-  <p>这不是 HuntAI 产品登录页。企业 SSO 上线后由真实 IdP 替换。</p>
-  <p>将签发 <code>sub={escape(MOCK_SUBJECT)}</code>。
-     须与库中 <code>users.idp_subject</code> 一致（无 JIT）。</p>
-  <form method="get" action="/authorize/complete">
-    <input type="hidden" name="redirect_uri" value="{escape(redirect_uri, quote=True)}">
-    <input type="hidden" name="state" value="{escape(state, quote=True)}">
-    <input type="hidden" name="nonce" value="{escape(nonce, quote=True)}">
-    <input type="hidden" name="code_challenge" value="{escape(code_challenge, quote=True)}">
-    <input type="hidden" name="client_id" value="{escape(client_id, quote=True)}">
-    <button type="submit" style="padding:.6rem 1rem">以本地用户登录</button>
-  </form>
-</body>
-</html>"""
+    if prompt != "login" and request.cookies.get(MOCK_SSO_COOKIE) == "1":
+        return _issue_code_redirect(
+            redirect_uri=redirect_uri,
+            state=state,
+            nonce=nonce,
+            code_challenge=code_challenge,
+            client_id=client_id,
+            set_sso_cookie=False,
+        )
+
+    message = (
+        "已按 prompt=login 要求出示账号密码表单。"
+        if prompt == "login"
+        else "企业 SSO 未成功，请输入公司账号密码。"
     )
-
-
-@app.get("/authorize/complete")
-def authorize_complete(
-    redirect_uri: str = Query(default=""),
-    state: str = Query(default=""),
-    nonce: str = Query(default=""),
-    code_challenge: str = Query(default=""),
-    client_id: str = Query(default=""),
-) -> RedirectResponse:
-    settings = get_settings()
-    if client_id != settings.oidc_client_id or redirect_uri != settings.oidc_redirect_uri:
-        return RedirectResponse(url="/authorize", status_code=303)
-
-    code = secrets.token_urlsafe(32)
-    _codes[code] = AuthCode(
+    return _login_form(
         redirect_uri=redirect_uri,
+        state=state,
         nonce=nonce,
         code_challenge=code_challenge,
         client_id=client_id,
-        expires_at=datetime.now(UTC) + CODE_TTL,
+        message=message,
     )
-    query = urlencode({"code": code, "state": state})
+
+
+@app.post("/authorize/complete")
+async def authorize_complete(request: Request) -> HTMLResponse | RedirectResponse:
+    settings = get_settings()
+    raw = (await request.body()).decode("utf-8")
+    form = {key: values[-1] for key, values in parse_qs(raw, keep_blank_values=True).items()}
+    redirect_uri = form.get("redirect_uri", "")
+    state = form.get("state", "")
+    nonce = form.get("nonce", "")
+    code_challenge = form.get("code_challenge", "")
+    client_id = form.get("client_id", "")
+    username = form.get("username", "")
+    password = form.get("password", "")
+    if client_id != settings.oidc_client_id or redirect_uri != settings.oidc_redirect_uri:
+        return HTMLResponse("<h1>Mock IdP 拒绝授权</h1>", status_code=400)
+    if username != MOCK_SUBJECT or password != MOCK_PASSWORD:
+        return _login_form(
+            redirect_uri=redirect_uri,
+            state=state,
+            nonce=nonce,
+            code_challenge=code_challenge,
+            client_id=client_id,
+            message="企业 SSO 未成功，请输入公司账号密码。",
+            error="用户名或密码不正确。",
+        )
+    return _issue_code_redirect(
+        redirect_uri=redirect_uri,
+        state=state,
+        nonce=nonce,
+        code_challenge=code_challenge,
+        client_id=client_id,
+        set_sso_cookie=True,
+    )
+
+
+@app.get("/authorize/fail")
+def authorize_fail(
+    redirect_uri: str = Query(default=""),
+    state: str = Query(default=""),
+) -> RedirectResponse:
+    settings = get_settings()
+    if redirect_uri != settings.oidc_redirect_uri:
+        return RedirectResponse(url="/authorize", status_code=303)
+    query = urlencode({"error": "login_required", "state": state})
     return RedirectResponse(url=f"{redirect_uri}?{query}", status_code=302)
 
 

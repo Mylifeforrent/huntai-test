@@ -1,7 +1,7 @@
 # HuntAI Test API 契约（Stage 7）
 
 > - **Status: Draft**
-> - **日期**：2026-08-29 · **版本**：v1.0
+> - **日期**：2026-08-29（2026-09-06 修订） · **版本**：v1.1
 > - **阶段**：Stage 7 · 数据模型与 API 规范 · 本文件只覆盖 **OpenAPI 3.1 风格接口契约**
 > - **文档定位**：把 [前后端边界](../06_architecture_design/frontend_backend_boundary_spec-v1.0.md) 的语义操作与已定稿架构的命令/查询/SSE/Webhook 原则落到路径、方法、请求/响应语义、错误码与鉴权。实现映射（FastAPI / Pydantic / ORM）留给 Stage 11/12。
 > - **实现边界**：本文不含可执行代码、DDL、Alembic、ORM 实体、部署配置、Redis/Temporal/MinIO/Vault 产品管理面。
@@ -366,7 +366,7 @@ HTTP 5xx 响应体仍用本外壳（`HT-INT-*` / `HT-NET-*`），不返回框架
 | `HT-NET-003` | — | network | — | SSE 断连（传输层，未必有 JSON 体） | 重连/降级轮询 |
 | `HT-AUTH-001` | 401 | permission | unauthenticated | 无会话或会话失效 | 完成登录后 |
 | `HT-AUTH-002` | 401 | permission | require_reauth | L3+ 需再认证 | 完成 API-004 后 |
-| `HT-AUTH-003` | 401 | permission | unauthenticated | OIDC `state`/`nonce`/PKCE 校验失败 | 否，重新 start |
+| `HT-AUTH-003` | 401 / 浏览器 302 | permission | unauthenticated | OIDC `state`/`nonce`/PKCE 失败或 IdP `error` | SPA 恢复面后重新 start |
 | `HT-AUTH-004` | 401/403 | permission | unauthenticated | 入站 HMAC 验签失败；不泄露签名材料 | 否 |
 | `HT-IAM-001` | 403 | permission | forbidden | 角色不足 | 否 |
 | `HT-IAM-002` | 403 | permission | forbidden | 四眼违例 | 否 |
@@ -439,7 +439,7 @@ HTTP 5xx 响应体仍用本外壳（`HT-INT-*` / `HT-NET-*`），不返回框架
 | `HT-NET-003` | `true`（通道） | SSE 重连或降级 GET 轮询 | 无 JSON 体亦可；禁止改业务态 |
 | `HT-AUTH-001` | `false` → 认证后可再发 | 完成 SSO / 换有效 Token 后视为新请求周期 | 无会话或失效；不得伪装 404 |
 | `HT-AUTH-002` | `false` → step-up 后可重放 | `API-004` 成功且 **hash 不变** 的同一 key | `REQUIRE_REAUTH` |
-| `HT-AUTH-003` | `false` | 重新 `API-001` | `state`/`nonce`/PKCE 失败 |
+| `HT-AUTH-003` | `false` | SPA 停恢复面后重新 `API-001`（`prompt=login`） | `state`/`nonce`/PKCE 失败或 IdP `error`；浏览器走 API-002 失败 302 |
 | `HT-AUTH-004` | `false` | 修正签名/密钥配置；禁止用猜签名重试刷接口 | HMAC 失败仍审计 |
 | `HT-IAM-001` | `false` | 权限变更后由人再操作 | 角色不足 / 无组织上下文 |
 | `HT-IAM-002` | `false` | 换审批人 | 四眼违例 |
@@ -819,8 +819,8 @@ Confidential（如 email、标题、轨迹摘要）最小化、禁缓存；不�
 
 | ID | Method | Path | 类 | 鉴权 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| API-001 | GET | `/api/v1/auth/oidc/start` | — | Pub | 开始 Authorization Code + PKCE；设置 state/nonce |
-| API-002 | GET | `/api/v1/auth/oidc/callback` | — | Pub | IdP 回调；签发服务端会话 |
+| API-001 | GET | `/api/v1/auth/oidc/start` | — | Pub | 开始 Authorization Code + PKCE；设置 state/nonce；可选 `prompt=login` |
+| API-002 | GET | `/api/v1/auth/oidc/callback` | — | Pub | IdP 回调；签发服务端会话；失败 302 回 SPA（`oidc=failed`） |
 | API-003 | POST | `/api/v1/auth/session/logout` | 2 | Sess | 吊销会话 |
 | API-004 | POST | `/api/v1/auth/reauth` | 2 | Sess | L3+ step-up |
 | API-005 | GET | `/api/v1/me` | 1 | Sess | 用户、租户、项目角色 |
@@ -1068,20 +1068,20 @@ Confidential（如 email、标题、轨迹摘要）最小化、禁缓存；不�
 
 1. **鉴权**：无会话。限流见 §11（OIDC start 必覆盖）。
 2. **同步性**：同步。实现可为 `302` 至 IdP，或 `200` 返回 `authorization_url`（SPA）。
-3. **请求**：query `return_path`（可选）。必须是**相对路径白名单**内，防开放重定向。
+3. **请求**：query `return_path`（可选，必须是**相对路径白名单**内，防开放重定向）；query `prompt`（可选，**仅**允许省略或 `login`）。`prompt=login` 映射 OIDC `prompt=login`，用于 SSO 失败后强制 IdP 出示企业账号密码表单。首次登录**省略** `prompt`，由 IdP 自行尝试 SSO。非法 `prompt` → `HT-VAL-001`。
 4. **响应**：不返回 `code_verifier`（只存服务端会话草稿）；不返回 IdP token。
 5. **成功判定**：到达 IdP 授权页 **≠** 登录成功。权威成功以 API-002 签发会话且 API-005 可查询为准（边界 §6-14）。
-6. **错误码**：`HT-VAL-005`、`HT-QUOTA-002`、`HT-INT-001`。
-7. **幂等**：不适用。IdP、claim、MFA、会话时长 **TBD**。
+6. **错误码**：`HT-VAL-001`、`HT-VAL-005`、`HT-QUOTA-002`、`HT-INT-001`。
+7. **幂等**：不适用。IdP、claim、MFA、会话时长 **TBD**。HuntAI **不**收集或校验用户密码；密码表单只存在于 IdP。
 
 #### API-002 `GET /api/v1/auth/oidc/callback`
 
 1. **鉴权**：校验 `state` / `nonce` / PKCE `code`；尚无业务会话。
-2. **同步性**：同步；`302` 回前端并 Set-Cookie。
-3. **请求**：IdP query `code`、`state`。
+2. **同步性**：同步；成功 `302` 回前端并 Set-Cookie。
+3. **请求**：IdP query `code`、`state`；失败时可为 OIDC `error`（无 `code`）。
 4. **响应**：Body **不**返回 access_token / refresh_token 明文。
 5. **成功判定**：后续 `API-005` 返回租户与角色。无组织上下文 → 拒绝（`HT-IAM-001`），不创建默认租户。
-6. **错误码**：`HT-AUTH-003`、`HT-AUTH-001`、`HT-QUOTA-002`。
+6. **错误码 / 浏览器失败路径**：`state`/`nonce`/PKCE 失败、缺 `code`、或 IdP `error` 视为 `HT-AUTH-003`。对浏览器 **不**返回 ErrorEnvelope body，改为 `302` 至已校验的 `return_path`（缺省 `/`）并附加 query `oidc=failed`。失败跳转 URL **禁止**携带 `code` / `state` / IdP token / `code_verifier` / `error_description`。SPA 见到该标记必须停在全局壳恢复面，禁止自动再次 `API-001`。用户确认后重新 `API-001`（`prompt=login`）。失败仍写 `trace_id` 审计/日志，不记录密钥。
 7. **限流**：§11 必覆盖。
 
 #### API-006 `GET /api/v1/auth/session`
@@ -8909,4 +8909,5 @@ Worker 回写**唯一**业务路径是已登记领域命令，不是「Worker HT
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
+| v1.1 | 2026-09-06 | API-001 可选 `prompt=login`；API-002 浏览器失败 302 回 SPA（`oidc=failed`）。不新增端点编号，不升格 LDAP |
 | v1.0 | 2026-08-29 | 首版 Stage 7 API 契约：OpenAPI 3.1 风格、API-001… 清单、错误码、SSE/G1/G3/G5、限流语义 |

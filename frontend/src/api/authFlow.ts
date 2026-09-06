@@ -3,6 +3,9 @@ import { apiBaseUrl, newIdempotencyKey } from "./apiConfig";
 import type { OidcStartResponse, ReauthResponse } from "./types";
 import { isOidcAuthFailed, isRequireReauth, isUnauthenticated } from "./errors";
 
+export const OIDC_FAILURE_QUERY_KEY = "oidc";
+export const OIDC_FAILURE_QUERY_VALUE = "failed";
+
 let authRedirectInProgress = false;
 
 async function authRequest<T>(options: {
@@ -81,20 +84,50 @@ export function validateReturnPath(returnPath: string): boolean {
   return true;
 }
 
+export function stripOidcFailureMarker(pathWithSearch: string): string {
+  const url = new URL(pathWithSearch, "http://huntai.local");
+  url.searchParams.delete(OIDC_FAILURE_QUERY_KEY);
+  return `${url.pathname}${url.search}`;
+}
+
+export function isOidcFailureRecovery(search: string = window.location.search): boolean {
+  return new URLSearchParams(search).get(OIDC_FAILURE_QUERY_KEY) === OIDC_FAILURE_QUERY_VALUE;
+}
+
+export function markOidcFailureInUrl(): void {
+  const url = new URL(window.location.href);
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+    url.pathname = "/";
+    url.search = "";
+  }
+  url.searchParams.set(OIDC_FAILURE_QUERY_KEY, OIDC_FAILURE_QUERY_VALUE);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+}
+
+export function clearOidcFailureInUrl(): void {
+  if (!isOidcFailureRecovery()) {
+    return;
+  }
+  const next = stripOidcFailureMarker(`${window.location.pathname}${window.location.search}`);
+  window.history.replaceState(null, "", next);
+}
+
 export function currentReturnPath(): string {
-  const path = `${window.location.pathname}${window.location.search}`;
   const pathname = window.location.pathname;
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     return "/";
   }
-  return path;
+  return stripOidcFailureMarker(`${pathname}${window.location.search}`);
 }
 
-export async function startOidcLogin(returnPath?: string): Promise<void> {
+export async function startOidcLogin(
+  returnPath?: string,
+  options?: { prompt?: "login" },
+): Promise<void> {
   if (authRedirectInProgress) {
     return;
   }
-  const path = returnPath ?? currentReturnPath();
+  const path = stripOidcFailureMarker(returnPath ?? currentReturnPath());
   if (!validateReturnPath(path)) {
     throw toApiError({
       apiId: "API-001",
@@ -119,7 +152,7 @@ export async function startOidcLogin(returnPath?: string): Promise<void> {
       apiId: "API-001",
       path: "/auth/oidc/start",
       method: "GET",
-      query: { return_path: path },
+      query: { return_path: path, prompt: options?.prompt },
     });
     window.location.assign(result.authorization_url);
   } catch (error) {
@@ -132,7 +165,7 @@ export async function handleReauth(returnPath?: string): Promise<void> {
   if (authRedirectInProgress) {
     return;
   }
-  const path = returnPath ?? currentReturnPath();
+  const path = stripOidcFailureMarker(returnPath ?? currentReturnPath());
   if (!validateReturnPath(path)) {
     throw toApiError({
       apiId: "API-004",
@@ -171,7 +204,14 @@ export async function handleReauth(returnPath?: string): Promise<void> {
 }
 
 export function handleAuthApiError(error: ApiError): boolean {
-  if (isUnauthenticated(error) || isOidcAuthFailed(error)) {
+  if (isOidcAuthFailed(error)) {
+    markOidcFailureInUrl();
+    return true;
+  }
+  if (isUnauthenticated(error)) {
+    if (isOidcFailureRecovery()) {
+      return true;
+    }
     void startOidcLogin(currentReturnPath());
     return true;
   }
@@ -185,3 +225,4 @@ export function handleAuthApiError(error: ApiError): boolean {
 export function resetAuthRedirectState(): void {
   authRedirectInProgress = false;
 }
+

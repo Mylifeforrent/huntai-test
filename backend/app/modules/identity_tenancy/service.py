@@ -3,7 +3,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 from authlib.integrations.httpx_client import AsyncOAuth2Client
@@ -32,6 +32,9 @@ from app.modules.results_evidence.audit_port import (
 from app.modules.run_orchestration import query_port as run_query
 
 WORKBENCH_LIST_LIMIT = 50
+OIDC_FAILURE_QUERY_KEY = "oidc"
+OIDC_FAILURE_QUERY_VALUE = "failed"
+OIDC_PROMPT_LOGIN = "login"
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,47 @@ def validate_return_path(return_path: str | None) -> str:
     if path_only == "/api" or path_only.startswith("/api/"):
         raise ValueError("invalid_return_path")
     return return_path
+
+
+def strip_oidc_failure_marker(return_path: str) -> str:
+    parsed = urlparse(return_path)
+    pairs = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != OIDC_FAILURE_QUERY_KEY
+    ]
+    query = urlencode(pairs)
+    path = parsed.path or "/"
+    return f"{path}?{query}" if query else path
+
+
+def append_oidc_failure_marker(return_path: str) -> str:
+    cleaned = strip_oidc_failure_marker(return_path)
+    parsed = urlparse(cleaned)
+    pairs = list(parse_qsl(parsed.query, keep_blank_values=True))
+    pairs.append((OIDC_FAILURE_QUERY_KEY, OIDC_FAILURE_QUERY_VALUE))
+    path = parsed.path or "/"
+    return f"{path}?{urlencode(pairs)}"
+
+
+def normalize_oidc_prompt(prompt: str | None) -> str | None:
+    if prompt is None or prompt == "":
+        return None
+    if prompt != OIDC_PROMPT_LOGIN:
+        raise ValueError("invalid_prompt")
+    return OIDC_PROMPT_LOGIN
+
+
+async def resolve_oidc_failure_location(session: AsyncSession, state: str | None) -> str:
+    return_path = "/"
+    if state:
+        draft = await repo.get_oidc_draft_by_state(session, state)
+        if draft is not None and draft.return_path:
+            try:
+                return_path = validate_return_path(draft.return_path)
+            except ValueError:
+                return_path = "/"
+    return append_oidc_failure_marker(return_path)
 
 
 def compute_reauth_required(
@@ -94,8 +138,10 @@ async def start_oidc_flow(
     settings: Settings,
     *,
     return_path: str | None,
+    prompt: str | None = None,
 ) -> dict[str, str]:
-    normalized_path = validate_return_path(return_path)
+    normalized_prompt = normalize_oidc_prompt(prompt)
+    normalized_path = strip_oidc_failure_marker(validate_return_path(return_path))
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     code_verifier, code_challenge = repo.generate_pkce_pair()
@@ -113,6 +159,7 @@ async def start_oidc_flow(
         state=state,
         nonce=nonce,
         code_challenge=code_challenge,
+        prompt=normalized_prompt,
     )
     return {"authorization_url": authorization_url}
 
@@ -123,6 +170,7 @@ def build_authorization_url(
     state: str,
     nonce: str,
     code_challenge: str,
+    prompt: str | None = None,
 ) -> str:
     params = {
         "response_type": "code",
@@ -134,6 +182,8 @@ def build_authorization_url(
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    if prompt == OIDC_PROMPT_LOGIN:
+        params["prompt"] = OIDC_PROMPT_LOGIN
     authorize_endpoint = f"{settings.oidc_issuer.rstrip('/')}/authorize"
     return f"{authorize_endpoint}?{urlencode(params)}"
 

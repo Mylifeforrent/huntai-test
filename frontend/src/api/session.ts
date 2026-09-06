@@ -4,11 +4,14 @@ import { ApiError, isNoOrgContext } from "./errors";
 import { resetAuthRedirectState, startOidcLogin } from "./authFlow";
 
 export {
+  clearOidcFailureInUrl,
   currentReturnPath,
   handleAuthApiError,
   handleReauth,
   isAuthRedirectInProgress,
+  isOidcFailureRecovery,
   startOidcLogin,
+  stripOidcFailureMarker,
   validateReturnPath,
 } from "./authFlow";
 

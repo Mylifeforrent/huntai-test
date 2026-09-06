@@ -16,6 +16,25 @@ async def test_api_001_oidc_start_returns_authorization_url(client: AsyncClient)
     assert query["response_type"] == ["code"]
     assert "state" in query
     assert "code_challenge" in query
+    assert "prompt" not in query
+
+
+@pytest.mark.asyncio
+async def test_api_001_oidc_start_prompt_login_appends_oidc_prompt(client: AsyncClient) -> None:
+    response = await client.get(
+        "/api/v1/auth/oidc/start",
+        params={"return_path": "/home", "prompt": "login"},
+    )
+    assert response.status_code == 200
+    query = parse_qs(urlparse(response.json()["authorization_url"]).query)
+    assert query["prompt"] == ["login"]
+
+
+@pytest.mark.asyncio
+async def test_api_001_oidc_start_rejects_unknown_prompt(client: AsyncClient) -> None:
+    response = await client.get("/api/v1/auth/oidc/start", params={"prompt": "none"})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "HT-VAL-001"
 
 
 @pytest.mark.asyncio

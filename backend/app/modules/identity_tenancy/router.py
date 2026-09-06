@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from typing import Annotated, Any, Literal, NoReturn
 
@@ -19,14 +20,13 @@ from app.core.errors import (
     forbidden,
     idempotency_conflict,
     not_found,
-    oidc_auth_failed,
     open_redirect,
     policy_deny,
     precondition_failed,
     validation_failed,
     version_conflict,
 )
-from app.core.logging import get_trace_id
+from app.core.logging import get_trace_id, log_with_trace
 from app.modules.identity_tenancy import repository as repo
 from app.modules.identity_tenancy.service import (
     SessionContext,
@@ -44,12 +44,14 @@ from app.modules.identity_tenancy.service import (
     put_siem_export_for_caller,
     remove_project_member,
     require_idempotency_key,
+    resolve_oidc_failure_location,
     start_oidc_flow,
     tighten_capability_controls,
     validate_return_path,
 )
 
 router = APIRouter(prefix="/api/v1")
+logger = logging.getLogger(__name__)
 
 RoleLiteral = Literal["owner", "admin", "tester", "viewer"]
 
@@ -143,12 +145,27 @@ def _parse_body[T: BaseModel](model_type: type[T], raw: bytes, trace_id: str) ->
         raise validation_failed(trace_id) from exc
 
 
+async def _oidc_callback_failure_redirect(
+    db: AsyncSession, *, state: str | None, trace_id: str
+) -> RedirectResponse:
+    location = await resolve_oidc_failure_location(db, state)
+    log_with_trace(
+        logger,
+        logging.WARNING,
+        "oidc callback failed",
+        trace_id=trace_id,
+        code="HT-AUTH-003",
+    )
+    return RedirectResponse(url=location, status_code=302)
+
+
 @router.get("/auth/oidc/start")
 async def api_001_oidc_start(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     return_path: Annotated[str | None, Query()] = None,
+    prompt: Annotated[str | None, Query()] = None,
 ) -> dict[str, str]:
     trace_id = get_trace_id(request)
     try:
@@ -156,7 +173,12 @@ async def api_001_oidc_start(
     except ValueError:
         raise open_redirect(trace_id) from None
 
-    result = await start_oidc_flow(db, settings, return_path=return_path)
+    try:
+        result = await start_oidc_flow(db, settings, return_path=return_path, prompt=prompt)
+    except ValueError as exc:
+        if str(exc) == "invalid_prompt":
+            raise validation_failed(trace_id, "prompt 仅允许 login 或省略") from exc
+        raise open_redirect(trace_id) from exc
     await db.commit()
     return result
 
@@ -164,16 +186,16 @@ async def api_001_oidc_start(
 @router.get("/auth/oidc/callback")
 async def api_002_oidc_callback(
     request: Request,
-    response: Response,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     optional: Annotated[OptionalSession, Depends(get_optional_session)],
     code: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
+    error: Annotated[str | None, Query()] = None,
 ) -> RedirectResponse:
     trace_id = get_trace_id(request)
-    if not code or not state:
-        raise oidc_auth_failed(trace_id)
+    if error or not code or not state:
+        return await _oidc_callback_failure_redirect(db, state=state, trace_id=trace_id)
 
     existing_session = None
     if optional.raw_session_id is not None:
@@ -191,7 +213,7 @@ async def api_002_oidc_callback(
         message = str(exc)
         if message == "no_org_context":
             raise forbidden(trace_id, "No organization context") from exc
-        raise oidc_auth_failed(trace_id) from exc
+        return await _oidc_callback_failure_redirect(db, state=state, trace_id=trace_id)
 
     await db.commit()
     redirect = RedirectResponse(url=return_path, status_code=302)

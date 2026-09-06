@@ -6,7 +6,12 @@ import {
   isUnauthenticated,
   toApiError,
 } from "./errors";
-import { currentReturnPath, validateReturnPath } from "./authFlow";
+import {
+  currentReturnPath,
+  isOidcFailureRecovery,
+  stripOidcFailureMarker,
+  validateReturnPath,
+} from "./authFlow";
 
 describe("api error classifier", () => {
   it("treats fetch failures as undeveloped", () => {
@@ -134,6 +139,25 @@ describe("session helpers", () => {
       },
     });
     expect(currentReturnPath()).toBe("/");
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  });
+
+  it("strips oidc=failed from return_path so success does not reopen recovery", () => {
+    expect(stripOidcFailureMarker("/home?oidc=failed")).toBe("/home");
+    expect(stripOidcFailureMarker("/projects?tab=1&oidc=failed")).toBe("/projects?tab=1");
+    const original = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        pathname: "/home",
+        search: "?oidc=failed",
+      },
+    });
+    expect(isOidcFailureRecovery()).toBe(true);
+    expect(currentReturnPath()).toBe("/home");
     Object.defineProperty(window, "location", {
       configurable: true,
       value: original,

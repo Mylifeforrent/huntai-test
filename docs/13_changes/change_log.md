@@ -5,6 +5,7 @@
 
 | 日期 | 变更对象（路径） | 变更摘要 | 原因 | 批准人 | 状态 |
 |---|---|---|---|---|---|
+| 2026-09-06 | `docs/07_backend_design/api_spec.md` §6.1 / §7.0 API-001、API-002；`docs/10_ai_context/context/m0.md`；`docs/10_ai_context/ai_context.md` S-M0-01 | API-001 增加可选 query `prompt=login`（非法值 `HT-VAL-001`）；API-002 浏览器失败改为 302 回 SPA 并带 `oidc=failed`（表示 HT-AUTH-003），不把 ErrorEnvelope / code / state / token 放入失败跳转 URL。首次无会话仍走 OIDC；失败后全局壳恢复面再 `prompt=login` 回 IdP。不新增 API/页面/LDAP，不收集 HuntAI 密码 | 企业 SSO 失败后须在 IdP 输入公司账号密码再入系统；用户本会话确认方案 A Plan | 用户（本会话确认方案 A Plan） | 已完成 |
 | 2026-09-04 | `.env.example` | 新增 `CI_LOG_CHUNK_BYTES`、`CI_LOG_MAX_TOTAL_BYTES`、`REPORT_PARSE_TIMEOUT_SECONDS`（空=不启用超时）、`REPORT_PARSE_BATCH_ROWS` 键名（无默认值） | S-M2-05 外部 CI 日志分片与超大报告分批解析配置；禁止硬编码 | 用户（S-M2-05 Plan） | 已完成 |
 | 2026-09-03 | `integration_hub.project_ci_trigger_configs`（实现表） | Alembic 0020 每项目一行：`bindings` jsonb + `aggregate_version`；承接 API-167 CI 触发绑定；`data_model.md` 未列该表 | S-M2-03 切片需要持久化仓库/分支↔计划绑定；实现侧补表并登记 | 用户（S-M2-03 Plan） | 已完成 |
 | 2026-09-03 | `.env.example` | 新增 `ARTIFACT_ROOT` 键名（无默认值）；S-M2-01 Playwright 制品本地卷根路径配置 | S-M2-01 切片需要 M0/M1 本地卷落盘 object_key；禁止硬编码路径 | 用户（本会话确认 S-M2-01 Plan） | 已完成 |
