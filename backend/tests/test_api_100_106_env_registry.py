@@ -3,10 +3,12 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
 from app.modules.approval_policy.models import ApprovalRequest
+from app.modules.execution_registry.models import ExecutionEnvironment, JobContract
 from app.modules.identity_tenancy.models import ProjectMember, User
 from tests.helpers import login_as
 from tests.test_api_120_action_previews import _seed_admin_peer
@@ -51,6 +53,11 @@ async def _register_environment(
     )
     assert response.status_code == 200
     return response.json()["data"]
+
+
+async def _count_rows(db_session: AsyncSession, model: type[DeclarativeBase]) -> int:
+    result = await db_session.execute(select(func.count()).select_from(model))
+    return int(result.scalar_one())
 
 
 async def _seed_tester(
@@ -396,3 +403,57 @@ async def test_api_100_unauthenticated(
     response = await client.get("/api/v1/execution-environments")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "HT-AUTH-001"
+
+
+@pytest.mark.asyncio
+async def test_api_102_invalid_job_contract_leaves_no_orphan(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    """A rejected job contract must not leave a half-written environment behind."""
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await _seed_admin_peer(  # type: ignore[arg-type]
+        db_session, org_id=seeded_identity["org_id"], project_id=project_id
+    )
+    await login_as(client)
+
+    response = await client.post(
+        "/api/v1/execution-environments",
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+        json=_register_body(project_id=project_id, job_contracts=[{"job_id": "   "}]),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "HT-VAL-001"
+    assert await _count_rows(db_session, ExecutionEnvironment) == 0
+    assert await _count_rows(db_session, JobContract) == 0
+
+
+@pytest.mark.asyncio
+async def test_api_102_no_approver_leaves_no_orphan(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    """Without a second owner/admin the four-eyes gate rejects before any write."""
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await login_as(client)
+
+    response = await client.post(
+        "/api/v1/execution-environments",
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+        json=_register_body(project_id=project_id, job_contracts=[{"job_id": "ci-run"}]),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "HT-STATE-001"
+    assert await _count_rows(db_session, ExecutionEnvironment) == 0
+    assert await _count_rows(db_session, JobContract) == 0
+    assert await _count_rows(db_session, ApprovalRequest) == 0

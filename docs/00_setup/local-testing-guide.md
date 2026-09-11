@@ -218,14 +218,23 @@ cd backend
 HUNTAI_LIVE=1 uv run pytest tests/test_live_smoke.py -q
 ```
 
-**运行前提（必须如实了解，否则会失败）**：
+**它是自助的**：不依赖任何演示数据和预发 Cookie。套件自己走一遍 mock IdP 的 OIDC
+Authorization Code + PKCE 链拿到 `huntai_session`，再用公开 API 自建所需资产
+（blocking 门禁策略 / jira 连接器 / 3 条 ACTIVE 用例 / ACTIVE 执行环境）。所以按 §3
+从干净库启动、只跑过 `seed_local_identity.py` 时即可运行。
+
+**运行前提**：
 
 - 后端在 `http://127.0.0.1:8000`（可用 `HUNTAI_BASE_URL` 覆盖）。
-- 需要 4 个角色的会话 Cookie，通过环境变量 `HUNTAI_OWNER` / `HUNTAI_ADMIN` / `HUNTAI_TESTER` / `HUNTAI_VIEWER` 覆盖；套件内默认值对应一批**仓库内不存在的演示数据**。
-- `test_02_seeded_assets_visible` 断言「2 条 ACTIVE 用例 + ACTIVE 环境 + blocking 门禁策略」，这些对象本仓库没有种子脚本会创建，需要你按 `user-ui-guide.md` 先在 UI 里造出来。
-- 仓库内**没有**为这套件准备数据的种子脚本；照本文从干净库启动时，它不会全绿，属预期。本文不声称「预期 N passed」。
+- mock IdP 已启动（§3 步骤 4）。
+- 账号只有 §4 的两个合成账号（`local-dev-user` 是项目 owner、`local-dev-user-2` 是项目
+  admin，口令 `local-dev`），因此套件只覆盖 owner/admin 边界；仓库没有 tester/viewer
+  账号。若想复用已有会话 Cookie，可用 `HUNTAI_OWNER` / `HUNTAI_ADMIN` 覆盖。
+- `test_08_release_webhook_observation` 需要「带 webhook secret 的 release 连接器」，
+  而当前公开 API 无法设置 `webhook_secret_ref`（API-162 不接受该字段、API-163 不能改），
+  干净库上它会**如实 skip**，不会用 ORM 伪造数据。
 
-因此：**复现主链路请以 `user-ui-guide.md` 为准**；冒烟套件是给已备好 demo 数据的维护者用的补充手段。
+在干净的本地库上实测结果为 `7 passed, 1 skipped`。
 
 ---
 

@@ -18,6 +18,29 @@ from app.modules.approval_policy.service import (
 from app.modules.identity_tenancy import query_port as identity_query
 
 
+async def require_env_register_approver(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    initiator_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    """Read-only four-eyes pre-check; raises ValueError("state") when no peer is eligible.
+
+    Callers run this before their first write so a missing approver cannot leave a
+    half-written aggregate behind.
+    """
+    candidates = await identity_query.list_project_owner_admin_user_ids(
+        session,
+        organization_id=organization_id,
+        project_id=project_id,
+        exclude_user_id=initiator_id,
+    )
+    if not candidates:
+        raise ValueError("state")
+    return candidates
+
+
 async def create_env_register_approval(
     session: AsyncSession,
     settings: Settings,
@@ -31,14 +54,12 @@ async def create_env_register_approval(
 ) -> uuid.UUID:
     """Create a four-eyes approval for env_register bound to a concrete environment."""
     now = datetime.now(UTC)
-    candidates = await identity_query.list_project_owner_admin_user_ids(
+    candidates = await require_env_register_approver(
         session,
         organization_id=organization_id,
         project_id=project_id,
-        exclude_user_id=initiator_id,
+        initiator_id=initiator_id,
     )
-    if not candidates:
-        raise ValueError("state")
 
     side_effect_level = resolve_side_effect_level("env_register", gate_payload)
     if side_effect_level is None:

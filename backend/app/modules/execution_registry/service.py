@@ -355,6 +355,39 @@ async def get_params_schema_for_caller(
     return serialize_params_schema(environment_id, contract)
 
 
+def _normalize_job_contract(item: dict[str, Any]) -> dict[str, Any]:
+    """Validate one job contract and return the fields used for persistence."""
+    job_id = item.get("job_id")
+    if not isinstance(job_id, str) or not job_id.strip():
+        raise ValueError("validation")
+    supports_cancel = item.get("supports_cancel", False)
+    contract_version = item.get("contract_version", 1)
+    if not isinstance(contract_version, int) or contract_version < 1:
+        raise ValueError("validation")
+    schema = item.get("schema")
+    if schema is not None and not isinstance(schema, dict):
+        raise ValueError("validation")
+    report_adapter_raw = item.get("report_adapter")
+    if report_adapter_raw is not None and (
+        not isinstance(report_adapter_raw, str)
+        or report_adapter_raw.strip() not in SUPPORTED_REPORT_ADAPTERS
+    ):
+        raise ValueError("validation")
+    params_schema_ref = item.get("params_schema_ref")
+    artifact_manifest = item.get("artifact_manifest")
+    return {
+        "job_id": job_id.strip(),
+        "supports_cancel": bool(supports_cancel),
+        "contract_version": contract_version,
+        "params_schema_ref": params_schema_ref if isinstance(params_schema_ref, str) else None,
+        "params_schema": schema if isinstance(schema, dict) else None,
+        "artifact_manifest": artifact_manifest if isinstance(artifact_manifest, dict) else None,
+        "report_adapter": report_adapter_raw.strip()
+        if isinstance(report_adapter_raw, str)
+        else None,
+    }
+
+
 async def register_execution_environment(
     session: AsyncSession,
     ctx: SessionContext,
@@ -434,6 +467,7 @@ async def register_execution_environment(
         stored_credential_ref = None
 
     job_contracts: list[dict[str, Any]] = []
+    normalized_contracts: list[dict[str, Any]] = []
     if job_contracts_raw is not None:
         if not isinstance(job_contracts_raw, list):
             raise ValueError("validation")
@@ -441,6 +475,7 @@ async def register_execution_environment(
             if not isinstance(item, dict):
                 raise ValueError("validation")
             _reject_nested_secrets(item)
+            normalized_contracts.append(_normalize_job_contract(item))
             job_contracts.append(item)
 
     gate_payload = _build_gate_payload(
@@ -516,6 +551,13 @@ async def register_execution_environment(
     if gate_result.gate != PolicyGate.REQUIRE_APPROVAL:
         raise ValueError("policy_deny")
 
+    await approval_command.require_env_register_approver(
+        session,
+        organization_id=org_id,
+        project_id=approval_project_id,
+        initiator_id=user_id,
+    )
+
     env = await repo.create_environment(
         session,
         organization_id=org_id,
@@ -529,42 +571,20 @@ async def register_execution_environment(
         project_id=persist_project_id,
     )
 
-    for item in job_contracts:
-        job_id = item.get("job_id")
-        if not isinstance(job_id, str) or not job_id.strip():
-            raise ValueError("validation")
-        supports_cancel = item.get("supports_cancel", False)
-        contract_version = item.get("contract_version", 1)
-        if not isinstance(contract_version, int) or contract_version < 1:
-            raise ValueError("validation")
-        schema = item.get("schema")
-        if schema is not None and not isinstance(schema, dict):
-            raise ValueError("validation")
-        report_adapter_raw = item.get("report_adapter")
-        if report_adapter_raw is not None and (
-            not isinstance(report_adapter_raw, str)
-            or report_adapter_raw.strip() not in SUPPORTED_REPORT_ADAPTERS
-        ):
-            raise ValueError("validation")
+    for contract in normalized_contracts:
         await repo.create_job_contract(
             session,
             organization_id=org_id,
             created_at=now,
             created_by=user_id,
             execution_environment_id=env.id,
-            job_id=job_id.strip(),
-            params_schema_ref=item.get("params_schema_ref")
-            if isinstance(item.get("params_schema_ref"), str)
-            else None,
-            params_schema=schema if isinstance(schema, dict) else None,
-            artifact_manifest=item.get("artifact_manifest")
-            if isinstance(item.get("artifact_manifest"), dict)
-            else None,
-            report_adapter=report_adapter_raw.strip()
-            if isinstance(report_adapter_raw, str)
-            else None,
-            supports_cancel=bool(supports_cancel),
-            contract_version=contract_version,
+            job_id=contract["job_id"],
+            params_schema_ref=contract["params_schema_ref"],
+            params_schema=contract["params_schema"],
+            artifact_manifest=contract["artifact_manifest"],
+            report_adapter=contract["report_adapter"],
+            supports_cancel=contract["supports_cancel"],
+            contract_version=contract["contract_version"],
         )
 
     approval_request_id = await approval_command.create_env_register_approval(
