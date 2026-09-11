@@ -23,6 +23,8 @@
 | 1 条用例结果 + StepRun | P09 用例结果表 / 证据查看器 | `passed` |
 | 1 条门禁评估 | P11 评估历史（`/gates/evaluations`） | `pass` |
 
+> 想**从头再来一遍**（清掉你创建的数据、回到干净种子态）：`cd backend && uv run python scripts/reset_local_data.py --yes`，说明见 [`local-testing-guide.md`](local-testing-guide.md) §6.1。
+
 ### 0.1 开工前自检
 
 三条命令都应该通（`backend/` 目录下）：

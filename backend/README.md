@@ -66,6 +66,7 @@ API-002 成功后会 `302` 到相对 `return_path`（如 `/projects`），并 `S
 4. 三个进程：`uv run uvicorn app.main:app --reload`、`uv run python scripts/mock_idp.py`、前端 `npm run dev`
 5. 打开 `http://127.0.0.1:5173/` → SessionGate 跳到 mock IdP。无 mock SSO cookie 时出示合成账号表单，可用的合成账号为 `local-dev-user` 与 `local-dev-user-2`（口令均为 `local-dev`，仅 loopback mock，不是产品密钥）。「模拟 SSO 失败返回应用」会回到 SPA 恢复面；再点「使用企业账号重新登录」会带 `prompt=login` 回到 IdP 表单。
 6. 四眼审批需要两个身份：L2+ 动作由 `local-dev-user` 发起后，须以 `local-dev-user-2` 登录批准。浏览器会记住 mock SSO，切换账号要么用另一个浏览器 profile / 无痕窗口，要么先访问 `http://127.0.0.1:8090/switch-account` 清除 mock SSO 后再重新登录。
+7. 想清空重来（回到第 2–3 步之后的干净态）：`uv run python scripts/reset_local_data.py --yes`。只清空本项目 schema 下的业务表并重跑身份种子，不动库结构与 `alembic_version`，后端无需重启；不带 `--yes` 只打印将要清空什么。`APP_ENV=production` 时拒绝运行。
 
 `scripts/mock_idp.py` 仅 loopback，不是产品端点，不可用于非开发环境。
 

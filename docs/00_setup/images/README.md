@@ -39,10 +39,10 @@
 
    ```bash
    cd backend
-   uv run alembic upgrade head
-   # 按 tests/conftest.py::_truncate_tables 的表清单 TRUNCATE 业务表，再重新种子：
-   uv run python scripts/seed_local_identity.py
+   uv run python scripts/reset_local_data.py --yes
    ```
+
+   一条命令完成：清空本项目 schema 下的业务表并重跑身份种子，不动库结构（`alembic_version` 不受影响）。完整说明见 [`../local-testing-guide.md`](../local-testing-guide.md) §6.1。
 
 2. **起齐三件套**（见 [`../local-testing-guide.md`](../local-testing-guide.md) §3）：mock IdP(8090) + 后端(8000) + 前端(5173)。
 

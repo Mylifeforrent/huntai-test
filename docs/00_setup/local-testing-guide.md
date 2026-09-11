@@ -212,8 +212,29 @@ npm run dev
 | 审批按钮点不动 / 403 `HT-IAM-002` | 你就是发起人（四眼） | 换 `local-dev-user-2` 登录后批准 |
 | 注册环境返回 `401 HT-AUTH-002` | L3+ 动作超出再认证窗口 | 按页面提示完成 step-up 再认证（API-004）后重放同一请求 |
 | 发起执行后立刻 `FAILED` | 参数缺 `TARGET_ENV`，或目标不可达 | 见 `user-ui-guide.md` §3；`FAILED` 也是有效结果，可在 P09 查看 |
-| 跑完 `pytest` 后数据没了 | 测试会清空业务表 | `conftest.py` 会 TRUNCATE；重跑 §3 步骤 3 恢复身份，再按 UI 教程重建数据 |
+| 跑完 `pytest` 后数据没了 | 测试会清空业务表 | `conftest.py` 会 TRUNCATE；按 §6.1 一条命令复位（清空业务数据 + 重建身份）后重来 |
 | mock IdP 登录页打不开 | 步骤 4 的 mock IdP 没启动 | 回到 §3 步骤 4 |
+
+### 6.1 想从头再来一次（复位本地数据）
+
+照 [`user-ui-guide.md`](user-ui-guide.md) 走完一遍后，库里会留下你创建的策略 / 用例 / 环境 / TestRun。想清空重来（回到 §2 描述的干净种子态），一条命令：
+
+```bash
+cd backend
+uv run python scripts/reset_local_data.py --yes
+```
+
+它只做三件事：**清空**本项目 11 个 schema 下的全部业务表（表清单从库里动态枚举，以后新增表也不会漏）→ **保留**库结构与 `alembic_version`（迁移状态不受影响，不需要重跑 `alembic upgrade`）→ **重跑**身份种子（组织 / 两个账号 / 项目 / 成员关系 / 模型路由 / 配额）。
+
+| 你可能会问 | 实际行为 |
+| --- | --- |
+| 要停后端吗 | **不用**。TRUNCATE 不是 DDL，正在跑的后端立刻看到空表；身份被重新种回，浏览器登录态仍然可用 |
+| 会动 `.env` 吗 | 不会。也不动 mock IdP |
+| 会误清生产库吗 | `APP_ENV=production` 时脚本直接拒绝运行 |
+| 手滑跑了会怎样 | 不带 `--yes` 只会打印「将要清空哪 11 个 schema、共多少张表」然后退出，**不动任何数据** |
+| 库结构坏了 / 改过迁移呢 | 那就连库一起重建：先 `Ctrl-C` 停后端（它持有连接时 `dropdb` 会失败），再 `dropdb <库名> && createdb <库名>`（库名以 `.env` 的 `DATABASE_URL` 为准，示例是 `huntai_test`），然后 `uv run alembic upgrade head && uv run python scripts/seed_local_identity.py` |
+
+> 复位后不需要重启任何进程，直接刷新浏览器（或重新走 §3 步骤 4 的登录）就能按 UI 教程从零再走一遍。
 
 ---
 
