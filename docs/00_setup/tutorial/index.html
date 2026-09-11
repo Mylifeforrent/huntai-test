@@ -43,17 +43,32 @@ nav.toc ol{margin:6px 0 0;padding-left:22px}.muted{color:var(--muted)}.card{back
 </table>
 
 <h2>3. 十分钟跑起来</h2>
-<pre><code># 1. 后端（Python 3.14 + uv）
+<div class="warn"><b>别照抄下面的命令就走</b>：本页只给最小示意。本地栈要能<b>登录并点到数据</b>，还差 <code>.env</code> 必填键、种子脚本、本地 mock IdP 三步——完整且逐条校验过的步骤在 <a href="../local-testing-guide.md">local-testing-guide.md</a>，请以它为准。</div>
+<pre><code># 0. 从仓库根 .env.example 复制出 .env，填好 DATABASE_URL / OIDC_* 等必填键
+
+# 1. 后端（Python 3.14 + uv）
 cd backend
 uv sync                                # 安装依赖
 uv run alembic upgrade head            # 数据库迁移（需本地 PostgreSQL）
-uv run uvicorn app.main:app --reload   # 启动 API（见 backend/README.md）
+uv run python scripts/seed_local_identity.py   # 种下组织/两个账号/项目/成员关系
+uv run python scripts/mock_idp.py      # 本地 mock IdP（默认 127.0.0.1:8090）
+uv run uvicorn app.main:app --reload   # 启动 API
 
 # 2. 前端（Node 24）
 cd frontend
 npm install
 npm run dev                            # Vite 开发服务器（代理 /api 到后端）</code></pre>
 <div class="warn"><b>红线提醒</b>：仓库<b>禁止</b> pip / requirements.txt / poetry / pnpm / yarn；配置只从根目录 <code>.env</code> 注入；<code>.env</code> 永不入库。</div>
+
+<h2>3.1 本地实操教程（先看这两篇）</h2>
+<p>上面的命令跑通后，接下来按角色挑一篇：<b>只想用平台</b>看 UI 篇，<b>要读 / 改代码</b>再加程序员篇。</p>
+<table>
+<tr><th>教程</th><th>给谁看</th><th>你会得到什么</th></tr>
+<tr><td><a href="../local-testing-guide.md">本地环境准备与启动</a></td><td>所有人（复现前提）</td><td>从干净仓库起栈：<code>.env</code> 必填键、六步启动、两个合成账号与切身份、种子脚本实际写入什么、常见启动故障排查</td></tr>
+<tr><td><a href="../user-ui-guide.md">普通用户 UI 教程</a></td><td>产品 / 测试 / 第一次用平台的人</td><td>全程在 UI 里点完一次闭环：登录 → 建门禁策略 → A1 生成并采纳用例 → 提审 + 换账号审核 → 注册执行环境 + 四眼审批 → 发起执行 → 看状态机 / StepRun / 证据；含「失败怎么办」与覆盖范围表</td></tr>
+<tr><td><a href="../developer-guide.md">程序员教程</a></td><td>后端 / 前端 / 测试开发</td><td>每个 UI 操作翻译成 <code>API-NNN</code> / router / service / 数据表 / 错误码，再落到对应的 <code>测试文件::用例名</code> 与单跑命令；含幂等键、CAS、Policy Gate、四眼、错误信封链路等横切原理</td></tr>
+</table>
+<div class="tip"><b>推荐顺序</b>：<code>local-testing-guide.md</code> → <code>user-ui-guide.md</code>（<b>先有现象</b>）→ <code>developer-guide.md</code>（<b>再看代码</b>）。下面第 5 节的模块教程负责「某一层讲更深」，这两篇负责「端到端能自己跑通」。</div>
 
 <h2>4. 合入前必须全绿的验证命令</h2>
 <pre><code># backend/

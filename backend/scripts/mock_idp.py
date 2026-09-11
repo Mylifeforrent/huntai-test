@@ -22,20 +22,46 @@ from authlib.jose import jwt as jose_jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.config import get_settings
 
-MOCK_SUBJECT = "local-dev-user"
-# Local mock only (loopback). Not a HuntAI product password and not stored in the app DB.
-MOCK_PASSWORD = "local-dev"
 MOCK_SSO_COOKIE = "huntai_mock_sso"
 CODE_TTL = timedelta(minutes=5)
 ID_TOKEN_TTL = timedelta(minutes=5)
 
 
+@dataclass(frozen=True)
+class MockAccount:
+    """Synthetic account; username is what the login form and SSO cookie carry."""
+
+    username: str
+    subject: str
+    email: str
+    display_name: str
+
+
+# Local mock only (loopback). Passwords are not HuntAI product secrets or app DB rows.
+MOCK_PASSWORD = "local-dev"
+MOCK_ACCOUNTS: dict[str, MockAccount] = {
+    "local-dev-user": MockAccount(
+        username="local-dev-user",
+        subject="local-dev-user",
+        email="local-dev@example.test",
+        display_name="Local Dev User",
+    ),
+    "local-dev-user-2": MockAccount(
+        username="local-dev-user-2",
+        subject="local-dev-user-2",
+        email="local-dev-2@example.test",
+        display_name="Local Dev User 2",
+    ),
+}
+
+
 @dataclass
 class AuthCode:
+    account: MockAccount
     redirect_uri: str
     nonce: str
     code_challenge: str
@@ -109,6 +135,13 @@ def jwks() -> dict[str, list[dict[str, Any]]]:
     return {"keys": [_public_jwk_dict]}
 
 
+def _sso_account(raw: str | None) -> MockAccount | None:
+    """Resolve the mock SSO cookie (a synthetic username) back to its account."""
+    if not raw:
+        return None
+    return MOCK_ACCOUNTS.get(raw)
+
+
 def _issue_code_redirect(
     *,
     redirect_uri: str,
@@ -116,10 +149,12 @@ def _issue_code_redirect(
     nonce: str,
     code_challenge: str,
     client_id: str,
+    account: MockAccount,
     set_sso_cookie: bool,
 ) -> RedirectResponse:
     code = secrets.token_urlsafe(32)
     _codes[code] = AuthCode(
+        account=account,
         redirect_uri=redirect_uri,
         nonce=nonce,
         code_challenge=code_challenge,
@@ -129,7 +164,7 @@ def _issue_code_redirect(
     query = urlencode({"code": code, "state": state})
     response = RedirectResponse(url=f"{redirect_uri}?{query}", status_code=302)
     if set_sso_cookie:
-        response.set_cookie(MOCK_SSO_COOKIE, "1", httponly=True, samesite="lax")
+        response.set_cookie(MOCK_SSO_COOKIE, account.username, httponly=True, samesite="lax")
     return response
 
 
@@ -144,6 +179,9 @@ def _login_form(
     error: str = "",
 ) -> HTMLResponse:
     error_html = f"<p style='color:#b42318'>{escape(error)}</p>" if error else ""
+    accounts_html = "、".join(
+        f"<code>{escape(account.username)}</code>" for account in MOCK_ACCOUNTS.values()
+    )
     return HTMLResponse(
         f"""<!doctype html>
 <html lang="zh-CN">
@@ -152,7 +190,7 @@ def _login_form(
   <h1>本地 Mock 身份提供商</h1>
   <p>这不是 HuntAI 产品登录页。企业 SSO 上线后由真实 IdP 替换。</p>
   <p>{escape(message)}</p>
-  <p>合成账号 <code>{escape(MOCK_SUBJECT)}</code>
+  <p>合成账号 {accounts_html}
      须与库中 <code>users.idp_subject</code> 一致（无 JIT）。
      合成口令仅 mock 进程内比对，不是产品密钥。</p>
   {error_html}
@@ -192,7 +230,7 @@ def authorize(
     code_challenge_method: str = Query(default=""),
     scope: str = Query(default=""),
     prompt: str = Query(default=""),
-) -> HTMLResponse | RedirectResponse:
+) -> Response:
     _ = scope
     settings = get_settings()
     errors: list[str] = []
@@ -211,15 +249,18 @@ def authorize(
         body = "<br>".join(errors)
         return HTMLResponse(f"<h1>Mock IdP 拒绝授权</h1><p>{body}</p>", status_code=400)
 
-    if prompt != "login" and request.cookies.get(MOCK_SSO_COOKIE) == "1":
-        return _issue_code_redirect(
-            redirect_uri=redirect_uri,
-            state=state,
-            nonce=nonce,
-            code_challenge=code_challenge,
-            client_id=client_id,
-            set_sso_cookie=False,
-        )
+    if prompt != "login":
+        sso_account = _sso_account(request.cookies.get(MOCK_SSO_COOKIE))
+        if sso_account is not None:
+            return _issue_code_redirect(
+                redirect_uri=redirect_uri,
+                state=state,
+                nonce=nonce,
+                code_challenge=code_challenge,
+                client_id=client_id,
+                account=sso_account,
+                set_sso_cookie=False,
+            )
 
     message = (
         "已按 prompt=login 要求出示账号密码表单。"
@@ -237,7 +278,7 @@ def authorize(
 
 
 @app.post("/authorize/complete")
-async def authorize_complete(request: Request) -> HTMLResponse | RedirectResponse:
+async def authorize_complete(request: Request) -> Response:
     settings = get_settings()
     raw = (await request.body()).decode("utf-8")
     form = {key: values[-1] for key, values in parse_qs(raw, keep_blank_values=True).items()}
@@ -250,7 +291,8 @@ async def authorize_complete(request: Request) -> HTMLResponse | RedirectRespons
     password = form.get("password", "")
     if client_id != settings.oidc_client_id or redirect_uri != settings.oidc_redirect_uri:
         return HTMLResponse("<h1>Mock IdP 拒绝授权</h1>", status_code=400)
-    if username != MOCK_SUBJECT or password != MOCK_PASSWORD:
+    account = MOCK_ACCOUNTS.get(username)
+    if account is None or password != MOCK_PASSWORD:
         return _login_form(
             redirect_uri=redirect_uri,
             state=state,
@@ -266,8 +308,23 @@ async def authorize_complete(request: Request) -> HTMLResponse | RedirectRespons
         nonce=nonce,
         code_challenge=code_challenge,
         client_id=client_id,
+        account=account,
         set_sso_cookie=True,
     )
+
+
+@app.get("/switch-account")
+def switch_account() -> HTMLResponse:
+    """Clear the mock SSO cookie so the next /authorize shows the account form again."""
+    parsed = urlparse(get_settings().oidc_redirect_uri)
+    app_url = f"{parsed.scheme}://{parsed.netloc}/"
+    response = HTMLResponse(
+        "<h1>已清除本地 mock SSO</h1>"
+        "<p>下次授权会重新出示账号表单，可换成另一个合成账号登录（审批人须用第二个账号）。</p>"
+        f"<p><a href='{escape(app_url, quote=True)}'>返回应用</a></p>"
+    )
+    response.delete_cookie(MOCK_SSO_COOKIE, path="/")
+    return response
 
 
 @app.get("/authorize/fail")
@@ -320,12 +377,12 @@ async def token(request: Request) -> JSONResponse:
     payload = {
         "iss": _issuer(),
         "aud": settings.oidc_client_id,
-        "sub": MOCK_SUBJECT,
+        "sub": record.account.subject,
         "nonce": record.nonce,
         "iat": issued_at,
         "exp": issued_at + int(ID_TOKEN_TTL.total_seconds()),
-        "email": "local-dev@example.test",
-        "name": "Local Dev User",
+        "email": record.account.email,
+        "name": record.account.display_name,
     }
     header = {"alg": "RS256", "kid": _public_jwk_dict["kid"]}
     id_token = jose_jwt.encode(header, payload, _private_jwk)

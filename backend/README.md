@@ -62,9 +62,10 @@ API-002 成功后会 `302` 到相对 `return_path`（如 `/projects`），并 `S
    - `OIDC_ISSUER=http://127.0.0.1:8090`
    - `OIDC_CLAIM_SUBJECT=sub`
 2. `cd backend && uv run alembic upgrade head`
-3. `uv run python scripts/seed_local_identity.py`（写入 `idp_subject=local-dev-user` 的租户/用户/项目，无 JIT）
+3. `uv run python scripts/seed_local_identity.py`（写入租户/项目/两个用户：`idp_subject=local-dev-user` 为项目 owner、`idp_subject=local-dev-user-2` 为项目 admin，无 JIT）
 4. 三个进程：`uv run uvicorn app.main:app --reload`、`uv run python scripts/mock_idp.py`、前端 `npm run dev`
-5. 打开 `http://127.0.0.1:5173/` → SessionGate 跳到 mock IdP。无 mock SSO cookie 时出示合成账号表单（用户名 `local-dev-user` / 口令 `local-dev`，仅 loopback mock，不是产品密钥）。「模拟 SSO 失败返回应用」会回到 SPA 恢复面；再点「使用企业账号重新登录」会带 `prompt=login` 回到 IdP 表单。
+5. 打开 `http://127.0.0.1:5173/` → SessionGate 跳到 mock IdP。无 mock SSO cookie 时出示合成账号表单，可用的合成账号为 `local-dev-user` 与 `local-dev-user-2`（口令均为 `local-dev`，仅 loopback mock，不是产品密钥）。「模拟 SSO 失败返回应用」会回到 SPA 恢复面；再点「使用企业账号重新登录」会带 `prompt=login` 回到 IdP 表单。
+6. 四眼审批需要两个身份：L2+ 动作由 `local-dev-user` 发起后，须以 `local-dev-user-2` 登录批准。浏览器会记住 mock SSO，切换账号要么用另一个浏览器 profile / 无痕窗口，要么先访问 `http://127.0.0.1:8090/switch-account` 清除 mock SSO 后再重新登录。
 
 `scripts/mock_idp.py` 仅 loopback，不是产品端点，不可用于非开发环境。
 

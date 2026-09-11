@@ -29,6 +29,7 @@ USER_ID = uuid.UUID("00000000-0000-4000-8000-000000000002")
 PROJECT_ID = uuid.UUID("00000000-0000-4000-8000-000000000003")
 MEMBER_ID = uuid.UUID("00000000-0000-4000-8000-000000000004")
 USER2_ID = uuid.UUID("00000000-0000-4000-8000-000000000005")
+MEMBER2_ID = uuid.UUID("00000000-0000-4000-8000-000000000006")
 IDP_SUBJECT = "local-dev-user"
 IDP_SUBJECT_2 = "local-dev-user-2"
 ORG_SLUG = "local-dev"
@@ -128,13 +129,34 @@ async def seed() -> None:
         else:
             user2.idp_subject = IDP_SUBJECT_2
             user2.is_disabled = False
+        await session.flush()
+
+        # 四眼审批要求批准人 ≠ 发起人，故第二账号必须是本项目的 owner/admin。
+        member2 = await session.scalar(select(ProjectMember).where(ProjectMember.id == MEMBER2_ID))
+        if member2 is None:
+            session.add(
+                ProjectMember(
+                    id=MEMBER2_ID,
+                    organization_id=org.id,
+                    created_at=now,
+                    updated_at=now,
+                    created_by=USER_ID,
+                    aggregate_version=1,
+                    project_id=PROJECT_ID,
+                    user_id=USER2_ID,
+                    role="admin",
+                )
+            )
 
         await seed_default_model_routes(session, organization_id=org.id, created_by=USER_ID)
         await seed_default_org_quota(session, organization_id=org.id, created_by=USER_ID)
 
         await session.commit()
     await dispose_engine()
-    print(f"seeded org={ORG_SLUG} idp_subject={IDP_SUBJECT} user2={USER2_ID}")
+    print(
+        f"seeded org={ORG_SLUG} idp_subject={IDP_SUBJECT} user2={USER2_ID} "
+        f"approver_subject={IDP_SUBJECT_2} project={PROJECT_ID}"
+    )
 
 
 if __name__ == "__main__":

@@ -298,9 +298,8 @@ async def test_07_evidence_export_and_proxy_download() -> None:
     project_id = await _demo_project_id()
     # Evidence creation itself is covered by backend tests; seed one row
     # directly so this smoke test can exercise export + proxy download.
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.modules.identity_tenancy.models import Organization
     from app.modules.results_evidence.models import EvidenceObject

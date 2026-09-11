@@ -1,213 +1,245 @@
-# 本地测试环境使用指南（S-M3 后 · 手工功能验证）
+# 本地环境准备与启动（复现前提）
 
-> 适用范围：本地（本机）运行 HuntAI Test，用预置的演示账号对系统各功能做手工验证。
-> 教程式模块讲解见同目录 `tutorial/`（浏览器打开 `tutorial/index.html`）。
-> 本文由环境准备脚本生成于 2026-09-06；Cookie 有效期 30 天。
+> 适用范围：在自己机器上从零启动 HuntAI Test，并**能真正把页面点下去**。
+> 本文只负责「装好、起来、登进去」；登录之后要做什么，看下面两条学习路径。
 
 ---
 
-## 1. 环境现状（已为你启动）
+## 1. 两条学习路径
 
-| 组件 | 地址 | 说明 |
+本文是两条教程的共同前置。启动完成后按你的身份选一条：
+
+| 你是 | 看这个 | 你会得到 |
 | --- | --- | --- |
-| 后端 API | http://127.0.0.1:8000 | 当前 main 代码（含 M1–M3 全部功能），日志 `/tmp/huntai-backend.log` |
-| 前端 Vite | http://127.0.0.1:5173 | 若被占用会顺延 5174（本次两个端口都在跑）；日志 `/tmp/huntai-frontend.log` |
-| 数据库 | `postgresql+asyncpg://macbookair@127.0.0.1:5432/huntai_test` | 与 pytest 共用同一个库 |
-| 登录方式 | **Cookie 注入**（无真实 IdP） | `huntai_session=<uuid>`，值见 §2 |
+| 想用界面做测试的普通用户 | [`user-ui-guide.md`](user-ui-guide.md) | 从空库开始，在 UI 里造出用例、执行环境、门禁策略，跑通一次执行并看到结果与证据 |
+| 想改代码的程序员 | [`developer-guide.md`](developer-guide.md) | 每个 UI 操作对应的页面文件 / `API-NNN` / router / service / 数据表，以及能单跑的测试用例 |
+| 想先理解模块设计 | [`tutorial/index.html`](tutorial/index.html) | 按后端模块分篇的教程（浏览器直接打开） |
 
-启动/停止命令（重启用）：
+> 重要：本仓库**没有**「一条命令灌入演示数据」的种子脚本。除租户/用户/项目这三样由 `seed_local_identity.py` 写入外，用例、执行环境、门禁策略等全部由你在 UI 里创建——`user-ui-guide.md` 会一步步带做。早先版本教程提到的「临时种子脚本」（放在 `/tmp` 下的那种）**从来不在仓库里，已废弃，不要去找**。
+
+---
+
+## 2. 前置条件
+
+### 2.1 工具版本
+
+| 组件 | 要求 | 校验 |
+| --- | --- | --- |
+| Python | 3.14 | `python3 --version` |
+| uv | 0.12.x | `uv --version`（缺则 `uv python install 3.14`） |
+| Node.js | 24 LTS | `node --version` |
+| PostgreSQL | 18（本地实例即可） | `psql --version` |
+
+> M0/M1 运行面只需要 **PostgreSQL + API 进程 + 前端静态产物**。Temporal / Redis / MinIO / Vault **不要启动**，本地也不需要。
+
+### 2.2 准备 `.env`
+
+配置**只从仓库根目录**的 `.env` 读取（不是 `backend/.env`）。复制模板后填写：
 
 ```bash
-# 后端
-cd backend && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-# 前端
-cd frontend && npm run dev
+cd <仓库根>
+cp .env.example .env
 ```
 
+`.env` 永不入库（`.gitignore` 已忽略）。只需关心这些键；其余键按 `.env.example` 注释留空即可：
+
+```text
+# 应用
+APP_ENV
+APP_PORT
+LOG_LEVEL
+
+# 数据库：指向你本机已存在的库
+DATABASE_URL
+
+# 会话 Cookie
+SESSION_COOKIE_NAME
+SESSION_COOKIE_SECURE          # 本地 HTTP 联调必须为 false，见下
+SESSION_COOKIE_SAMESITE        # 本地填 Lax
+SESSION_TTL_SECONDS
+
+# OIDC（本地 mock IdP）
+OIDC_ISSUER                    # 指向本地 mock：http://127.0.0.1:8090
+OIDC_CLIENT_ID
+OIDC_CLIENT_SECRET             # 本地 mock 不校验真实密钥，填任意非空值即可；须与 mock 读到的同一份 .env 一致
+OIDC_REDIRECT_URI              # 浏览器可达：http://127.0.0.1:5173/api/v1/auth/oidc/callback
+OIDC_CLAIM_SUBJECT             # 填 sub
+
+# 审批与再认证窗口
+REAUTH_WINDOW_SECONDS
+APPROVAL_TTL_SECONDS
+```
+
+本地 HTTP 必填原因：浏览器会丢弃 `Secure` Cookie，若 `SESSION_COOKIE_SECURE` 为 `true`，登录后立刻回到未登录态。生产 HTTPS 才设为 `true`。
+
+> 数据库必须先存在。例如：`createdb huntai_test`，然后 `DATABASE_URL=postgresql+asyncpg://<用户>@127.0.0.1:5432/huntai_test`。
+
 ---
 
-## 2. 演示账号（Cookie 即登录态）
+## 3. 启动顺序（六步）
 
-会话模型没有签名，Cookie 值就是 `auth_sessions.id` 的 UUID。**Cookie 不区分端口**，设一次对 5173/5174 都生效。
+按顺序执行，每步都给出「期望看到」。
 
-| 角色 | 账号（idp_subject） | Cookie 值（huntai_session） | 能做什么 |
-| --- | --- | --- | --- |
-| owner | demo-owner | `cbbacb6e-9c02-433d-8f7a-8fcb64ac91f9` | 全部功能 + 审批 + 两个项目 |
-| admin | demo-admin | `e268226b-fab8-4ed2-86d8-1b617afb19ad` | 同 owner（审批四眼：批准人 ≠ 发起人，用 owner 发起、admin 批准） |
-| tester | demo-tester | `338b0fb1-5dfe-495d-a70c-f794cf0dd3ef` | 用例/执行/压测/Release 发起；只能发起审批不能批准 |
-| viewer | demo-viewer | `490b849d-c326-4d38-aad5-91c9ff0a7bd8` | 只读；写操作应得到 403 HT-IAM-001 |
+### 步骤 1 · 装后端依赖
 
-> 注：重跑种子脚本会刷新所有 Cookie（旧的立即作废），以脚本末尾打印的值为准。
+```bash
+cd backend
+uv sync
+```
 
-**注入方法**：浏览器打开 `http://127.0.0.1:5173` → F12 → Application（应用）→ Cookies → `http://127.0.0.1` → 添加一条：名称 `huntai_session`，值上表对应 UUID → 刷新页面即已登录。切换账号 = 改这条 Cookie 的值。
+**期望看到**：解析并安装依赖，末尾无 error，生成/更新 `backend/.venv`。
 
-> 重新生成 Cookie：`cd backend && uv run python /tmp/seed_huntai.py`（幂等，末尾打印新 Cookie；完整脚本见附录 A）。
+### 步骤 2 · 建表
+
+```bash
+cd backend
+uv run alembic upgrade head
+```
+
+**期望看到**：若干 `Running upgrade ...`，最后停在 `head`。这一步在库里建出各模块私有 schema（如 `identity_tenancy`、`ai_governance`）与全部业务表。
+
+### 步骤 3 · 写入本地身份（唯一的内置种子）
+
+```bash
+cd backend
+uv run python scripts/seed_local_identity.py
+```
+
+**期望看到**（一行）：
+
+```text
+seeded org=local-dev idp_subject=local-dev-user user2=<uuid> approver_subject=local-dev-user-2 project=<uuid>
+```
+
+这一步是幂等的，可重复执行。它写入的内容见 §5。
+
+### 步骤 4 · 启动本地 mock IdP（新开一个终端）
+
+```bash
+cd backend
+uv run python scripts/mock_idp.py
+```
+
+**期望看到**：Uvicorn 监听 `127.0.0.1:8090`。这是本地的 OIDC 提供方，只允许 loopback，**不是产品端点**，不要用于任何共享环境。
+
+### 步骤 5 · 启动后端（新开一个终端）
+
+```bash
+cd backend
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+**期望看到**：`Application startup complete.` 与 `Uvicorn running on http://127.0.0.1:8000`。
+
+### 步骤 6 · 启动前端（新开一个终端）
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+**期望看到**：Vite 打印 `Local: http://127.0.0.1:5173/`。前端把 `/api` 代理到 `127.0.0.1:8000`，所以浏览器**只用 5173**，不要把 API 指到 8000。
+
+### 就绪自检
+
+| 检查 | 命令 | 期望 |
+| --- | --- | --- |
+| mock IdP 活着 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/.well-known/openid-configuration` | `200` |
+| 前端活着 | 浏览器打开 `http://127.0.0.1:5173/` | 跳转到 mock IdP 登录页（未登录时） |
+
+> API 没有 `/health` 这类探活路由，`curl` 8000 返回 404 属正常；以 §3 步骤 5 的启动日志为准。
 
 ---
 
-## 3. 预置数据（种子脚本写入）
+## 4. 登录与两个合成账号
 
-| 数据 | 内容 |
+打开 `http://127.0.0.1:5173/`，前端 SessionGate 会把你带到 mock IdP 的账号表单（首次没有 mock SSO Cookie 时）。
+
+| 账号 | 角色 | 说明 |
+| --- | --- | --- |
+| `local-dev-user` | 项目 **owner** | 主要操作身份；发起用例、注册环境、发起执行 |
+| `local-dev-user-2` | 项目 **admin** | 四眼审批人身份；批准 `local-dev-user` 发起的审批 |
+
+**口令统一为 `local-dev`**。两个都是合成账号，仅存在于本地 mock，不是产品密钥。
+
+**切换身份**（浏览器会记住 mock SSO，直接重开登录页不会重新出表单）：
+
+- 方式 A：访问 `http://127.0.0.1:8090/switch-account` → 清除 mock SSO → 回应用重新登录，此时会再次出示账号表单。
+- 方式 B：用另一个浏览器 profile 或无痕窗口，各自登录一个账号。
+
+> 为什么需要两个账号：**四眼审批要求「批准人 ≠ 发起人」**，这条规则由服务端强制。用同一个账号发起又批准，会在审批接口上被判 `403 HT-IAM-002`。所以本教程始终用两个身份交替。
+
+> 注意：项目成员关系也必须在库里。`seed_local_identity.py` 已把 `local-dev-user` 设为 owner、`local-dev-user-2` 设为 admin；若成员不存在，登录后项目列表会是空的，需要在 P02 项目里先加成员。
+
+---
+
+## 5. 种子脚本实际写入什么
+
+`scripts/seed_local_identity.py` 只写下面这些（`local-dev` 组织）——**没有用例、没有执行环境、没有门禁策略**：
+
+| 对象 | 内容 |
 | --- | --- |
-| 组织 | HuntAI 演示租户（`huntai-demo`） |
-| 项目 | A=电商核心（四角色全员）；B=支付网关（仅 owner/admin）——用于验证跨项目越权 |
-| 用例（ACTIVE） | 「GET 宠物列表」（script/api，断言 200）；「下单接口压测场景」（performance） |
-| 执行环境 | 「本地平台执行器」（ACTIVE，项目级，可发起执行） |
-| 门禁策略 | 项目 A：blocking 模式，阈值 95% / 500ms / 1% |
-| 连接器 | 演示 Jira、演示 Release（webhook secret 引用 `env:GITHUB_WEBHOOK_SECRET`） |
-| 配额 | token 1000 / 执行 slot 5 / 压测并发 2 |
-| ModelRoute | general → stub |
+| 组织 | `Local Dev Org`（slug `local-dev`） |
+| 用户 | `local-dev-user`（owner）、`local-dev-user-2`（admin） |
+| 项目 | `Local Dev Project` |
+| 成员关系 | 上述 2 条（user 是 owner，user2 是 admin） |
+| ModelRoute | 3 条（Internal / Confidential / Restricted 各一条，A1 生成走本地 stub） |
+| OrgQuota | 1 条组织配额 |
+
+其余对象全部由 [`user-ui-guide.md`](user-ui-guide.md) 带你在 UI 里创建。
+
+> 重新执行本步骤不会刷新或作废登录态；登录态由 mock IdP 会话决定，不是脚本生成 Cookie。
 
 ---
 
-## 4. 功能测试走查清单
+## 6. 常见问题
 
-> 前置：已注入 owner Cookie。每条注明「入口页面 → 操作 → 预期」。
-
-### 4.1 工作台与项目（P01/P02）
-- 打开 `http://127.0.0.1:5173` → 工作台聚合、组织配额余量可见。
-- 切换 admin Cookie 也能看到「支付网关」；切 tester/viewer 只能看到「电商核心」（B 项目不可见）。
-
-### 4.2 用例库（P05/P13）
-- 用例库出现两条 ACTIVE 用例；详情看版本快照（API-037/038）。
-- 新建草稿 → 提交评审 → 换 **admin** 账号在 P10 批准 → 变 ACTIVE（FR-05 两步式）。
-
-### 4.3 执行与 TestRun（P08/P09）
-- P08 选「本地平台执行器」+「GET 宠物列表」发起（execution_source=script）。
-- 目标环境默认不通（127.0.0.1:9 之类），run 会 **FAILED**——这本身就是有效结果：去 P09 看终态、StepRun、失败聚类（A2 会跑规则聚类）。
-- 想要 SUCCEEDED：本机起一个返回 200 的服务（如 `python3 -m http.server 18999`），发起时把参数 `TARGET_ENV` 填 `http://127.0.0.1:18999`。
-- 取消：RUNNING 中点取消 → 状态先 STOPPING（受理 ≠ 已取消）→ worker 停止后 CANCELLED。
-
-### 4.4 Agent 轨迹（P14）
-- P08 用 execution_source=agent + agent 用例发起（需在参数里声明 `agent_manifest`：`{"allowed_tools":["request"],"max_steps":5,"total_timeout_seconds":30}`，缺失会被 VALIDATING 拒绝）。
-- 轨迹在 P14；白名单外工具 → DENY + policy_denials；连续 3 次 DENY 自动终止（AC-085）。
-- 「转脚本草稿」按钮：轨迹 completed 时可一键生成 DRAFT 用例。
-
-### 4.5 性能压测（P16）
-- P16 填：场景用例=「下单接口压测场景」、目标 `http://127.0.0.1:18999`、白名单含该前缀、并发 2、时长 30s → 发起。
-- **白名单外目标 → 403 HT-POL-002，不产生审批**（AC-051）。
-- kill switch：点「Kill switch 关停压测模块」→ 进行中的施压 60s 内 CANCELLED（实测 ~6s）。
-- 高危：场景参数加 `"side_effect_level": "L2"` → run 进 WAITING_APPROVAL + 自动生成 perf_high_risk 审批 → admin 批准后继续压。
-- 基线：压测完成后可创建基线（同场景唯一活跃）。
-
-### 4.6 门禁（P11/P12）
-- 项目 A 策略 blocking；run 终态后 P12 出现 GateEvaluation（pass_rate/p95/error_rate 逐项实测）。
-- 压测 run 无指标/报告 partial/CANCELLED → 不建评估行，只给 unevaluated_reason。
-- 「仅报告 ⇄ 阻断」切换：P11 改 blocking 需勾选确认；历史评估结论不被改写。
-
-### 4.7 审批中心（P10）与四眼
-- 用 owner 发起（jira_write / heal_apply / perf_high_risk / release_push），必须换 **admin** 账号批准（owner 自己看不到批准按钮）。
-- 审批卡片九要素 + param_hash；批准后状态 EXECUTED，领域对象随之推进。
-
-### 4.8 Release（P17）
-- P17 填 Jira 版本号创建 → DRAFT → 自动推进 PENDING_CONFIRM（Readiness 红黄绿、A5 草稿只读、缺失项显式）。
-- 「发起 release_push 审批」→ admin 批准 → SUBMITTED（内部 prepare 创建 item，幂等）。
-- READY 由 webhook 观察驱动；本地可用 curl 模拟（HMAC 签名，密钥 `test-github-webhook-secret`，见附录 B）。
-- 失败重试（API-153）不会重复创建外部 item（AC-067）；取消后迟到 READY 只追加 divergence。
-
-### 4.9 证据中心（P20）
-- 证据检索/详情；「导出证据包」选格式 → 受理 → 完成后下载（API-223 代理）。含 Restricted 证据的导出整单 403。
-
-### 4.10 Copilot（P18）
-- 新建会话（可填项目锚点）→ 提问「当前项目最近的 TestRun 情况如何？」→ 返回 A6 四键（answer/citations/tool_calls/refused_policies）。
-- 越权测试：在问题里粘贴项目 B 的资源 UUID → `refused_policies` 出现 `cross_project_reference:*` 且绝无该数据（AC-068）。
-- kill switch：P23 或 API-199 关停 `copilot` 模块 → 再提问直接 403（AC-069，命令真实失败）。
-- 配额：token 花完后提问 → 429 HT-QUOTA-001。
-
-### 4.11 AI 开关与降级（P23）
-- 单能力（A1–A8）/模块（copilot/performance…）/全局 四级关停即时生效；恢复必须走 kill_switch_restore 审批。
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 登录后立即回到未登录 | `SESSION_COOKIE_SECURE=true` 而本地是 HTTP | 改为 `false`，重启后端 |
+| 回调后报 `state` / `nonce` 校验失败 | `OIDC_REDIRECT_URI` 与浏览器地址不一致 | 确保为 `http://127.0.0.1:5173/api/v1/auth/oidc/callback`，且用 5173 访问 |
+| 端口被占 | 8000 / 5173 / 8090 已被别的进程占用 | `lsof -i :8000 -sTCP:LISTEN` 找到 PID 杀掉后重启；Vite 端口被占会顺延到 5174，此时回调地址要同步改 |
+| 项目列表为空 | 当前账号不是任何项目成员 | 用 owner 身份在 P02 项目里加成员 |
+| 审批按钮点不动 / 403 `HT-IAM-002` | 你就是发起人（四眼） | 换 `local-dev-user-2` 登录后批准 |
+| 注册环境返回 `401 HT-AUTH-002` | L3+ 动作超出再认证窗口 | 按页面提示完成 step-up 再认证（API-004）后重放同一请求 |
+| 发起执行后立刻 `FAILED` | 参数缺 `TARGET_ENV`，或目标不可达 | 见 `user-ui-guide.md` §3；`FAILED` 也是有效结果，可在 P09 查看 |
+| 跑完 `pytest` 后数据没了 | 测试会清空业务表 | `conftest.py` 会 TRUNCATE；重跑 §3 步骤 3 恢复身份，再按 UI 教程重建数据 |
+| mock IdP 登录页打不开 | 步骤 4 的 mock IdP 没启动 | 回到 §3 步骤 4 |
 
 ---
 
-## 5. curl 快速验证（无需浏览器）
+## 7. 冒烟套件（`backend/tests/test_live_smoke.py`）
+
+这是针对**运行中的本地实例**的端到端冒烟套件，默认跳过，需显式开启：
 
 ```bash
-OWNER="Cookie: huntai_session=9eb26c2f-7cae-4688-ab3a-f558703319a6"
-ADMIN="Cookie: huntai_session=99d0105e-f955-4a20-bc12-92ee18ec0681"
-
-curl -s http://127.0.0.1:8000/api/v1/me -H "$OWNER" | head -c 300
-curl -s http://127.0.0.1:8000/api/v1/test-cases?project_id=<A的id> -H "$OWNER"
-curl -s http://127.0.0.1:8000/api/v1/copilot-sessions -H "$OWNER"
-```
-
-## 6. 注意事项 / 常见问题
-
-1. **跑 pytest 会清库**（conftest TRUNCATE 全表）。跑完测试后重新执行 `uv run python /tmp/seed_huntai.py` 即可恢复演示数据与 Cookie（脚本幂等）。
-2. 后端是本地卷存制品（`ARTIFACT_ROOT=./artifacts`），无 MinIO；删除 artifacts 目录不影响元数据，但制品内容会 409。
-3. 外部系统（Jira/Release）是 stub：连接器存在即可走通流程，无真实 HTTP。
-4. Cookie 过期/失效 → 重新跑种子脚本取新 Cookie。
-5. 8000/5173 端口被占 → `lsof -i :8000 -sTCP:LISTEN` 找 PID 杀掉后重启。
-6. 本文档与种子数据仅用于**本地手工验证**，请勿将演示账号用于任何共享环境。
-7. **L4 动作（release_push）要求 15 分钟内 step-up 认证**：本地无真实 IdP，重跑种子脚本即可把 `last_reauth_at` 刷新到当前（详见 §7）。
-
----
-
-## 7. 自动化冒烟测试脚本（`backend/tests/test_live_smoke.py`）
-
-针对**运行中的本地实例**（http://127.0.0.1:8000）的端到端冒烟套件，7 条用例覆盖各模块核心链路。**默认跳过**（常规 `uv run pytest` 不受影响），需显式开启：
-
-```bash
-# 前置：刷新会话（同时满足 L4 的 15 分钟 step-up 窗口；也会同步冒烟脚本的默认 Cookie 说明见下）
-cd backend && uv run python /tmp/seed_huntai.py
-
-# 运行冒烟
+cd backend
 HUNTAI_LIVE=1 uv run pytest tests/test_live_smoke.py -q
 ```
 
-### 7.1 用例清单与对应功能
+**运行前提（必须如实了解，否则会失败）**：
 
-| 用例 | 功能点 | 验证内容 |
-| --- | --- | --- |
-| test_01_health_and_rbac | 认证/RBAC | 四角色 /me 可读；viewer 创建会话 403 HT-IAM-001 |
-| test_02_seeded_assets_visible | 种子资产 | ACTIVE 用例 ×2、ACTIVE 环境、blocking 门禁策略 |
-| test_03_run_lifecycle_script_api | 执行+门禁 | 受理≠完成（202 回执）→ SUCCEEDED → blocking 门禁 pass 评估 + Check Run success |
-| test_04_perf_whitelist_denied | AC-051 | 压测白名单外 403 HT-POL-002 且不建审批 |
-| test_05_copilot_answer_and_cross_project_refusal | AC-068 | A6 四键；跨项目引用 100% 剥离记 refused_policies；messages 持久化 |
-| test_06_release_task_full_flow | FR-15 | 圈定→PENDING_CONFIRM（A5/Readiness）→ step-up → release_push 审批 → SUBMITTED+item → HMAC webhook → READY |
-| test_07_evidence_export_and_proxy_download | AC-096 | 导出受理 202 → 完成后 API-223 代理下载（attachment + JSON 可解析） |
+- 后端在 `http://127.0.0.1:8000`（可用 `HUNTAI_BASE_URL` 覆盖）。
+- 需要 4 个角色的会话 Cookie，通过环境变量 `HUNTAI_OWNER` / `HUNTAI_ADMIN` / `HUNTAI_TESTER` / `HUNTAI_VIEWER` 覆盖；套件内默认值对应一批**仓库内不存在的演示数据**。
+- `test_02_seeded_assets_visible` 断言「2 条 ACTIVE 用例 + ACTIVE 环境 + blocking 门禁策略」，这些对象本仓库没有种子脚本会创建，需要你按 `user-ui-guide.md` 先在 UI 里造出来。
+- 仓库内**没有**为这套件准备数据的种子脚本；照本文从干净库启动时，它不会全绿，属预期。本文不声称「预期 N passed」。
 
-### 7.2 操作步骤
-
-1. 确认后端在 8000 端口运行（当前 main 代码）。
-2. `cd backend && uv run python /tmp/seed_huntai.py` —— 刷新演示数据与全部 Cookie（**必须在冒烟前 15 分钟内执行**，否则 test_06 的 L4 动作会返回 HT-AUTH-002）。
-3. `HUNTAI_LIVE=1 uv run pytest tests/test_live_smoke.py -q` —— 预期 `7 passed`。
-4. 冒烟会在演示库留下：1 个 SUCCEEDED run + 门禁评估、1 个 READY Release 任务、1 个导出包、若干 Copilot 会话——可在前端直接查看这些真实数据。
-
-### 7.3 行为说明
-
-- conftest 已加护栏：`HUNTAI_LIVE=1` 时 pytest 不清空数据库（普通测试仍照常清库）。
-- Cookie 值写在脚本顶部 `COOKIES` 常量，可用环境变量 `HUNTAI_OWNER/ADMIN/TESTER/VIEWER` 覆盖。
-- test_07 直接向演示库插入一条 EvidenceObject（证据创建本身由后端测试覆盖），用于驱动导出链路。
+因此：**复现主链路请以 `user-ui-guide.md` 为准**；冒烟套件是给已备好 demo 数据的维护者用的补充手段。
 
 ---
 
-## 附录 A：种子脚本（`/tmp/seed_huntai.py`）
+## 附录：模拟 Release webhook（可选进阶）
 
-完整脚本约 460 行，核心逻辑（幂等可重复执行）：
-
-1. 建/复用组织 `huntai-demo` → 建 4 个用户（`demo-owner/admin/tester/viewer`，created_by 自指）→ 建 2 个项目（created_by=owner）→ 建成员关系（A 全员四角色；owner/admin 兼 B）。
-2. 建 OrgQuota / ModelRoute（general→stub）/ jira+release 连接器 / blocking 门禁策略 / ACTIVE 平台执行器 / 两条 ACTIVE 用例（api + performance）。
-3. 为每个用户创建 `AuthSession`（30 天），打印 `huntai_session=<uuid>`。
-
-从 `backend/` 目录执行：
+只有先创建了 release 连接器（webhook secret 引用 `env:GITHUB_WEBHOOK_SECRET`，对应 `.env` 中的 `GITHUB_WEBHOOK_SECRET`）才可用。这是可选进阶，不影响主链路。
 
 ```bash
-uv run alembic upgrade head
-uv run python /tmp/seed_huntai.py
-```
-
-> 若 `/tmp` 已清空，可向维护者索取脚本，或按上面 3 步自行重建；脚本本身不入库（docs/ 不放可执行代码）。
-
-## 附录 B：模拟 Release webhook（READY 观察回传）
-
-```bash
-# 前置：release 连接器已建（webhook_secret_ref=env:GITHUB_WEBHOOK_SECRET，
-# 本地 .env 中 GITHUB_WEBHOOK_SECRET=test-github-webhook-secret）
 BODY='{"release_task_id":"<task_id>","external_item_id":"RI-DEMO","status":"ready"}'
-SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac 'test-github-webhook-secret' -r | cut -d' ' -f1)"
+SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$GITHUB_WEBHOOK_SECRET" -r | cut -d' ' -f1)"
 curl -s -X POST "http://127.0.0.1:8000/api/v1/inbound-webhooks/<release_connector_id>" \
   -H "content-type: application/json" -H "x-hub-signature-256: $SIG" \
   -H "x-github-delivery: demo-$(date +%s)" -H "x-github-event: release_item_ready" \
   -d "$BODY"
-# SUBMITTED 的任务将迁到 READY；CANCELLED 的任务只追加 divergence
 ```
+
+`SUBMITTED` 的任务将迁到 `READY`；`CANCELLED` 的任务只追加 divergence。
