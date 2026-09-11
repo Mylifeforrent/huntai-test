@@ -84,7 +84,7 @@
 
 | # | 级别 | 残留 | 来源切片 | 处置建议 |
 |---|---|---|---|---|
-| D1 | 中 | 生产 IdP 未接入（本地为 `scripts/mock_idp.py`）；全请求租户中间件 / ORM 过滤未做；API-006 过期提示 UI 未接 | S-M0-01（部分完成） | 单开 `feat/stage11-tenant-middleware` 与生产 IdP 接入切片；这是 M1 放行的前置 |
+| D1 | 中 | **2026-09-11 部分闭环**（详见 §7）。已补：租户边界强制（路由认证一致性测试 + AC-003 跨租户系统级回归 + 无上下文拒绝）、生产 IdP 对接能力（discovery 端点 / `iss`·`aud`·`azp` 与算法白名单 / 生产拒绝 loopback issuer）、API-006 过期提示 UI。**仍残留**：ORM 层租户自动过滤未做（本轮按用户决定只做 API 边界）；生产 IdP 真实凭证与端到端验证未做 | S-M0-01（部分完成） | 前者需单开切片评估收益与回归面；后者待 IdP 选型与凭证就位 |
 | D2 | 中 | API-022 通知角标未做（前端缺口 G4）；`is_expiring` 阈值 TBD 故省略；`gate_anomalies` 恒 `[]`（M0 登记理由为「无 GateEvaluation 表」，而迁移 `0019_gate_evaluations` 已在 S-M2-03 落地，**是否已解除未回写待核**） | S-M0-11 | 先核实 `gate_anomalies` 现状再决定是否补；补 TBD 阈值需产品裁决 |
 | D3 | 中 | API-165 / API-166 缺失；`waived` 结论的 Check Run 回写语义未定义；p95 / error_rate 在 S-M2-08 时固定 `not_measured` | S-M2-03、S-M2-04、S-M2-08 | S-M3-02 已接 PerfBaseline，需核实 `not_measured` 是否已解除并补 API-165/166 |
 | D4 | 中 | 无真实外部系统 E2E：Jenkins / Jira REST / GitHub Check Run / Release 系统（均 stub 或 mock 服务） | S-M1-05、S-M2-03/04/05、S-M3-03 | 见 [implementation_notes.md](implementation_notes.md) §6 未本地验证清单 |
@@ -119,6 +119,53 @@
 
 1. **8 条合入前验证命令全部零失败**：后端 `ruff check` / `ruff format --check` / `mypy app` / `pytest`（362 passed, 8 skipped）；前端 `lint` / `tsc --noEmit` / `build` / `test`（31 files, 104 tests passed）。
 2. **无阻塞级缺陷**。本次新发现的 4 条均为低级别告警/噪音（W1–W4），2 条为本地工具链版本偏差（O1、O2）。
-3. **Stage 11 状态**：代码实现与验证已完整；本报告补齐原缺失的阶段约定产出（`implementation_notes.md` + `test_report.md`）。但 `S-M0-01` 仍为「部分完成」，残留 D1（生产 IdP / 全请求租户中间件）**阻塞 M1 正式放行**；同时 `[CONFLICT-5]` 未裁决。因此 Stage 11 的「实现+验证」可判定为通过，而 M1 Gate 放行仍需先闭环 D1 与 D16。
-4. **未在本阶段改动任何代码**：§4 全部条目只登记，处置需单开 `fix/` 分支并先经用户确认范围。
+3. **Stage 11 状态**：代码实现与验证已完整；本报告补齐原缺失的阶段约定产出（`implementation_notes.md` + `test_report.md`）。`S-M0-01` 仍为「部分完成」（残留见 §4.2 D1 与 §7）。
+   - **勘误（2026-09-11）**：本报告 §4.2 与本节原先称「S-M0-01 残留阻塞 M1 放行」，与事实源不符。`docs/10_ai_context/ai_context.md` §4.1 明确 M1 放行受 **PRD B.10 Gate**（越权回归全阻断；AI 调用无旁路；任务无永久 running；注册 CI 健康检查与 Job 发现）与**一致性检查 FAIL 项**约束，并明确 S-M0-01 残留**不阻塞**进 M1。此前的表述把 S-M0-01 残留与「一致性检查 FAIL 项」混为一谈，现更正。
+   - `[CONFLICT-5]`（`gate_waiver` 是否覆盖 Readiness 豁免）仍待用户裁决，禁止实现中自行选边。
+4. **本报告 §1–§6 记录的是 Stage 11 收口时的基线**（HEAD `075ae8b`，后端 362 / 前端 104）。后续 D1 的代码变更与验证结果记在 §7，**未覆盖**上表基线。
 5. **下一步**：可进入 Stage 12（`docs/12_deployment/deployment.md`）；`deployment.md` 中原属「无法本地验证」的部署配置项，按 §5.3 继续记录验证方式与验证人。
+
+## 7. D1（`S-M0-01` 残留）验证补充 · 2026-09-11
+
+> 分支 `feat/s-m0-01-residual`；范围经用户确认：租户隔离只做 API 边界强制（不做 SQLAlchemy 自动过滤 / PostgreSQL RLS）、生产 IdP 只做对接能力与生产守卫、API-006 只渲染服务端布尔（不发明 TBD 阈值）、membership 语义不一致仅登记。
+
+### 7.1 验证结果（8 条命令零失败）
+
+| 命令 | 结果 |
+|---|---|
+| `uv run ruff check .` | 通过 |
+| `uv run ruff format --check .` | `200 files already formatted` |
+| `uv run mypy app` | `Success: no issues found in 116 source files` |
+| `uv run pytest -q` | **`442 passed, 8 skipped, 4 warnings in 151.89s`**（基线 362 → 442，新增 80 条） |
+| `npm run lint`（`tsc -b`） | 通过 |
+| `npx tsc --noEmit` | 通过 |
+| `npm run build` | 2043 modules，`dist/assets/index-*.js` 617.53 kB（gzip 182.91 kB），362ms |
+| `npm run test` | **`Test Files 33 passed (33)` / `Tests 112 passed (112)`**（基线 31/104，新增 2 文件 8 用例） |
+
+告警仍为 4 条（authlib `jose` 弃用 + 3 条 `PytestCollectionWarning`），未新增告警类别。
+
+### 7.2 新增测试
+
+| 文件 | 条数 | 覆盖 |
+|---|---|---|
+| `backend/tests/test_route_auth_conformance.py` | 4 | 每个 `/api/v1` 路由必须声明认证依赖或登记为公开/内联；登记表无失效条目；不重叠；内联认证的 API-062 无凭证时 401 |
+| `backend/tests/test_tenant_isolation_regression.py` | 40 | 38 个详情端点以未知 id 访问统一 404 `HT-RES-001`（不泄露存在性）；未认证 401 不伪装 404；他租户 project id 不可枚举 |
+| `backend/tests/test_tenant_context_rejection.py` | 12 | 未认证 401；会话租户只来自 `AuthSession`；指向未知 org 的会话解析为 `None`；4 个 membership 门禁端点无 membership → 403 `HT-IAM-001` |
+| `backend/tests/test_oidc_hardening.py` | 24 | discovery 取端点/缓存/issuer 不匹配/缺 jwks_uri/非对象文档；`iss`·`aud`·过期·`HS256`·`none`·nonce·`azp` 拒绝；生产守卫（loopback 检测 + 启动即拒） |
+| `frontend/src/components/layout/SessionReauthNotice.test.tsx` | 4 | 不需要时为 null；需要时提示与 CTA；CTA 触发既有再认证流；失败回显并恢复可用 |
+| `frontend/src/hooks/useSession.test.tsx` | 4 | `HT-AUTH-002` 不再阻断外壳（保持可浏览）；`HT-IAM-001` 仍阻断；`useReauthRequired` 读 API-006 布尔 |
+
+### 7.3 已知偏离与新增登记
+
+| # | 级别 | 内容 | 说明 |
+|---|---|---|---|
+| N1 | 中 | **无 membership 用户语义不一致**：`/api/v1/projects` 等用 `require_session` → 200 空列表；4 个端点用 `require_session_with_membership` → 403 `HT-IAM-001` | 本次按用户决定**保持现状仅登记**。两者都不跨租户（数据仍限本组织），但同一类调用方在不同端点得到不同语义，需产品/契约裁决 |
+| N2 | 中 | 一致性测试只保证「路由不漏鉴权」，**不保证**「每个仓储查询都带 `organization_id`」 | 因为本轮不做 ORM 自动过滤/RLS；该限制已写入 `test_route_auth_conformance.py` 模块文档串，不掩盖 |
+| N3 | 中 | `POST /api/v1/test-runs` 采用**内联认证**（bearer 优先、支持 execute scope 的 ApiToken），未用 `Depends(require_*) ` | 行为正确（无凭证 401 已测），但因不走依赖而不被一致性规则直接覆盖，故显式登记为「内联认证路由」并要求伴随行为测试。是否重构为统一依赖待评估 |
+| N4 | 低 | `_IncludedRouter` 懒加载结构：`create_app().routes` 不直接展开为 `APIRoute` | 一致性测试用递归穿透 `original_router` 的方式遍历；若升级 FastAPI 改变该结构，该测试会失败（fail-close，属预期） |
+| N5 | 低 | W4（Vitest `act(...)` 环境未配置）在本轮新增的两个前端测试文件内已按现有惯例显式设置 `IS_REACT_ACT_ENVIRONMENT`，**全局 setup 仍未设置** | 其余文件的同类告警仍在，未扩大范围 |
+
+### 7.4 未本地验证（沿用 §5 与 implementation_notes §6）
+
+生产 IdP 的真实凭证、端点形态、JWKS 轮换与 client 认证方式**仍无法本地验证**；本轮只证明「对接能力与守卫存在且被测试覆盖」，**不等于**已对真实 IdP 验证。验证人：执行 ZCode（2026-09-11），人工复核签署待指定。
+

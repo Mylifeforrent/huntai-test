@@ -7,8 +7,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from authlib.jose import JsonWebKey
-from authlib.jose import jwt as jose_jwt
+from authlib.jose import JsonWebKey, JsonWebToken
+from authlib.jose.errors import JoseError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -35,6 +35,59 @@ WORKBENCH_LIST_LIMIT = 50
 OIDC_FAILURE_QUERY_KEY = "oidc"
 OIDC_FAILURE_QUERY_VALUE = "failed"
 OIDC_PROMPT_LOGIN = "login"
+OIDC_DISCOVERY_PATH = "/.well-known/openid-configuration"
+
+# ID tokens must be signed with an asymmetric algorithm. HS* and "none" are
+# excluded: a shared-secret MAC would let the client forge tokens, and "none"
+# would drop signature verification entirely.
+OIDC_ID_TOKEN_ALGORITHMS = ("RS256", "RS384", "RS512", "ES256", "ES384", "ES512")
+
+_ID_TOKEN_DECODER = JsonWebToken(list(OIDC_ID_TOKEN_ALGORITHMS))
+
+_oidc_metadata_cache: dict[str, dict[str, Any]] = {}
+
+
+def clear_oidc_metadata_cache() -> None:
+    """Drop cached discovery documents (issuer reconfiguration, tests)."""
+    _oidc_metadata_cache.clear()
+
+
+def _require_metadata_str(metadata: dict[str, Any], key: str) -> str:
+    value = metadata.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"missing_{key}")
+    return value
+
+
+async def fetch_oidc_metadata(settings: Settings) -> dict[str, Any]:
+    """Fetch and cache the provider discovery document for the configured issuer.
+
+    Endpoints come from discovery rather than being derived from the issuer URL:
+    real providers routinely serve authorize/token under non-standard paths.
+    """
+    issuer = settings.oidc_issuer.rstrip("/")
+    cached = _oidc_metadata_cache.get(issuer)
+    if cached is not None:
+        return cached
+
+    metadata_url = f"{issuer}{OIDC_DISCOVERY_PATH}"
+    async with httpx.AsyncClient() as client:
+        metadata_response = await client.get(metadata_url)
+        metadata_response.raise_for_status()
+        payload: Any = metadata_response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("invalid_oidc_metadata")
+
+    # Mix-up defence: the document must claim the issuer we actually asked.
+    advertised = payload.get("issuer")
+    if not isinstance(advertised, str) or advertised.rstrip("/") != issuer:
+        raise ValueError("issuer_mismatch")
+
+    for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
+        _require_metadata_str(payload, key)
+
+    _oidc_metadata_cache[issuer] = payload
+    return payload
 
 
 @dataclass(frozen=True)
@@ -154,7 +207,7 @@ async def start_oidc_flow(
         return_path=normalized_path,
         expires_at=expires_at,
     )
-    authorization_url = build_authorization_url(
+    authorization_url = await build_authorization_url(
         settings,
         state=state,
         nonce=nonce,
@@ -164,7 +217,7 @@ async def start_oidc_flow(
     return {"authorization_url": authorization_url}
 
 
-def build_authorization_url(
+async def build_authorization_url(
     settings: Settings,
     *,
     state: str,
@@ -172,6 +225,7 @@ def build_authorization_url(
     code_challenge: str,
     prompt: str | None = None,
 ) -> str:
+    metadata = await fetch_oidc_metadata(settings)
     params = {
         "response_type": "code",
         "client_id": settings.oidc_client_id,
@@ -184,7 +238,7 @@ def build_authorization_url(
     }
     if prompt == OIDC_PROMPT_LOGIN:
         params["prompt"] = OIDC_PROMPT_LOGIN
-    authorize_endpoint = f"{settings.oidc_issuer.rstrip('/')}/authorize"
+    authorize_endpoint = _require_metadata_str(metadata, "authorization_endpoint")
     return f"{authorize_endpoint}?{urlencode(params)}"
 
 
@@ -194,7 +248,8 @@ async def exchange_oidc_code(
     code: str,
     code_verifier: str,
 ) -> dict[str, Any]:
-    token_endpoint = f"{settings.oidc_issuer.rstrip('/')}/token"
+    metadata = await fetch_oidc_metadata(settings)
+    token_endpoint = _require_metadata_str(metadata, "token_endpoint")
     async with AsyncOAuth2Client(
         client_id=settings.oidc_client_id,
         client_secret=settings.oidc_client_secret,
@@ -209,30 +264,49 @@ async def exchange_oidc_code(
     return dict(token)
 
 
+def _validate_authorized_party(claims: dict[str, Any], *, client_id: str) -> None:
+    """When the token lists several audiences, OIDC requires azp == client_id."""
+    audience = claims.get("aud")
+    if not isinstance(audience, list) or len(audience) <= 1:
+        return
+    if claims.get("azp") != client_id:
+        raise ValueError("azp_mismatch")
+
+
 async def verify_id_token(
     settings: Settings,
     *,
     id_token: str,
     expected_nonce: str,
 ) -> dict[str, Any]:
-    metadata_url = f"{settings.oidc_issuer.rstrip('/')}/.well-known/openid-configuration"
+    metadata = await fetch_oidc_metadata(settings)
+    jwks_uri = _require_metadata_str(metadata, "jwks_uri")
     async with httpx.AsyncClient() as client:
-        metadata_response = await client.get(metadata_url)
-        metadata_response.raise_for_status()
-        metadata: dict[str, Any] = metadata_response.json()
-        jwks_uri = metadata.get("jwks_uri")
-        if not isinstance(jwks_uri, str) or not jwks_uri:
-            raise ValueError("missing_jwks_uri")
         jwks_response = await client.get(jwks_uri)
         jwks_response.raise_for_status()
         jwks_data: dict[str, Any] = jwks_response.json()
 
+    issuer = settings.oidc_issuer.rstrip("/")
     key_set = JsonWebKey.import_key_set(jwks_data)
-    claims = jose_jwt.decode(id_token, key_set)
-    claims.validate()
+    try:
+        claims = _ID_TOKEN_DECODER.decode(
+            id_token,
+            key_set,
+            claims_options={
+                "iss": {"essential": True, "value": issuer},
+                "aud": {"essential": True, "value": settings.oidc_client_id},
+            },
+        )
+        claims.validate()
+    except JoseError as exc:
+        # One opaque code: a bad signature, issuer, audience, algorithm or
+        # lifetime must not be distinguishable from outside.
+        raise ValueError("id_token_invalid") from exc
     if claims.get("nonce") != expected_nonce:
         raise ValueError("nonce_mismatch")
-    return dict(claims)
+    resolved = dict(claims)
+    _validate_authorized_party(resolved, client_id=settings.oidc_client_id)
+    return resolved
 
 
 async def complete_oidc_callback(

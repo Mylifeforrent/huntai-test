@@ -1,12 +1,36 @@
+import ipaddress
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
+from urllib.parse import urlparse
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = _REPO_ROOT / ".env"
+
+PRODUCTION_ENV = "production"
+
+# Hosts that can only ever address the local machine, including the mock IdP.
+_LOCAL_ISSUER_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def loopback_issuer_host(issuer: str) -> str | None:
+    """Return the host when ``issuer`` addresses the local machine, else None."""
+    host = urlparse(issuer).hostname
+    if host is None:
+        return None
+    normalized = host.strip("[]").lower()
+    if normalized in _LOCAL_ISSUER_HOSTS:
+        return host
+    try:
+        if ipaddress.ip_address(normalized).is_loopback:
+            return host
+    except ValueError:
+        return None
+    return None
 
 
 class SameSitePolicy(StrEnum):
@@ -96,6 +120,17 @@ class Settings(BaseSettings):
             if normalized in {"false", "0", "no"}:
                 return False
         return value
+
+    @model_validator(mode="after")
+    def reject_local_mock_idp_in_production(self) -> Self:
+        """Refuse to boot a production process pointed at the local mock IdP."""
+        if self.app_env.strip().lower() != PRODUCTION_ENV:
+            return self
+        if loopback_issuer_host(self.oidc_issuer) is not None:
+            raise ValueError(
+                f"OIDC_ISSUER must not address the local mock IdP when APP_ENV={PRODUCTION_ENV}"
+            )
+        return self
 
 
 @lru_cache

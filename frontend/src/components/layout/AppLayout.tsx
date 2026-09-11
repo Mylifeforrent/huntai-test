@@ -21,6 +21,8 @@ import { logoutSession } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SessionReauthNotice } from "@/components/layout/SessionReauthNotice";
+import { useReauthRequired } from "@/hooks/useSession";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 
@@ -94,6 +96,7 @@ export function AppLayout() {
   const showCount = typeof unread === "number" && unread > 0;
   const badgeUndeveloped = isUndeveloped(badgeQuery.error);
   const banner = aiBanner(orgQuery.data?.data, orgQuery.error, orgQuery.isPending);
+  const reauthRequired = useReauthRequired();
 
   return (
     <TooltipProvider>
@@ -182,6 +185,11 @@ export function AppLayout() {
               <LogOut className="size-4" />
             </Button>
           </header>
+          {reauthRequired ? (
+            <div className="border-b bg-card px-4 py-2">
+              <SessionReauthNotice active />
+            </div>
+          ) : null}
           {inProject ? <Subnav links={projectLinks(projectId)} /> : null}
           {inTestCenter ? <Subnav links={TEST_CENTER_LINKS} /> : null}
           {inGates ? <Subnav links={GATE_LINKS} /> : null}

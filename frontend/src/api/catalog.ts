@@ -179,6 +179,7 @@ export const PAGE_APIS = {
   ],
   session: [
     { id: "API-005", method: "GET", path: "/api/v1/me", summary: "当前用户" },
+    { id: "API-006", method: "GET", path: "/api/v1/auth/session", summary: "会话投影与再认证提示" },
     { id: "API-010", method: "GET", path: "/api/v1/organizations/current", summary: "租户投影" },
     { id: "API-011", method: "GET", path: "/api/v1/projects", summary: "项目列表" },
     { id: "API-001", method: "GET", path: "/api/v1/auth/oidc/start", summary: "OIDC 登录" },

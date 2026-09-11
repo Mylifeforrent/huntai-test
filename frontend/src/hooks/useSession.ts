@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import { ApiError } from "@/api/errors";
+import { ApiError, isRequireReauth } from "@/api/errors";
 import { queryKeys } from "@/api/queryKeys";
 import {
   clearOidcFailureInUrl,
   currentReturnPath,
+  fetchSessionMetadata,
   isAuthRedirectInProgress,
   isOidcFailureRecovery,
   shouldBlockAuthenticatedShell,
@@ -44,6 +45,16 @@ export function useSession() {
     }
 
     const error = meQuery.error;
+
+    // HT-AUTH-002: the L3+ step-up window elapsed. The shell stays browsable —
+    // only the privileged command needs re-auth — so surface the notice instead
+    // of blocking the whole application.
+    if (error instanceof ApiError && isRequireReauth(error)) {
+      setBlockError(null);
+      setPhase("ready");
+      return;
+    }
+
     if (shouldBlockAuthenticatedShell(error)) {
       setBlockError(error);
       setPhase("blocked");
@@ -70,11 +81,28 @@ export function useSession() {
   }, [meQuery.isPending, meQuery.isSuccess, meQuery.error]);
 
   const redirecting = phase === "redirecting" || isAuthRedirectInProgress();
+  const exposedPhase = redirecting ? ("redirecting" as const) : phase;
 
   return {
-    phase: redirecting ? ("redirecting" as const) : phase,
+    phase: exposedPhase,
     me: meQuery.data?.data,
-    error: blockError ?? meQuery.error,
+    // Only meaningful when the shell is not usable: a stale query error must not
+    // be reported as a live error once the session is ready (e.g. HT-AUTH-002).
+    error: exposedPhase === "ready" ? null : (blockError ?? meQuery.error),
     refetch: meQuery.refetch,
   };
+}
+
+/**
+ * API-006 probe for the step-up hint. Read-only: it never starts a redirect, so
+ * it is safe to mount outside the session phase machine. The hint comes from the
+ * server's own boolean — no client-side expiry threshold is invented.
+ */
+export function useReauthRequired(): boolean {
+  const sessionQuery = useQuery({
+    queryKey: queryKeys.session,
+    queryFn: () => fetchSessionMetadata(),
+    retry: false,
+  });
+  return sessionQuery.data?.reauth_required === true;
 }

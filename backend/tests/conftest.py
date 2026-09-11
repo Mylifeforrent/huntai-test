@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import dispose_engine, get_engine, get_session_factory
 from app.main import create_app
+from app.modules.identity_tenancy import service as identity_service
 from app.modules.identity_tenancy.models import (
     DEFAULT_CAPABILITY_CONTROLS,
     DEFAULT_SIEM_EXPORT,
@@ -55,6 +56,29 @@ from app.modules.identity_tenancy.models import (
     User,
 )
 from app.modules.quota_governance.service import seed_default_org_quota
+
+TEST_OIDC_ISSUER = TEST_ENV["OIDC_ISSUER"]
+
+# Discovery document served from memory during tests. Endpoints deliberately use
+# a non-standard path so tests prove they come from discovery, not from the
+# issuer URL, and so API-001/002 never open a socket.
+TEST_OIDC_METADATA: dict[str, str] = {
+    "issuer": TEST_OIDC_ISSUER,
+    "authorization_endpoint": f"{TEST_OIDC_ISSUER}/oauth2/v2/authorize",
+    "token_endpoint": f"{TEST_OIDC_ISSUER}/oauth2/v2/token",
+    "jwks_uri": f"{TEST_OIDC_ISSUER}/oauth2/v2/jwks",
+}
+
+
+@pytest.fixture(autouse=True)
+def _stub_oidc_discovery(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+    """Pre-seed the discovery cache so OIDC tests stay offline."""
+    identity_service.clear_oidc_metadata_cache()
+    monkeypatch.setitem(
+        identity_service._oidc_metadata_cache, TEST_OIDC_ISSUER, dict(TEST_OIDC_METADATA)
+    )
+    yield
+    identity_service.clear_oidc_metadata_cache()
 
 
 @pytest.fixture(scope="session", autouse=True)

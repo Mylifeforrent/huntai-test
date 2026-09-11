@@ -3,6 +3,8 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from httpx import AsyncClient
 
+from tests.conftest import TEST_OIDC_METADATA
+
 
 @pytest.mark.asyncio
 async def test_api_001_oidc_start_returns_authorization_url(client: AsyncClient) -> None:
@@ -12,6 +14,8 @@ async def test_api_001_oidc_start_returns_authorization_url(client: AsyncClient)
     assert "authorization_url" in body
     parsed = urlparse(body["authorization_url"])
     assert parsed.hostname == "idp.example.com"
+    # Endpoint comes from discovery, not from f"{issuer}/authorize".
+    assert body["authorization_url"].startswith(TEST_OIDC_METADATA["authorization_endpoint"])
     query = parse_qs(parsed.query)
     assert query["response_type"] == ["code"]
     assert "state" in query
