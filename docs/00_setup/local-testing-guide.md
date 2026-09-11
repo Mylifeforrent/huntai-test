@@ -156,6 +156,10 @@ npm run dev
 
 打开 `http://127.0.0.1:5173/`，前端 SessionGate 会把你带到 mock IdP 的账号表单（首次没有 mock SSO Cookie 时）。
 
+![mock IdP 登录页：用户名、密码与提交按钮](images/1.1-a-idp-login.png)
+
+> ① 用户名 ② 密码 ③ 点「使用企业账号登录」。详细走查见 [`user-ui-guide.md`](user-ui-guide.md) §1.1。
+
 | 账号 | 角色 | 说明 |
 | --- | --- | --- |
 | `local-dev-user` | 项目 **owner** | 主要操作身份；发起用例、注册环境、发起执行 |
@@ -167,6 +171,10 @@ npm run dev
 
 - 方式 A：访问 `http://127.0.0.1:8090/switch-account` → 清除 mock SSO → 回应用重新登录，此时会再次出示账号表单。
 - 方式 B：用另一个浏览器 profile 或无痕窗口，各自登录一个账号。
+
+![switch-account 页面：清除成功 + 返回应用](images/1.3-a-switch-account.png)
+
+> 访问 `http://127.0.0.1:8090/switch-account` 只会看到这两行，属正常。
 
 > 为什么需要两个账号：**四眼审批要求「批准人 ≠ 发起人」**，这条规则由服务端强制。用同一个账号发起又批准，会在审批接口上被判 `403 HT-IAM-002`。所以本教程始终用两个身份交替。
 
