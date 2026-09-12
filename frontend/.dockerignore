@@ -1,0 +1,12 @@
+# Build context hygiene for the frontend image (context is frontend/).
+# node_modules is reinstalled by `npm ci` and dist is produced by the build.
+node_modules/
+dist/
+
+# Repo-root env must never enter the context; VITE_API_BASE_URL is a build arg.
+.env
+.env.*
+
+# Editor / OS noise
+.DS_Store
+.idea/
