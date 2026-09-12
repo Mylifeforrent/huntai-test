@@ -23,7 +23,7 @@ import { TEST_RUN_TERMINALS } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, PageHeader, QueryGate, EmptyState, StepMark } from "@/components/domain/PageState";
 import { RunProgressBar } from "@/components/domain/RunProgressBar";
 import { ClusterCard } from "@/components/domain/ClusterCard";
 import { EvidenceViewer } from "@/components/domain/EvidenceViewer";
@@ -648,12 +648,4 @@ function parseSuggestedPatch(suggested: string): Record<string, unknown> {
     return { assertions: [{ type: "status_code", expected: Number(suggested) || 200 }] };
   }
   return {};
-}
-
-function StepMark({ step }: { step: string }) {
-  return (
-    <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary font-mono text-xs font-semibold text-secondary-foreground">
-      {step}
-    </span>
-  );
 }

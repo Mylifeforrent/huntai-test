@@ -7,6 +7,7 @@ import { ApiError, isUndeveloped } from "@/api/errors";
 import type { ApiDescriptor } from "@/api/catalog";
 import { cn } from "@/lib/utils";
 import { UndevelopedCallout } from "./UndevelopedCallout";
+import { useViewport } from "@/hooks/useViewport";
 
 export function PageHeader({
   title,
@@ -17,14 +18,23 @@ export function PageHeader({
   description?: string;
   actions?: ReactNode;
 }) {
+  const { canMutate } = useViewport();
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions && canMutate ? <div className="flex items-center gap-2">{actions}</div> : null}
     </div>
+  );
+}
+
+export function StepMark({ step }: { step: string }) {
+  return (
+    <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary font-mono text-xs font-semibold text-secondary-foreground">
+      {step}
+    </span>
   );
 }
 

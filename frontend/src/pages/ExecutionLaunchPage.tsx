@@ -18,8 +18,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/domain/StatusBadge";
-import { CommandFeedback, PageHeader, EmptyState, LoadingState } from "@/components/domain/PageState";
+import { CommandFeedback, PageHeader, EmptyState, LoadingState, StepMark } from "@/components/domain/PageState";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useViewport } from "@/hooks/useViewport";
 import { asRecord, extractResourceId } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ function schemaRequiredFields(schema: Record<string, unknown> | undefined): stri
 
 export function ExecutionLaunchPage() {
   const { get, set } = useUrlState();
+  const { canMutate } = useViewport();
   const projectId = get("projectId");
   const urlCaseId = get("caseId");
   const navigate = useNavigate();
@@ -360,9 +362,13 @@ export function ExecutionLaunchPage() {
         {localError ? <p className="text-xs text-destructive">{localError}</p> : null}
       </Layer>
 
-      <Button onClick={submit} disabled={launch.isPending}>
-        发起执行
-      </Button>
+      {canMutate ? (
+        <Button onClick={submit} disabled={launch.isPending}>
+          发起执行
+        </Button>
+      ) : (
+        <p className="text-sm text-muted-foreground">请在宽度 ≥1024px 的桌面发起执行。</p>
+      )}
       <CommandFeedback error={launchError} apis={LAUNCH_APIS} action="创建 TestRun" />
     </>
   );
@@ -381,11 +387,12 @@ function Layer({
 }) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>
-          {step}. {title}
-        </CardTitle>
-        <CardDescription>{hint}</CardDescription>
+      <CardHeader className="flex-row items-start gap-3">
+        <StepMark step={step} />
+        <div className="flex min-w-0 flex-col gap-1">
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{hint}</CardDescription>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">{children}</CardContent>
     </Card>

@@ -10,6 +10,7 @@ import { UndevelopedCallout } from "./UndevelopedCallout";
 import { PAGE_APIS } from "@/api/catalog";
 import { asRecord, formatServerScalar } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useViewport } from "@/hooks/useViewport";
 
 export interface ApprovalCardModel {
   id: string;
@@ -86,6 +87,7 @@ export function ApprovalCard({
   const [hashOpen, setHashOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const { canMutate } = useViewport();
   const selfApprove = Boolean(
     card.fourEyesSelf ||
       (card.initiatorId && card.currentUserId && card.initiatorId === card.currentUserId),
@@ -164,35 +166,42 @@ export function ApprovalCard({
         ) : null}
       </Section>
       <div data-zone="actions" className="flex flex-col gap-3 bg-muted/40 px-4 py-3">
+        {!canMutate ? (
+          <p className="text-xs text-warning">当前为只读浏览，批准 / 拒绝请在宽度 ≥1024px 的桌面完成。</p>
+        ) : null}
         {selfApprove ? <p className="text-xs text-warning">发起人本人不可批准（四眼前端呈现，服务端强制）。</p> : null}
         {undeveloped ? <UndevelopedCallout compact apis={PAGE_APIS.P10} action="批准 / 拒绝 / 重新提交" /> : null}
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={actionsDisabled} onClick={onApprove}>
-            批准
-          </Button>
-          <Button variant="destructive" disabled={actionsDisabled} onClick={() => setRejectOpen(true)}>
-            拒绝（附理由）
-          </Button>
-          <Button variant="outline" disabled={undeveloped || busy} onClick={onResubmit}>
-            修改后重新提交
-          </Button>
-        </div>
-        {rejectOpen ? (
-          <div className="flex flex-col gap-2">
-            <Label htmlFor={`reject-${card.id}`}>拒绝理由（必填）</Label>
-            <Textarea
-              id={`reject-${card.id}`}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-            <Button
-              variant="destructive"
-              disabled={!reason.trim() || undeveloped || busy}
-              onClick={() => onReject?.(reason)}
-            >
-              确认拒绝
-            </Button>
-          </div>
+        {canMutate ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={actionsDisabled} onClick={onApprove}>
+                批准
+              </Button>
+              <Button variant="destructive" disabled={actionsDisabled} onClick={() => setRejectOpen(true)}>
+                拒绝（附理由）
+              </Button>
+              <Button variant="outline" disabled={undeveloped || busy} onClick={onResubmit}>
+                修改后重新提交
+              </Button>
+            </div>
+            {rejectOpen ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor={`reject-${card.id}`}>拒绝理由（必填）</Label>
+                <Textarea
+                  id={`reject-${card.id}`}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+                <Button
+                  variant="destructive"
+                  disabled={!reason.trim() || undeveloped || busy}
+                  onClick={() => onReject?.(reason)}
+                >
+                  确认拒绝
+                </Button>
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
     </Card>

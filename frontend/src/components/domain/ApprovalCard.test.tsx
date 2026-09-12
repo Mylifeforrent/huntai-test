@@ -2,6 +2,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { act, type ReactNode } from "react";
 import { describe, expect, it, afterEach } from "vitest";
 import { ApprovalCard, approvalCardFromRequest } from "./ApprovalCard";
+import { ViewportContext, valueForWidth } from "@/hooks/useViewport";
 
 const mounts: Array<{ root: Root; container: HTMLDivElement }> = [];
 
@@ -71,5 +72,27 @@ describe("approval card zones", () => {
     expect(card.paramHash).toBe("payload-hash");
     expect(card.cost).toBe("0.02 USD");
     expect(card.diff?.[0]).toEqual({ field: "locator", from: "#a", to: "#b" });
+  });
+
+  it("keeps action zone but hides command buttons under 1024px", () => {
+    const container = mount(
+      <ViewportContext.Provider value={valueForWidth(800)}>
+        <ApprovalCard
+          card={{
+            id: "ar-ro",
+            action: "jira_write",
+            target: "cluster-1",
+            status: "PENDING",
+            risk: "L1",
+          }}
+        />
+      </ViewportContext.Provider>,
+    );
+    const zones = [...container.querySelectorAll("[data-zone]")].map((node) => node.getAttribute("data-zone"));
+    expect(zones).toEqual(["1", "2", "3", "4", "5", "6", "actions"]);
+    expect(container.textContent).toContain("只读浏览");
+    const labels = [...container.querySelectorAll("button")].map((node) => node.textContent);
+    expect(labels).not.toContain("批准");
+    expect(labels).not.toContain("拒绝（附理由）");
   });
 });

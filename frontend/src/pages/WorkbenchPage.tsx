@@ -49,7 +49,7 @@ export function WorkbenchPage() {
           </Button>
         }
       />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="待审批"
           value={workbenchBlocked ? undefined : String(pending.length)}
@@ -79,7 +79,7 @@ export function WorkbenchPage() {
           undeveloped={workbenchUndeveloped && quotaUndeveloped}
         />
       </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>待审批</CardTitle>

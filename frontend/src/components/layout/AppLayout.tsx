@@ -22,7 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SessionReauthNotice } from "@/components/layout/SessionReauthNotice";
-import { useReauthRequired } from "@/hooks/useSession";
+import { useReauthRequired, useSession } from "@/hooks/useSession";
+import { ViewportProvider, useViewport } from "@/hooks/useViewport";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 
@@ -72,11 +73,22 @@ const ADMIN_LINKS = [
 ];
 
 export function AppLayout() {
+  return (
+    <ViewportProvider>
+      <AppShell />
+    </ViewportProvider>
+  );
+}
+
+function AppShell() {
   const { projectId } = useParams();
   const location = useLocation();
   const queryClient = useQueryClient();
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggle = useUiStore((state) => state.toggleSidebar);
+  const viewport = useViewport();
+  const session = useSession();
+  const iconOnly = viewport.sidebarIconOnly || collapsed;
   const inProject = location.pathname.startsWith("/projects");
   const inTestCenter = location.pathname.startsWith("/test-center");
   const inGates = location.pathname.startsWith("/gates");
@@ -97,6 +109,8 @@ export function AppLayout() {
   const badgeUndeveloped = isUndeveloped(badgeQuery.error);
   const banner = aiBanner(orgQuery.data?.data, orgQuery.error, orgQuery.isPending);
   const reauthRequired = useReauthRequired();
+  const orgName = session.me?.organization.name;
+  const userName = session.me?.user.display_name;
 
   return (
     <TooltipProvider>
@@ -104,14 +118,14 @@ export function AppLayout() {
         <aside
           className={cn(
             "flex h-full flex-col border-r border-sidebar-accent bg-sidebar text-sidebar-foreground transition-[width] duration-200",
-            collapsed ? "w-16" : "w-56",
+            iconOnly ? "w-16" : "w-56",
           )}
         >
           <div className="flex items-center gap-2 border-b border-sidebar-accent px-3 py-4">
             <div className="flex size-8 items-center justify-center rounded-md bg-sidebar-primary text-sm font-bold text-primary-foreground">
               H
             </div>
-            {collapsed ? null : <span className="text-sm font-semibold text-white">HuntAI Test</span>}
+            {iconOnly ? null : <span className="text-sm font-semibold text-white">HuntAI Test</span>}
           </div>
           <nav className="flex flex-1 flex-col gap-0.5 px-2 py-2">
             {PRIMARY_NAV.map((item) => (
@@ -122,7 +136,7 @@ export function AppLayout() {
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
-                    collapsed && "justify-center px-0",
+                    iconOnly && "justify-center px-0",
                     isActive
                       ? "bg-sidebar-accent font-medium text-white shadow-[inset_2px_0_0_0_var(--color-sidebar-primary)]"
                       : "text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-white",
@@ -130,8 +144,8 @@ export function AppLayout() {
                 }
               >
                 <item.icon className="size-4 shrink-0" />
-                {collapsed ? null : <span className="flex-1">{item.label}</span>}
-                {!collapsed && "badgeKey" in item ? (
+                {iconOnly ? null : <span className="flex-1">{item.label}</span>}
+                {!iconOnly && "badgeKey" in item ? (
                   showCount ? (
                     <Badge variant="destructive" className="border-transparent px-1.5 py-0 text-[10px]">
                       {unread}
@@ -143,7 +157,7 @@ export function AppLayout() {
               </NavLink>
             ))}
           </nav>
-          {collapsed ? null : (
+          {iconOnly ? null : (
             <p className="px-3 py-3 text-[10px] leading-relaxed text-sidebar-foreground/40">
               助手 / 技能入口按里程碑隐藏
             </p>
@@ -151,10 +165,23 @@ export function AppLayout() {
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 items-center gap-3 border-b bg-card px-4">
-            <Button variant="ghost" size="icon" onClick={toggle} aria-label="折叠侧栏">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggle}
+              aria-label="折叠侧栏"
+              disabled={viewport.sidebarIconOnly}
+            >
               <Menu className="size-4" />
             </Button>
-            <div className="flex-1" />
+            <div className="min-w-0 flex-1">
+              {orgName || userName ? (
+                <p className="truncate text-xs text-muted-foreground">
+                  {orgName ?? "组织"}
+                  {userName ? ` · ${userName}` : ""}
+                </p>
+              ) : null}
+            </div>
             <div
               className={cn(
                 "hidden items-center gap-2 rounded-md border px-2.5 py-1 text-xs sm:flex",
@@ -171,9 +198,12 @@ export function AppLayout() {
               />
               {banner.text}
             </div>
-            <Button variant="ghost" size="icon" aria-label="通知">
+            <Button variant="ghost" size="icon" aria-label="通知（缺口 G4，非命令通道）">
               <Bell className="size-4" />
             </Button>
+            {badgeUndeveloped ? (
+              <span className="hidden text-[10px] text-muted-foreground lg:inline">通知未开发</span>
+            ) : null}
             <Button
               variant="ghost"
               size="icon"
@@ -185,6 +215,11 @@ export function AppLayout() {
               <LogOut className="size-4" />
             </Button>
           </header>
+          {viewport.mode === "readonly" ? (
+            <div className="border-b border-warning/30 bg-warning-foreground px-4 py-2 text-xs text-warning">
+              当前宽度 &lt; 1024px，仅只读浏览。批准、发起执行与终止请在桌面（≥1024px）操作。
+            </div>
+          ) : null}
           {reauthRequired ? (
             <div className="border-b bg-card px-4 py-2">
               <SessionReauthNotice active />
@@ -194,7 +229,7 @@ export function AppLayout() {
           {inTestCenter ? <Subnav links={TEST_CENTER_LINKS} /> : null}
           {inGates ? <Subnav links={GATE_LINKS} /> : null}
           {inAdmin ? <Subnav links={ADMIN_LINKS} /> : null}
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className={cn("flex-1 overflow-y-auto", viewport.mode === "desktop" ? "p-6" : "p-4")}>
             <div className="mx-auto flex max-w-7xl flex-col gap-6">
               <Outlet />
             </div>
