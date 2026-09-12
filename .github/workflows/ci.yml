@@ -1,0 +1,76 @@
+# Stage 12 CI 门控。门控命令与 docs/00_setup/project_rules.md §5 完全一致，
+# 本地与 CI 不各立一套。说明见 docs/12_deployment/deployment.md §7。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: huntai_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # conftest 优先读取已存在的 DATABASE_URL，取不到才回落到本地默认值。
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/huntai_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.7"
+      - run: uv python install 3.14
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Lint, types and tests
+        working-directory: backend
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy app
+          uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint, types, build and tests
+        working-directory: frontend
+        run: |
+          npm run lint
+          npx tsc --noEmit
+          npm run build
+          npm run test
+
+  # 镜像可用性的唯一自动化验证：本地环境无 Docker daemon，只有 CI 能真正构建。
+  images:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t huntai-backend:${{ github.sha }} backend
+      - name: Build frontend image
+        run: docker build -t huntai-frontend:${{ github.sha }} frontend
