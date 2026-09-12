@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   CommandFeedback,
   EmptyState,
+  MutateOnly,
   PageHeader,
   QueryGate,
 } from "@/components/domain/PageState";
@@ -159,19 +160,21 @@ export function ModelRoutePage() {
                         </TableCell>
                         <TableCell className="font-mono text-xs">{route.version}</TableCell>
                         <TableCell className="space-y-1 text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEdit(route)}>
-                              编辑
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={testConnection.isPending}
-                              onClick={() => testConnection.mutate(route)}
-                            >
-                              测试连接
-                            </Button>
-                          </div>
+                          <MutateOnly>
+                            <div className="flex justify-end gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openEdit(route)}>
+                                编辑
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={testConnection.isPending}
+                                onClick={() => testConnection.mutate(route)}
+                              >
+                                测试连接
+                              </Button>
+                            </div>
+                          </MutateOnly>
                           {testResult ? (
                             <p className="text-xs text-muted-foreground">
                               {testResult.reachable ? "可达" : "不可达"} · {testResult.latency_ms}ms
@@ -208,16 +211,18 @@ export function ModelRoutePage() {
                   />
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    disabled={saveRoute.isPending}
-                    onClick={() => editingRoute && saveRoute.mutate(editingRoute)}
-                  >
-                    保存
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setEditingRoute(null)}>
-                    取消
-                  </Button>
+                  <MutateOnly>
+                    <Button
+                      size="sm"
+                      disabled={saveRoute.isPending}
+                      onClick={() => editingRoute && saveRoute.mutate(editingRoute)}
+                    >
+                      保存
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingRoute(null)}>
+                      取消
+                    </Button>
+                  </MutateOnly>
                 </div>
               </div>
             </div>

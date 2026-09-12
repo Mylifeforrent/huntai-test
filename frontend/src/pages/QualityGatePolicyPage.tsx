@@ -28,6 +28,7 @@ import {
 import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useSession } from "@/hooks/useSession";
+import { useViewport } from "@/hooks/useViewport";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_THRESHOLDS = {
@@ -39,6 +40,7 @@ const DEFAULT_THRESHOLDS = {
 export function QualityGatePolicyPage() {
   const queryClient = useQueryClient();
   const session = useSession();
+  const { canMutate } = useViewport();
   const { get, set } = useUrlState();
   const projectId = get("projectId");
   const modeFilter = get("mode");
@@ -59,11 +61,13 @@ export function QualityGatePolicyPage() {
   const [editMaxErrorRate, setEditMaxErrorRate] = useState("");
 
   const canWrite =
-    session.me?.memberships.some(
+    canMutate &&
+    (session.me?.memberships.some(
       (membership) =>
         membership.project_id === projectId &&
         (membership.role === "owner" || membership.role === "admin"),
-    ) ?? false;
+    ) ??
+      false);
 
   const listQuery = useQuery({
     queryKey: queryKeys.gatePolicies({ projectId, mode: modeFilter, cursor }),
@@ -198,7 +202,7 @@ export function QualityGatePolicyPage() {
       <PageHeader
         title="质量门禁策略"
         description="配置阈值与模式。保存策略不等于 TestRun 已通过门禁；未评估不得视为通过。"
-        actions={
+        browseActions={
           <Button variant="link" asChild>
             <Link to="/gates/evaluations">查看评估历史</Link>
           </Button>
@@ -239,7 +243,7 @@ export function QualityGatePolicyPage() {
                 <CardTitle>创建策略</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 lg:grid-cols-3">
                   <ThresholdInput label="最低通过率" suffix="%" value={minPassRate} onChange={setMinPassRate} />
                   <ThresholdInput label="最大 P95" suffix="ms" value={maxP95Ms} onChange={setMaxP95Ms} />
                   <ThresholdInput label="最大错误率" suffix="%" value={maxErrorRate} onChange={setMaxErrorRate} />
@@ -314,7 +318,7 @@ export function QualityGatePolicyPage() {
                         门禁模式 · policy_version {detail.policy_version} · CAS version {detail.version}
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       <button
                         type="button"
                         disabled={!canWrite || patchPolicy.isPending}

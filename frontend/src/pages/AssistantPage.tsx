@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { cn } from "@/lib/utils";
 
 interface CopilotSessionItem {
@@ -113,12 +113,14 @@ export function AssistantPage() {
           onChange={(event) => setProjectId(event.target.value)}
           className="max-w-xs"
         />
-        <Button
-          onClick={() => createMutation.mutate()}
-          disabled={createMutation.isPending}
-        >
-          新建会话（API-191）
-        </Button>
+        <MutateOnly>
+          <Button
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+          >
+            新建会话（API-191）
+          </Button>
+        </MutateOnly>
       </div>
       <QueryGate isPending={list.isPending} error={list.error} apis={PAGE_APIS.P18}>
         {items.length === 0 ? (
@@ -157,12 +159,14 @@ export function AssistantPage() {
                     onChange={(event) => setQuestion(event.target.value)}
                     placeholder="例如：当前项目最近的 TestRun 情况如何？"
                   />
-                  <Button
-                    onClick={() => messageMutation.mutate()}
-                    disabled={messageMutation.isPending || !question.trim() || !current?.id}
-                  >
-                    发送
-                  </Button>
+                  <MutateOnly>
+                    <Button
+                      onClick={() => messageMutation.mutate()}
+                      disabled={messageMutation.isPending || !question.trim() || !current?.id}
+                    >
+                      发送
+                    </Button>
+                  </MutateOnly>
                 </CardContent>
               </Card>
               {lastAnswer ? (

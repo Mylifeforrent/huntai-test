@@ -10,9 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
-import { CommandFeedback } from "@/components/domain/PageState";
 
 type CiBindingsResponse = {
   project_id: string;
@@ -121,9 +120,11 @@ export function IntegrationPage() {
             <Label htmlFor="plan">测试计划 ID</Label>
             <Input id="plan" value={planId} onChange={(e) => setPlanId(e.target.value)} />
           </div>
-          <Button onClick={() => saveMutation.mutate()} disabled={!projectId || saveMutation.isPending}>
-            保存绑定（API-167）
-          </Button>
+          <MutateOnly>
+            <Button onClick={() => saveMutation.mutate()} disabled={!projectId || saveMutation.isPending}>
+              保存绑定（API-167）
+            </Button>
+          </MutateOnly>
           {saveSuccess ? (
             <Alert>
               <AlertDescription>绑定已保存（version={expectedVersion}）。本操作不会创建 TestRun。</AlertDescription>

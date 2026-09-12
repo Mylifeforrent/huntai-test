@@ -355,17 +355,17 @@ export function TestRunDetailPage() {
       <PageHeader
         title={`TestRun ${runId || ""}`}
         description="页头进度条 → 聚类报告 → 用例结果 → 证据查看器"
-        actions={
-          <div className="flex gap-2">
-            {source === "agent" ? (
-              <Button variant="outline" asChild>
-                <Link to={`/test-center/runs/${runId}/agent`}>Agent 轨迹</Link>
-              </Button>
-            ) : null}
-            <Button variant="destructive" onClick={() => setCancelOpen(true)}>
-              终止
+        browseActions={
+          source === "agent" ? (
+            <Button variant="outline" asChild>
+              <Link to={`/test-center/runs/${runId}/agent`}>Agent 轨迹</Link>
             </Button>
-          </div>
+          ) : null
+        }
+        actions={
+          <Button variant="destructive" onClick={() => setCancelOpen(true)}>
+            终止
+          </Button>
         }
       />
       <QueryGate isPending={detail.isPending} error={detail.error} apis={PAGE_APIS.P09}>

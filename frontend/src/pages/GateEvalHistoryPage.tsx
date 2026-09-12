@@ -12,6 +12,7 @@ import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useSession } from "@/hooks/useSession";
+import { useViewport } from "@/hooks/useViewport";
 
 type GateEvalItem = {
   id: string;
@@ -27,6 +28,7 @@ export function GateEvalHistoryPage() {
   const queryClient = useQueryClient();
   const { get, set } = useUrlState();
   const session = useSession();
+  const { canMutate } = useViewport();
   const projectId = get("projectId");
   const result = get("result");
   const testRunId = get("testRunId");
@@ -34,11 +36,13 @@ export function GateEvalHistoryPage() {
   const selectedId = get("evaluationId");
 
   const canWaiver =
-    session.me?.memberships.some(
+    canMutate &&
+    (session.me?.memberships.some(
       (membership) =>
         membership.project_id === projectId &&
         (membership.role === "owner" || membership.role === "admin"),
-    ) ?? false;
+    ) ??
+      false);
 
   const query = useQuery({
     queryKey: queryKeys.gateEvaluations({ projectId, result, testRunId, cursor }),
@@ -94,7 +98,7 @@ export function GateEvalHistoryPage() {
       <PageHeader
         title="门禁评估历史"
         description="Check Run 关联 · 评估明细 · 豁免记录"
-        actions={
+        browseActions={
           <Button variant="link" asChild>
             <Link to="/gates/policies">← 门禁策略</Link>
           </Button>

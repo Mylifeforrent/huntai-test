@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
+import { MutateOnly, PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { cn } from "@/lib/utils";
 
@@ -196,12 +196,14 @@ export function GenerationReviewPage() {
               onChange={(event) => setSource(event.target.value)}
               placeholder="粘贴 OpenAPI / Postman / curl 原文…"
             />
-            <Button
-              onClick={() => startGeneration.mutate()}
-              disabled={a1Disabled || !projectId || startGeneration.isPending}
-            >
-              {startGeneration.isPending ? "生成中…" : "发起 A1 生成"}
-            </Button>
+            <MutateOnly>
+              <Button
+                onClick={() => startGeneration.mutate()}
+                disabled={a1Disabled || !projectId || startGeneration.isPending}
+              >
+                {startGeneration.isPending ? "生成中…" : "发起 A1 生成"}
+              </Button>
+            </MutateOnly>
           </CardContent>
         </Card>
         <div className="flex flex-col gap-3">
@@ -334,15 +336,17 @@ function DraftPane({
                 <AlertDescription>ai-generated 用例必须经人工评审，保存后为 DRAFT。</AlertDescription>
               </Alert>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={onAdopt} disabled={adoptPending}>
-                  采纳
-                </Button>
-                <Button size="sm" variant="outline" onClick={onApplyEdit}>
-                  应用编辑
-                </Button>
-                <Button size="sm" variant="destructive" onClick={onDiscard}>
-                  弃用
-                </Button>
+                <MutateOnly>
+                  <Button size="sm" onClick={onAdopt} disabled={adoptPending}>
+                    采纳
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={onApplyEdit}>
+                    应用编辑
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={onDiscard}>
+                    弃用
+                  </Button>
+                </MutateOnly>
               </div>
             </>
           )}

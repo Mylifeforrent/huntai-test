@@ -34,7 +34,7 @@ function ProjectListView() {
         {items.length === 0 ? (
           <EmptyState title="无项目" hint="空集表示当前用户无项目成员身份，不是错误。" />
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {items.map((item) => (
               <Link key={item.id} to={`/projects/${item.id}/overview`}>
                 <Card className="h-full hover:border-primary/40" data-testid="project-list-item">

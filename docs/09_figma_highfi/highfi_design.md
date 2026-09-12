@@ -14,7 +14,7 @@
 | 约定产出 | 本文 `highfi_design.md` |
 | Figma 文件 | **不做**（确认：token 板 + 三关键帧留待后续） |
 | 切图 / 导出资产 | 无独立 PNG；认证页截图依赖 mock IdP，compose 栈未含 IdP，**未登记二进制截图** |
-| Layout 代码 | 全局壳、P01、P08、P09、P10（`ApprovalCard`）、共享 `PageHeader` / `StepMark` |
+| Layout 代码 | 全局壳、P01–P25：`lg`/`xl` 网格、`PageHeader` `actions`/`browseActions`、页内 `MutateOnly` |
 
 `templates/` 下订单审批示例**不是** HuntAI 内容，仅作填写规则参考。
 
@@ -134,7 +134,8 @@
 | Button | `components/ui/button.tsx` | default / destructive / outline / secondary / ghost / link；sm / default / lg / icon |
 | Badge | `components/ui/badge.tsx` | default / secondary / outline / success / warning / destructive / info |
 | Card | `components/ui/card.tsx` | Header 底边、Content `p-4` |
-| PageHeader | `PageState.tsx` | `text-xl` 标题；`actions` 在 `canMutate=false` 时不渲染 |
+| PageHeader | `PageState.tsx` | `text-xl` 标题；`actions` 为命令（`canMutate=false` 不渲染）；`browseActions` 为导航/视图标签（始终可见） |
+| MutateOnly | `PageState.tsx` | 包裹页内命令按钮；&lt;1024 不渲染。筛选 / 分页 / 行选 / 导航链接不包裹 |
 | StepMark | `PageState.tsx` | 步号 1–3，P08 三层与 P09 四区共用 |
 | EmptyState / LoadingState / ErrorState | `PageState.tsx` | 七态：空 / 加载 / 错误；无权限走 `ApiError.kind=permission`；404 文案「资源不存在」 |
 | StatusBadge | `domain/StatusBadge.tsx` | 服务端状态字符串，前端不推演 |
@@ -170,28 +171,28 @@ shadcn 源码内置，禁止改为 npm 包或换成 Ant / MUI。
 | 编号 | 布局要点 |
 |---|---|
 | P01 工作台 | 页头 + 指标 `1 / lg:2 / xl:4` 列 + 待审批/进行中列表 `1 / xl:2` 列。WAITING_* 滞留秒数原样展示 |
-| P02 项目总览 | 卡片网格 `1 / md:2 / lg:3` |
-| P03 集成 | 项目级绑定表 + 未开发/空态 |
-| P04 项目设置 | 成员与角色表单 |
-| P05 用例库 | 筛选进 URL 的表；&lt;1024 可横滑 |
-| P06 测试计划 | 列表 + 表单两列（md） |
-| P07 生成审阅 | 左右分栏 `lg:grid-cols-2`；partial 失败列表不得静默 |
+| P02 项目总览 | 卡片网格 `1 / lg:2 / xl:3` |
+| P03 集成 | 项目级绑定表 + 未开发/空态；保存绑定为命令 |
+| P04 项目设置 | 成员与角色表单；&lt;1024 隐藏添加/改角色/移除 |
+| P05 用例库 | 筛选进 URL 的表；&lt;1024 可横滑；「生成审阅」为浏览跳转，导入/导出/评审/发起为命令 |
+| P06 测试计划 | 列表 + 表单两列（lg）；执行 / 创建 / 绑定为命令 |
+| P07 生成审阅 | 左右分栏 `lg:grid-cols-2`；partial 失败列表不得静默；生成/采纳/编辑/弃用为命令 |
 | P08 | §5.1 |
 | P09 列表 | 筛选进 URL 的表 |
 | P09 详情 | §5.2 |
 | P10 | 左队列 + 右卡片 `lg:grid-cols-[minmax(16rem,22rem)_1fr]`；§5.3 |
-| P11 / P12 | 策略表单 / 评估表 |
-| P13 | 定位器主备与版本区 |
-| P14 | 轨迹时间线纵向 |
-| P15 | 环境表 + 健康 |
-| P16 | 压测表单 md 两列；白名单 DENY 提示 |
-| P17 | 范围栏 + 就绪度 `lg:grid-cols-[18rem_1fr]` |
+| P11 / P12 | 策略表单 / 评估表；创建/改模式/保存阈值/豁免为命令；页间链接为浏览 |
+| P13 | 定位器主备与版本区；heal_apply / 回滚为命令 |
+| P14 | 轨迹时间线纵向；终止 / 转草稿为命令 |
+| P15 | 环境表 + 健康；注册 / 停用为命令；审批跳转为浏览 |
+| P16 | 压测表单 lg 两列；白名单 DENY 提示；发起/基线/kill 为命令 |
+| P17 | 范围栏 + 就绪度 `lg:grid-cols-[18rem_1fr]`；创建/推送/取消为命令 |
 | P18 / P19 | 里程碑前无一级入口；页内占位不启用写操作 |
-| P20 | 检索 + 证据包；筛选进 URL |
-| P21 | 指标四卡，对齐 P01 网格 |
-| P22 / P23 | 配置表 + 关停横幅以后端为准 |
-| P24 | 审计检索表，筛选进 URL |
-| P25 | 组织级连接器 / Token；明文仅签发当次 |
+| P20 | 检索 + 证据包；筛选进 URL；导出为命令，分页为浏览 |
+| P21 | 指标四卡，对齐 P01 网格 `1 / lg:2 / xl:4` |
+| P22 / P23 | 配置表 + 关停横幅以后端为准；编辑/关停/恢复为命令 |
+| P24 | 审计检索表，筛选进 URL；SIEM 保存为命令 |
+| P25 | 组织级连接器 / Token；明文仅签发当次；签发/吊销为命令 |
 
 ## 7. 七态与断点
 
@@ -203,7 +204,7 @@ shadcn 源码内置，禁止改为 npm 包或换成 Ant / MUI。
 | 1024–1279px | 可用；侧栏图标；P01 指标最多两列 |
 | &lt;1024px | **只读浏览**；命令（发起 / 批准 / 拒绝 / 终止）不提供；语义与桌面一致 |
 
-实现：`useViewport`（`frontend/src/hooks/useViewport.ts`）。无 `matchMedia` 的测试默认走 Context 的 desktop（`canMutate=true`）。
+实现：`useViewport`（`frontend/src/hooks/useViewport.tsx`）。无 `matchMedia` 的测试默认走 Context 的 desktop（`canMutate=true`）。布局断点只用 `lg`（1024）与 `xl`（1280），禁止用 `sm`/`md`（768）做列数切换。
 
 ## 8. 资产登记
 

@@ -23,7 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
 
@@ -153,16 +153,18 @@ export function PerformancePage() {
       </Alert>
       <CommandFeedback error={commandError} apis={PAGE_APIS.P16} action="压测命令" />
       <div className="flex flex-wrap items-end gap-2">
-        <Button variant="destructive" onClick={() => setKillOpen(true)} disabled={orgVersion === undefined}>
-          Kill switch 关停压测模块
-        </Button>
+        <MutateOnly>
+          <Button variant="destructive" onClick={() => setKillOpen(true)} disabled={orgVersion === undefined}>
+            Kill switch 关停压测模块
+          </Button>
+        </MutateOnly>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>发起压测（统一 TestRun）</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2">
+        <CardContent className="grid gap-3 lg:grid-cols-2">
           <div className="flex flex-col gap-1">
             <Label htmlFor="perf-project">项目 ID</Label>
             <Input
@@ -192,7 +194,7 @@ export function PerformancePage() {
               placeholder="http://target.example"
             />
           </div>
-          <div className="flex flex-col gap-1 md:col-span-2">
+          <div className="flex flex-col gap-1 lg:col-span-2">
             <Label htmlFor="perf-whitelist">目标白名单（逗号分隔前缀）</Label>
             <Input
               id="perf-whitelist"
@@ -217,15 +219,17 @@ export function PerformancePage() {
               onChange={(event) => set({ runTime: event.target.value })}
             />
           </div>
-          <div className="flex items-center gap-3 md:col-span-2">
-            <Button
-              onClick={() => startMutation.mutate()}
-              disabled={
-                startMutation.isPending || !projectId || !get("envId") || !scenarioId || !targetEnv
-              }
-            >
-              发起压测
-            </Button>
+          <div className="flex items-center gap-3 lg:col-span-2">
+            <MutateOnly>
+              <Button
+                onClick={() => startMutation.mutate()}
+                disabled={
+                  startMutation.isPending || !projectId || !get("envId") || !scenarioId || !targetEnv
+                }
+              >
+                发起压测
+              </Button>
+            </MutateOnly>
             {startedRunId ? (
               <Link className="text-sm text-primary underline" to={`/test-center/runs/${startedRunId}`}>
                 查看压测 run（受理 ≠ 完成，以 run 终态为准）
@@ -260,13 +264,15 @@ export function PerformancePage() {
                 onChange={(event) => set({ baselineTolerance: event.target.value })}
               />
             </div>
-            <Button
-              variant="outline"
-              onClick={() => baselineMutation.mutate()}
-              disabled={baselineMutation.isPending || !scenarioId}
-            >
-              创建基线（自动停用旧活跃）
-            </Button>
+            <MutateOnly>
+              <Button
+                variant="outline"
+                onClick={() => baselineMutation.mutate()}
+                disabled={baselineMutation.isPending || !scenarioId}
+              >
+                创建基线（自动停用旧活跃）
+              </Button>
+            </MutateOnly>
           </div>
           {!scenarioId ? (
             <Alert>

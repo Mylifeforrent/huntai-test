@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { useUrlState } from "@/hooks/useUrlState";
 
 interface EvidenceObjectItem {
@@ -254,9 +254,11 @@ export function EvidenceCenterPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={() => void exportPackage()} disabled={!subjectPair || exporting}>
-          导出证据包（当前主体筛选）
-        </Button>
+        <MutateOnly>
+          <Button onClick={() => void exportPackage()} disabled={!subjectPair || exporting}>
+            导出证据包（当前主体筛选）
+          </Button>
+        </MutateOnly>
         {!subjectPair ? (
           <span className="text-xs text-muted-foreground">导出需先按「主体类型 + 主体 ID」筛选证据范围。</span>
         ) : null}

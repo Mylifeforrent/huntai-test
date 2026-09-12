@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CommandFeedback, EmptyState, PageHeader, QueryGate } from "@/components/domain/PageState";
+import { CommandFeedback, EmptyState, MutateOnly, PageHeader, QueryGate } from "@/components/domain/PageState";
 import { ApprovalCard, approvalCardFromRequest, type ApprovalCardModel } from "@/components/domain/ApprovalCard";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
@@ -127,7 +127,7 @@ export function ApprovalCenterPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 lg:grid-cols-2">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="preview-action">action_type</Label>
                   <Select
@@ -184,12 +184,14 @@ export function ApprovalCenterPage() {
                   onChange={(event) => setPayloadText(event.target.value)}
                 />
               </div>
-              <Button
-                disabled={preview.isPending || !targetObjectId.trim() || !targetObjectType.trim()}
-                onClick={() => preview.mutate()}
-              >
-                {preview.isPending ? "受理中…" : "提交 Preview"}
-              </Button>
+              <MutateOnly>
+                <Button
+                  disabled={preview.isPending || !targetObjectId.trim() || !targetObjectType.trim()}
+                  onClick={() => preview.mutate()}
+                >
+                  {preview.isPending ? "受理中…" : "提交 Preview"}
+                </Button>
+              </MutateOnly>
               <CommandFeedback error={commandError} apis={PAGE_APIS.P10_preview} action="API-120 Preview" />
             </CardContent>
           </Card>

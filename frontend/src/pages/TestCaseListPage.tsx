@@ -7,7 +7,7 @@ import type { ListEnvelope } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
+import { MutateOnly, PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 import { useUrlState } from "@/hooks/useUrlState";
@@ -77,11 +77,13 @@ export function TestCaseListPage() {
       <PageHeader
         title="用例库"
         description="标签筛选含 ai-generated；validity=invalid 不可执行。导入导出走 API-200/202。"
+        browseActions={
+          <Button variant="outline" asChild>
+            <Link to={`/projects/${projectId}/cases/generation-review`}>生成审阅</Link>
+          </Button>
+        }
         actions={
           <div className="flex gap-2">
-            <Button variant="outline" asChild>
-              <Link to={`/projects/${projectId}/cases/generation-review`}>生成审阅</Link>
-            </Button>
             <Button variant="outline" onClick={() => setIoTried(true)}>
               Excel 导入
             </Button>
@@ -131,39 +133,42 @@ export function TestCaseListPage() {
                       <StatusBadge status={String(item.validity ?? "valid")} />
                     </TableCell>
                     <TableCell className="space-x-2">
-                      {lifecycleStatus === "DRAFT" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => submitReview.mutate({ caseId: id, version })}
-                        >
-                          提交评审
-                        </Button>
-                      ) : null}
-                      {lifecycleStatus === "PENDING_REVIEW" && canReview ? (
-                        <>
+                      <MutateOnly>
+                        {lifecycleStatus === "DRAFT" ? (
                           <Button
                             size="sm"
-                            onClick={() => reviewCase.mutate({ caseId: id, version, decision: "approve" })}
+                            variant="outline"
+                            onClick={() => submitReview.mutate({ caseId: id, version })}
                           >
-                            通过
+                            提交评审
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => reviewCase.mutate({ caseId: id, version, decision: "reject" })}
-                          >
-                            驳回
+                        ) : null}
+                        {lifecycleStatus === "PENDING_REVIEW" && canReview ? (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={() => reviewCase.mutate({ caseId: id, version, decision: "approve" })}
+                            >
+                              通过
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => reviewCase.mutate({ caseId: id, version, decision: "reject" })}
+                            >
+                              驳回
+                            </Button>
+                          </>
+                        ) : null}
+                        {invalid ? null : (
+                          <Button size="sm" asChild>
+                            <Link to={`/test-center/kickoff?projectId=${projectId}&caseId=${id}`}>发起执行</Link>
                           </Button>
-                        </>
-                      ) : null}
+                        )}
+                      </MutateOnly>
                       {invalid ? (
                         <span className="text-xs text-destructive">失效用例不可执行</span>
-                      ) : (
-                        <Button size="sm" asChild>
-                          <Link to={`/test-center/kickoff?projectId=${projectId}&caseId=${id}`}>发起执行</Link>
-                        </Button>
-                      )}
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 );

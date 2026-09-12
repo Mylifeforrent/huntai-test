@@ -12,6 +12,7 @@ import type {
   SimilarFailureClusterItem,
 } from "@/api/types";
 import { cn } from "@/lib/utils";
+import { MutateOnly } from "@/components/domain/PageState";
 
 const CATEGORY_LABEL: Record<ClusterCategory, string> = {
   env_down: "环境故障",
@@ -122,38 +123,40 @@ export function ClusterCard({
             Jira 缺陷：<span className="font-mono text-foreground">{cluster.jiraIssue.key}</span>
           </p>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Input
-            placeholder="人工修正类别"
-            className="max-w-40"
-            value={categoryDraft}
-            onChange={(event) => setCategoryDraft(event.target.value)}
-          />
-          <Input
-            placeholder="阻塞判断"
-            className="max-w-40"
-            value={blockingDraft}
-            onChange={(event) => setBlockingDraft(event.target.value)}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={correctPending}
-            onClick={() => onCorrect?.({ category: categoryDraft, blocking: blockingDraft })}
-          >
-            提交修正留痕
-          </Button>
-          {applyVisible && bestFix ? (
-            <Button size="sm" disabled={applyPending} onClick={() => onApply?.(bestFix)}>
-              可应用（须审批）
+        <MutateOnly>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              placeholder="人工修正类别"
+              className="max-w-40"
+              value={categoryDraft}
+              onChange={(event) => setCategoryDraft(event.target.value)}
+            />
+            <Input
+              placeholder="阻塞判断"
+              className="max-w-40"
+              value={blockingDraft}
+              onChange={(event) => setBlockingDraft(event.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={correctPending}
+              onClick={() => onCorrect?.({ category: categoryDraft, blocking: blockingDraft })}
+            >
+              提交修正留痕
             </Button>
-          ) : null}
-          {showJiraButton ? (
-            <Button size="sm" variant="secondary" disabled={jiraPending} onClick={() => onCreateJira?.()}>
-              一键创建 Jira 缺陷
-            </Button>
-          ) : null}
-        </div>
+            {applyVisible && bestFix ? (
+              <Button size="sm" disabled={applyPending} onClick={() => onApply?.(bestFix)}>
+                可应用（须审批）
+              </Button>
+            ) : null}
+            {showJiraButton ? (
+              <Button size="sm" variant="secondary" disabled={jiraPending} onClick={() => onCreateJira?.()}>
+                一键创建 Jira 缺陷
+              </Button>
+            ) : null}
+          </div>
+        </MutateOnly>
         <div className="rounded-md border border-dashed bg-muted/30 p-2 text-xs">
           <p className="mb-1 font-medium text-foreground">修正历史</p>
           {history.length === 0 ? (

@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useSession } from "@/hooks/useSession";
@@ -208,7 +208,9 @@ export function EnvironmentPage() {
       <PageHeader
         title="环境管理"
         description="执行环境注册（健康检查、Job 发现）· 管理员审批。Admin 与 Projects 双入口同一页面。"
-        actions={<span className="text-xs text-muted-foreground">{adminView ? "组织级视图" : "项目过滤视图"}</span>}
+        browseActions={
+          <span className="text-xs text-muted-foreground">{adminView ? "组织级视图" : "项目过滤视图"}</span>
+        }
       />
 
       <Card className="mb-4">
@@ -302,15 +304,17 @@ export function EnvironmentPage() {
               {health?.health_status ? JSON.stringify(health.health_status) : "（M0 无探活）"}
             </div>
             {canDisableSelected ? (
-              <Button
-                variant="destructive"
-                size="sm"
-                className="w-fit"
-                disabled={disableEnv.isPending}
-                onClick={() => disableEnv.mutate(detail)}
-              >
-                停用环境
-              </Button>
+              <MutateOnly>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="w-fit"
+                  disabled={disableEnv.isPending}
+                  onClick={() => disableEnv.mutate(detail)}
+                >
+                  停用环境
+                </Button>
+              </MutateOnly>
             ) : null}
             <div>
               <h3 className="mb-2 text-sm font-semibold">Job Registry</h3>
@@ -438,12 +442,14 @@ export function EnvironmentPage() {
               </div>
             </>
           ) : null}
-          <Button
-            onClick={() => register.mutate()}
-            disabled={register.isPending || !name.trim() || !registerProjectId || !canManage}
-          >
-            提交注册
-          </Button>
+          <MutateOnly>
+            <Button
+              onClick={() => register.mutate()}
+              disabled={register.isPending || !name.trim() || !registerProjectId || !canManage}
+            >
+              提交注册
+            </Button>
+          </MutateOnly>
           {!canManage && registerProjectId ? (
             <p className="text-xs text-muted-foreground">需要该项目 owner/admin 角色方可注册。</p>
           ) : null}

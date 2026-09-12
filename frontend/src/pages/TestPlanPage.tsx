@@ -18,15 +18,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useSession } from "@/hooks/useSession";
+import { useViewport } from "@/hooks/useViewport";
 
 export function TestPlanPage() {
   const { projectId = "" } = useParams();
   const queryClient = useQueryClient();
   const { get, set } = useUrlState();
   const session = useSession();
+  const { canMutate } = useViewport();
   const q = get("q");
   const cursor = get("cursor");
   const selectedPlanId = get("plan") || null;
@@ -42,13 +44,15 @@ export function TestPlanPage() {
   const [envId, setEnvId] = useState("");
 
   const canWrite =
-    session.me?.memberships.some(
+    canMutate &&
+    (session.me?.memberships.some(
       (membership) =>
         membership.project_id === projectId &&
         (membership.role === "owner" ||
           membership.role === "admin" ||
           membership.role === "tester"),
-    ) ?? false;
+    ) ??
+      false);
 
   const listQuery = useQuery({
     queryKey: queryKeys.testPlans({ projectId, q, cursor }),
@@ -215,9 +219,11 @@ export function TestPlanPage() {
                   <TableCell className="font-mono text-xs">{item.jira_fix_version ?? "—"}</TableCell>
                   <TableCell className="font-mono">{item.case_count}</TableCell>
                   <TableCell>
-                    <Button size="sm" asChild onClick={(event) => event.stopPropagation()}>
-                      <Link to="/test-center/kickoff">执行</Link>
-                    </Button>
+                    <MutateOnly>
+                      <Button size="sm" asChild onClick={(event) => event.stopPropagation()}>
+                        <Link to="/test-center/kickoff">执行</Link>
+                      </Button>
+                    </MutateOnly>
                   </TableCell>
                 </TableRow>
               ))}
@@ -231,7 +237,7 @@ export function TestPlanPage() {
           <CardHeader>
             <CardTitle className="text-base">创建测试计划</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
+          <CardContent className="grid gap-3 lg:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="plan-name">名称</Label>
               <Input
@@ -250,7 +256,7 @@ export function TestPlanPage() {
                 placeholder="例如 2.4.0"
               />
             </div>
-            <div className="md:col-span-2">
+            <div className="lg:col-span-2">
               <Button
                 disabled={!name.trim() || createPlan.isPending}
                 onClick={() => createPlan.mutate()}
@@ -283,7 +289,7 @@ export function TestPlanPage() {
             >
               {detail && statusLabels ? (
                 <>
-                  <div className="grid gap-2 text-sm md:grid-cols-2">
+                  <div className="grid gap-2 text-sm lg:grid-cols-2">
                     <p>
                       <span className="text-muted-foreground">已创建：</span>
                       {detail.name}（v{detail.version}）

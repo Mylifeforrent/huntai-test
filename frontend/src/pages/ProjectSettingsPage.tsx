@@ -36,9 +36,11 @@ import {
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { tokenRemainingProjection } from "@/lib/utils";
+import { useViewport } from "@/hooks/useViewport";
 
 export function ProjectSettingsPage() {
   const { projectId = "" } = useParams();
+  const { canMutate } = useViewport();
   const queryClient = useQueryClient();
   const [commandError, setCommandError] = useState<unknown>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export function ProjectSettingsPage() {
   const myRole =
     me.data?.data.memberships.find((item) => item.project_id === projectId)?.role ?? null;
   const viewer = myRole === "viewer";
-  const canWrite = myRole === "owner" || myRole === "admin";
+  const canWrite = canMutate && (myRole === "owner" || myRole === "admin");
   const memberItems = members.data?.data.items ?? [];
 
   const invalidateMembers = () => {

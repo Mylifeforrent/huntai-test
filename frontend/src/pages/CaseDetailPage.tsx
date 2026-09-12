@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
+import { MutateOnly, PageHeader, QueryGate, EmptyState, CommandFeedback } from "@/components/domain/PageState";
 import { EvidenceViewer } from "@/components/domain/EvidenceViewer";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
@@ -238,9 +238,11 @@ export function CaseDetailPage() {
                   <EmptyState title="暂无 A3 建议" />
                 )}
                 {canShowApply ? (
-                  <Button size="sm" disabled={healApply.isPending} onClick={() => healApply.mutate()}>
-                    可应用（API-120 heal_apply）
-                  </Button>
+                  <MutateOnly>
+                    <Button size="sm" disabled={healApply.isPending} onClick={() => healApply.mutate()}>
+                      可应用（API-120 heal_apply）
+                    </Button>
+                  </MutateOnly>
                 ) : null}
                 <CommandFeedback error={healApply.error} apis={PAGE_APIS.P13} action="heal_apply Preview（API-120）" />
               </CardContent>
@@ -266,14 +268,16 @@ export function CaseDetailPage() {
           <CardHeader className="flex-row items-center justify-between gap-2">
             <CardTitle>版本历史</CardTitle>
             {canRollback && rollbackTarget ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={rollback.isPending}
-                onClick={() => rollback.mutate()}
-              >
-                回滚到上一版本（API-039）
-              </Button>
+              <MutateOnly>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={rollback.isPending}
+                  onClick={() => rollback.mutate()}
+                >
+                  回滚到上一版本（API-039）
+                </Button>
+              </MutateOnly>
             ) : null}
           </CardHeader>
           <CardContent>

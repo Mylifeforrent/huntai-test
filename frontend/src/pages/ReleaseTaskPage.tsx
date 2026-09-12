@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { useUrlState } from "@/hooks/useUrlState";
 import { asRecord } from "@/lib/utils";
@@ -197,12 +197,14 @@ export function ReleaseTaskPage() {
             placeholder="v1.0"
           />
         </div>
-        <Button
-          onClick={() => createMutation.mutate()}
-          disabled={createMutation.isPending || !projectId || !jiraVersionRef}
-        >
-          圈定版本创建（API-152）
-        </Button>
+        <MutateOnly>
+          <Button
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending || !projectId || !jiraVersionRef}
+          >
+            圈定版本创建（API-152）
+          </Button>
+        </MutateOnly>
       </div>
       {!projectId ? (
         <Alert>
@@ -238,26 +240,28 @@ export function ReleaseTaskPage() {
                   <CardHeader className="flex-row items-center justify-between">
                     <CardTitle>范围快照（创建后不可变）</CardTitle>
                     <div className="flex gap-2">
-                      {currentStatus === "PENDING_CONFIRM" ? (
-                        <Button size="sm" onClick={() => setPushOpen(true)}>
-                          发起 release_push 审批
-                        </Button>
-                      ) : null}
-                      {RETRYABLE.has(currentStatus) ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => retryMutation.mutate()}
-                          disabled={retryMutation.isPending}
-                        >
-                          幂等重试（API-153）
-                        </Button>
-                      ) : null}
-                      {currentStatus === "PENDING_CONFIRM" || RETRYABLE.has(currentStatus) ? (
-                        <Button size="sm" variant="destructive" onClick={() => setCancelOpen(true)}>
-                          取消
-                        </Button>
-                      ) : null}
+                      <MutateOnly>
+                        {currentStatus === "PENDING_CONFIRM" ? (
+                          <Button size="sm" onClick={() => setPushOpen(true)}>
+                            发起 release_push 审批
+                          </Button>
+                        ) : null}
+                        {RETRYABLE.has(currentStatus) ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => retryMutation.mutate()}
+                            disabled={retryMutation.isPending}
+                          >
+                            幂等重试（API-153）
+                          </Button>
+                        ) : null}
+                        {currentStatus === "PENDING_CONFIRM" || RETRYABLE.has(currentStatus) ? (
+                          <Button size="sm" variant="destructive" onClick={() => setCancelOpen(true)}>
+                            取消
+                          </Button>
+                        ) : null}
+                      </MutateOnly>
                     </div>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-2">

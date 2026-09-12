@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CommandFeedback, PageHeader, QueryGate } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate } from "@/components/domain/PageState";
 import { AiDegradeBanner } from "@/components/domain/AiDegradeBanner";
 
 const ABILITIES = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"] as const;
@@ -120,7 +120,7 @@ export function AiSwitchPage() {
             关停（收紧）= L1，走 API-199，即时生效不走审批。恢复（放开）= L3，走 API-120 action_type=kill_switch_restore。禁止用 tighten 放开。
           </AlertDescription>
         </Alert>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
             <p className="font-semibold text-destructive">关停（收紧）= L1</p>
             <p className="text-muted-foreground">即时生效，不走审批。事故响应不得被审批阻塞。</p>
@@ -158,21 +158,25 @@ export function AiSwitchPage() {
                       <Badge variant="outline">{off ? "已关停" : "运行中"}</Badge>
                     </div>
                     {off ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPending({ kind: "restore", level: level.id, id: row.id, label: row.label })}
-                      >
-                        申请恢复 (L3)
-                      </Button>
+                      <MutateOnly>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPending({ kind: "restore", level: level.id, id: row.id, label: row.label })}
+                        >
+                          申请恢复 (L3)
+                        </Button>
+                      </MutateOnly>
                     ) : (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => setPending({ kind: "tighten", level: level.id, id: row.id, label: row.label })}
-                      >
-                        关停 (L1)
-                      </Button>
+                      <MutateOnly>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => setPending({ kind: "tighten", level: level.id, id: row.id, label: row.label })}
+                        >
+                          关停 (L1)
+                        </Button>
+                      </MutateOnly>
                     )}
                   </div>
                 );

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CommandFeedback, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { CommandFeedback, MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { useUrlState } from "@/hooks/useUrlState";
 
 export function AuditSearchPage() {
@@ -191,13 +191,15 @@ export function AuditSearchPage() {
               className="max-w-md"
             />
           ) : null}
-          <Button
-            variant="outline"
-            disabled={saveSiem.isPending || orgVersion === undefined}
-            onClick={() => saveSiem.mutate()}
-          >
-            保存 SIEM 配置
-          </Button>
+          <MutateOnly>
+            <Button
+              variant="outline"
+              disabled={saveSiem.isPending || orgVersion === undefined}
+              onClick={() => saveSiem.mutate()}
+            >
+              保存 SIEM 配置
+            </Button>
+          </MutateOnly>
           <CommandFeedback error={commandError} apis={PAGE_APIS.P24} action="SIEM 外发 API-040" />
         </CardContent>
       </Card>

@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
+import { MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
 import { StatusBadge } from "@/components/domain/StatusBadge";
 import { UndevelopedCallout } from "@/components/domain/UndevelopedCallout";
 import { useSession } from "@/hooks/useSession";
@@ -258,13 +258,15 @@ export function AdminIntegrationPage() {
                 <p className="text-xs text-muted-foreground">
                   项目白名单：{projectIds.join(", ") || "无项目成员资格，无法签发"}
                 </p>
-                <Button
-                  data-testid="issue-api-token"
-                  onClick={issueToken}
-                  disabled={!canIssue || !expiresAtLocal}
-                >
-                  签发（API-171）
-                </Button>
+                <MutateOnly>
+                  <Button
+                    data-testid="issue-api-token"
+                    onClick={issueToken}
+                    disabled={!canIssue || !expiresAtLocal}
+                  >
+                    签发（API-171）
+                  </Button>
+                </MutateOnly>
                 {issuedToken ? (
                   <Alert variant="warning">
                     <AlertTitle>一次性明文</AlertTitle>
@@ -298,9 +300,11 @@ export function AdminIntegrationPage() {
                         <TableCell className="text-xs">{item.revoked_at ?? "—"}</TableCell>
                         <TableCell>
                           {item.revoked_at ? null : (
-                            <Button size="sm" variant="destructive" onClick={() => revoke(id)}>
-                              吊销
-                            </Button>
+                            <MutateOnly>
+                              <Button size="sm" variant="destructive" onClick={() => revoke(id)}>
+                                吊销
+                              </Button>
+                            </MutateOnly>
                           )}
                         </TableCell>
                       </TableRow>

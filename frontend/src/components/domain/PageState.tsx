@@ -13,21 +13,41 @@ export function PageHeader({
   title,
   description,
   actions,
+  browseActions,
 }: {
   title: string;
   description?: string;
+  /** Commands (create / save / terminate). Hidden when viewport is read-only. */
   actions?: ReactNode;
+  /** Navigation and view labels. Always visible. */
+  browseActions?: ReactNode;
 }) {
   const { canMutate } = useViewport();
+  const trailing = (
+    <>
+      {browseActions}
+      {actions && canMutate ? actions : null}
+    </>
+  );
+  const hasTrailing = Boolean(browseActions) || (Boolean(actions) && canMutate);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
-      {actions && canMutate ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {hasTrailing ? <div className="flex items-center gap-2">{trailing}</div> : null}
     </div>
   );
+}
+
+/** Hide write-command controls under &lt;1024 read-only browse. Filters and nav stay. */
+export function MutateOnly({ children }: { children: ReactNode }) {
+  const { canMutate } = useViewport();
+  if (!canMutate) {
+    return null;
+  }
+  return <>{children}</>;
 }
 
 export function StepMark({ step }: { step: string }) {
