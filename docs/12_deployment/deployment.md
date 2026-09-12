@@ -2,7 +2,7 @@
 
 > - **阶段**：Stage 12（`docs/12_deployment`）—— 发布和部署
 > - **日期**：2026-09-12
-> - **代码基线**：分支 `feat/stage12-deployment`（基于 `main` `f7025d5`）
+> - **代码基线**：`main` `57ce649`（PR #3 `feat/stage12-ci-verify` 合入后；Stage 12 产物自 `feat/stage12-deployment` `04ed250` 起）
 > - **权威**：部署形态与硬约束引用 [tech_stack_decision-v1.0.md](../06_architecture_design/tech_stack_decision-v1.0.md) §3.8、[AGENTS.md](../../AGENTS.md) §1/§6、[project_rules.md](../00_setup/project_rules.md) §2/§5.3。本文**不新增** US / FR / AC / API 编号，**不发明** TBD 数值（RPO/RTO、SLO、会话秒数、K8s 时点等一律留空并登记）。
 > - **配套产出**：`backend/Dockerfile`、`backend/.dockerignore`、`frontend/Dockerfile`、`frontend/nginx.conf`、`frontend/.dockerignore`；探针代码 `backend/app/api/ops.py`
 
@@ -193,7 +193,9 @@ volumes:
 
 `pytest` 需要 PostgreSQL：CI 用 service 容器提供，并通过 `DATABASE_URL` 指向它（`conftest.py` 优先读取已存在的 `DATABASE_URL`，取不到才回落到本地默认值）。
 
-> ✅ **已落地**：`.github/` 已于 2026-09-12 经用户批准加入顶层白名单，本片段与 `.github/workflows/ci.yml` 内容一致（校验：YAML 可解析，3 个 job：`backend` / `frontend` / `images`）。**但「CI 为绿」尚未取得**——`gh` 在本环境未登录、无 PR 运行记录，首次真实运行结果仍属未验证项（见 §10.2 #6）。
+> ✅ **已落地**：`.github/` 已于 2026-09-12 经用户批准加入顶层白名单，本片段与 `.github/workflows/ci.yml` 内容一致（校验：YAML 可解析，3 个 job：`backend` / `frontend` / `images`；触发器 `push`(main) + `pull_request` + `workflow_dispatch`）。
+>
+> ✅ **「CI 为绿」已取得（2026-09-12）**：`feat/stage12-ci-verify` 的 PR #3 在 GitHub Actions 上跑通 `backend` / `frontend` / `images` 后合入 `main`（merge commit `57ce649`）。`images` job 在 GitHub runner 上真实 `docker build` 了两个镜像——这是本地无 Docker daemon 时唯一的镜像可用性验证。验证人：用户（确认 CI 成功并 merge）。本代理环境 `gh` 仍未登录、仓库私有，未能复读 Actions 日志正文，以 merge commit + 用户确认为证据。
 
 ```yaml
 name: ci
@@ -201,6 +203,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -299,22 +302,28 @@ jobs:
 | 锁文件冻结一致性 | `uv lock --check` | 通过 |
 | 前端镜像构建步骤本体 | `npm ci && npm run build`（`VITE_API_BASE_URL` 留空） | `npm ci` 329 包、0 漏洞、lockfile 无失配；build 成功（同源默认基址生效） |
 | compose 结构（仓内 `docker-compose.yml`） | `POSTGRES_PASSWORD=… docker compose config -q` | 退出码 0，无错误/告警；相对 `build.context` 正确解析到 `backend/`、`frontend/`；缺 `POSTGRES_PASSWORD` 时**报错退出**（符合预期）。**说明**：这是无 daemon 的客户端解析——验证 YAML 结构、变量插值、`depends_on` 条件与 context 解析，**未验证**镜像构建与容器启动 |
-| CI workflow 结构 | `yaml.safe_load` 解析 + job/step 计数 | 可解析；3 个 job（`backend` / `frontend` / `images`）、触发器 `push`(main) + `pull_request`，与文档片段一致 |
+| CI workflow 结构 | `yaml.safe_load` 解析 + job/step 计数 | 可解析；3 个 job（`backend` / `frontend` / `images`）、触发器 `push`(main) + `pull_request` + `workflow_dispatch`，与仓内 `ci.yml` 一致 |
 | 探针行为 | `uv run pytest tests/test_ops_probes.py` | 3 条通过：匿名 200、就绪 200、失败 503 且不泄露内部信息 |
 | 路由认证一致性（含新探针） | `uv run pytest tests/test_route_auth_conformance.py` | 4 条通过 |
 
-### 10.2 未本地验证（必须据此记录，不得声称已验证）
+### 10.2 已由 CI 验证（2026-09-12，PR #3 → `main` `57ce649`）
 
-本地 **Docker daemon 未运行**（`docker info` 连接 `unix:///Users/.../docker.sock` 失败）、**`gh` 未登录**，因此以下均未验证：
+本地仍无 Docker daemon、`gh` 仍未登录。下列项由 GitHub Actions 的 `images` job（依赖 `backend`/`frontend` 先绿）与用户确认的 merge 闭环，**不再列为未验证**：
+
+| # | 验证项 | 证据 | 验证人 |
+|---|---|---|---|
+| 1 | 后端镜像能否真正构建 | CI `images` job：`docker build -t huntai-backend:${{ github.sha }} backend` 成功 | 用户（PR #3 CI 绿并 merge） |
+| 5 | 基础镜像 tag 是否可用（`python:3.14-slim`、`node:24-slim`、`nginx:alpine`、`ghcr.io/astral-sh/uv:0.12.7`） | 两次 `docker build` 成功即证明构建期拉取的 tag 可用。`postgres:18` 另由 backend job 的 service 容器拉取 | 同上 |
+| 6 | CI 是否真能跑绿 | PR #3 三个 job 全绿后合入；`workflow_dispatch` 现已在默认分支生效，可在 Actions 页手动再跑 | 同上 |
+| 2a | 前端镜像能否真正构建 | CI `images` job：`docker build -t huntai-frontend:${{ github.sha }} frontend` 成功 | 同上 |
+
+### 10.3 仍未验证（必须据此记录，不得声称已验证）
 
 | # | 未验证项 | 验证方式 | 验证人 |
 |---|---|---|---|
-| 1 | 后端镜像能否真正构建 | 有可用 daemon 的环境执行 `docker build backend`；或 CI `images` job | 待指定 |
-| 2 | 前端镜像能否真正构建、nginx 站点配置是否生效 | `docker build frontend` 后 `docker run -p 8080:80` 访问页面与 `/api` | 待指定 |
+| 2b | 前端镜像**运行时** nginx 站点配置是否生效（SPA fallback、`/api` 反代、SSE 关缓冲） | `docker run` 或 `docker compose up` 后访问页面与 `/api` | 待指定 |
 | 3 | compose 能否真正起来（含 `migrate` 顺序、健康门控、卷挂载） | `docker compose up -d` 后核查四个服务状态与 `/readyz` | 待指定 |
-| 4 | Playwright 浏览器与系统库在镜像内是否可执行 | 镜像内跑一次 Web 用例（`playwright_worker`） | 待指定 |
-| 5 | 基础镜像 tag 是否可用（`python:3.14-slim`、`node:24-slim`、`postgres:18`、`nginx:alpine`、`ghcr.io/astral-sh/uv:0.12.7`） | 首次构建即验证；`uv` 0.12.7 已确认存在于 PyPI（发布物存在） | 待指定 |
-| 6 | CI 是否真能跑绿 | 落到 `.github/workflows/` 后在 PR 上运行（依赖 §11.1 裁定） | 待指定 |
+| 4 | Playwright 浏览器与系统库在镜像内是否可执行 | 镜像内跑一次 Web 用例（`playwright_worker`）。`images` job 只证明构建期 `playwright install` 成功，不等于运行时可用 | 待指定 |
 | 7 | 生产 IdP 真实对接 | 见 [test_report.md](../11_test/test_report.md) §7.4；真实凭证与端到端仍不可验证 | 待指定 |
 
 ## 11. 已裁定事项与开放项
@@ -330,7 +339,7 @@ jobs:
 3. 同步修订 `AGENTS.md` §1 与 `project_rules.md` §2（两处同改，均限定这两个条目只用于 Stage 12 的编排与 CI 门控，且 CI 门控命令必须与 §5 一致）。
 4. 落地仓库根 `docker-compose.yml` 与 `.github/workflows/ci.yml`。
 
-**剩余缺口（据实登记）**：`project_rules.md` §5.3 的「CI 为绿」需要一次真实 CI 运行才能判定，本环境 `gh` 未登录、无法触发或观测，因此该判定标准**尚未取得**，不得视为已闭环。
+**「CI 为绿」已闭环（2026-09-12）**：PR #3 真实跑通三个 job 后合入 `main`（`57ce649`）。`project_rules.md` §5.3 对该阶段的判定标准已取得。仍未验证的是 compose 实起、镜像内 Playwright 执行、nginx 运行时行为与生产 IdP（见 §10.3），这些**不阻断** Stage 12 约定产出收口，按 §5.3 继续登记验证方式。
 
 ### 11.2 已裁定：`.env.example` 新增键（2026-09-12）
 
