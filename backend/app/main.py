@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.ops import ops_router
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.db import dispose_engine
@@ -25,6 +26,8 @@ def create_app() -> FastAPI:
     app.add_middleware(TraceIdMiddleware)
     register_exception_handlers(app)
     app.include_router(api_router)
+    # Ops probes stay outside /api/v1 and take no API number (Stage 12).
+    app.include_router(ops_router)
     return app
 
 

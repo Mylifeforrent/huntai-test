@@ -38,6 +38,12 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/inbound-webhooks/{connector_id}"): (
         "API-090 inbound webhook; authenticated by HMAC signature, not a session"
     ),
+    ("GET", "/healthz"): (
+        "Stage 12 liveness probe; outside /api/v1, no API number, must be anonymous"
+    ),
+    ("GET", "/readyz"): (
+        "Stage 12 readiness probe; outside /api/v1, no API number, must be anonymous"
+    ),
 }
 
 # Routes that authenticate inside the handler instead of via a dependency.
