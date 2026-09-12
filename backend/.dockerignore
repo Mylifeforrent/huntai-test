@@ -1,0 +1,25 @@
+# Build context hygiene for the backend image.
+# The context is backend/, but .env lives at the repo root: exclude it anyway so a
+# wider context can never bake secrets into the image.
+.env
+.env.*
+*.pem
+*.key
+
+# Local virtualenv / caches: the builder recreates the venv from uv.lock.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime data volume (object_store + worker tmp) is mounted, never baked.
+artifacts/
+
+# Tests and local tooling are not part of the runtime image.
+tests/
+
+# Editor / OS noise
+.DS_Store
+.idea/
