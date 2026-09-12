@@ -1,12 +1,12 @@
 # 普通用户 UI 教程：从零准备数据到跑完一次执行
 
 > **这篇是给谁看的**：不写代码、只想在浏览器里把 HuntAI Test 用起来的人（测试同学、产品同学、第一次验收的同事）。
-> **前置**：已经按 [`local-testing-guide.md`](./local-testing-guide.md) 的 §2–§4 把栈起起来了——`.env` 就绪、迁移跑过、`seed_local_identity.py` 跑过、mock IdP 与后端在 8000、前端在 5173，并且能用 `local-dev-user` 登录。
+> **前置**：已经按 [`local-testing-guide.md`](./local-testing-guide.md) 的 §2–§4 把栈起起来了——`.env` 就绪、迁移跑过、`seed_local_identity.py` 跑过、mock IdP(8090) 与 mock 集成(8091) 与后端在 8000、前端在 5173，并且能用 `local-dev-user` 登录。
 > **配套读物**：想弄清楚「我点的这个按钮底层走了哪段代码、哪张表、哪条测试」→ [`developer-guide.md`](./developer-guide.md)。
 
 本文所有步骤都在本地实机走通过一遍；文中出现的页面标题、按钮文字、字段名、报错码都取自当前仓库代码，不是示意。
 
-本文截图取自同一次真实走查（本地 1440×900 浏览器窗口，中文界面）。图上的红色描边框与 ① ② ③ 角标是**为指路后加的标注**，界面本身没有做任何改动，也没有示意图或合成图。截图出处与重拍方法见 [`images/README.md`](images/README.md)。
+本文 §1–§5 截图取自同一次真实走查（本地 1440×900 浏览器窗口，中文界面）。§7 截图由 `backend/scripts/capture_tutorial_screenshots.mjs` 拍摄并已入库（`images/7-a-` … `7-g-`）。图上的红色描边框与 ① ② ③ 角标是**为指路后加的标注**，界面本身没有做任何改动，也没有示意图或合成图。截图出处与重拍方法见 [`images/README.md`](images/README.md)。
 
 ---
 
@@ -27,15 +27,16 @@
 
 ### 0.1 开工前自检
 
-三条命令都应该通（`backend/` 目录下）：
+四条命令都应该通（在仓库任意目录均可；注释在 `backend/` 视角）：
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8090/.well-known/openid-configuration   # 期望 200（mock IdP: 本教程的「被测目标」）
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8091/healthz                             # 期望 200（mock 集成；§7 质量闭环依赖）
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/healthz                             # 期望 200（进程探活；/readyz 再确认数据库）
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                                   # 期望 200（前端）
 ```
 
-任一不通 → 回到 [`local-testing-guide.md`](./local-testing-guide.md) §3 的对应步骤。
+任一不通 → 回到 [`local-testing-guide.md`](./local-testing-guide.md) §3 的对应步骤。§7 还要求 mock 集成进程已启动（步骤 5）。
 
 ### 0.2 本教程用到的两个账号
 
@@ -141,7 +142,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                 
 
 ## §2 数据准备（本教程核心）
 
-干净数据库里只有组织 / 两个用户 / 一个项目 / 成员关系 / 模型路由 / 配额（详见 [`local-testing-guide.md`](./local-testing-guide.md) §5），**没有用例、没有环境、没有门禁策略**。下面按依赖顺序把它们造出来。
+干净数据库里只有组织 / 两个用户 / 一个项目 / 成员关系 / 四条本地 mock 连接器 / 模型路由 / 配额（详见 [`local-testing-guide.md`](./local-testing-guide.md) §5），**没有用例、没有环境、没有门禁策略**。下面按依赖顺序把它们造出来。
 
 ### 2.1 建一条质量门禁策略（P11）
 
@@ -609,24 +610,229 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                 
 | P09 TestRun 详情 | `/test-center/runs/<runId>` | 无 |
 | 证据中心（读已产生证据） | `/evidence` | 先有一次执行 |
 
-### 6.2 代码已落地、但本地干净库走不通真实外部闭环
+### 6.2 本地 loopback mock 已接线（仍非生产）
 
-M1–M3 切片已合入，页面不再是空壳。下面这些**仍然需要外部系统或明确被禁用**，不要把 stub / 拒绝当成「已经对接成功」。
+起齐 **8091**（[`local-testing-guide.md`](./local-testing-guide.md) §3 步骤 5）且种子 Connector 的 `action_contract.base_url` 指向 loopback 时，产品出站会经 **httpx 打到 mock**；`base_url` 缺失或非 loopback 时仍走进程内 stub（fail-close，不把 mock 当生产）。
 
-| 能力 | 代码现状 | 本地干净库上实际怎样 |
+| 能力 | 本地 loopback 上怎样 | 仍须知道 |
 |---|---|---|
-| Jira 写缺陷 / 关联 fixVersion | 审批后走 `jira_write_stub`（无真实 HTTP） | 需要真实 Jira 站点与凭证；stub 不能当成功证据 |
-| Release 编排 | API-150–155 已落地；平台**只准备 item，不执行生产发布** | 创建任务需要 Jira 连接器；webhook 腿在干净库上会 skip（见 live smoke `test_08`） |
-| CI 回填（Jenkins 采集 / 报告解析） | 多格式适配器已落地 | 需要 `external_ci` 环境 + Jenkins 实例与 Token |
-| 性能压测（P16 `/test-center/performance`） | Locust 包装已落地 | 目标必须命中 `perf_whitelist`；未命中直接 `HT-POL-002` |
+| Jira 写缺陷（`jira_write`） | 四眼批准后 httpx → `http://127.0.0.1:8091/jira`；证据里出现 `HT-<n>` 键 | `APPROVED` ≠ `EXECUTED` + `execution_result=ok`；见 §7.3 |
+| GitHub Check Run | 失败 run 评估链可 httpx → `http://127.0.0.1:8091/github` | 与 §3 的 Script 成功路径无关 |
+| Release prepare（`release_push` 批准后） | httpx → `http://127.0.0.1:8091/release`；`scope_snapshot` 写入 `release_mock` / `RI-…` | **READY ≠ 生产已发布**；平台只准备 item |
+| Release webhook（`release_item_ready`） | mock `POST /dev/emit-webhook` 代签 HMAC 后打到产品入站链 | webhook **只落观察**再走已登记命令；不直接改状态机 |
+| Jenkins CI 回填 | mock 已预置 `local-demo` / `smoke-suite` job | **须自行注册** `external_ci` 环境（endpoint `http://127.0.0.1:8091/jenkins`，`credential_ref` 见 §7.6）；UI 表单不暴露凭证字段 |
+| 性能压测（P16） | Locust 包装已落地 | 目标须命中 `perf_whitelist`，否则 `HT-POL-002` |
 | Agent Mode（P14） | 试点已落地，**不进门禁** | 一期 `external_ci` 不支持 Agent |
-| Copilot 只读（P18 `/assistant`） | 本地 stub 可提问 | **不在主导航**（P18/P19 按里程碑隐藏）；请直接打开 `/assistant` |
-| Copilot 写操作（`copilot_write`） | 代码冻结为 `DISABLED` | M4 能力，不要当已启用 |
-| 定时回归 / 计划级报告 | API-055 可存绑定 | cron/时区仍 TBD，本地不会按点触发 |
+| Copilot 只读（P18 `/assistant`） | 本地 stub 可提问 | **不在主导航**；直接打开 `/assistant` |
+| Copilot 写操作 | 代码冻结为 `DISABLED` | M4 能力 |
+| 定时回归 / 计划级报告 | API-055 可存绑定 | cron/时区仍 TBD |
 
-**这些页面长什么样**：能打开、能看到空态或策略拒绝，但**没有外部凭证就不会产出真实外部结果**。不要把它们当成「配一下就能对接生产」的模块。
+> **红线提醒**：Agent Mode 的结果**不进质量门禁，也不作为发布证据**。mock 集成仅供本地联调，**不是**生产 Jira / GitHub / Jenkins / Release。
 
-> **红线提醒**：Agent Mode 的结果**不进质量门禁，也不作为发布证据**。不要试图用它来「绕过」上面这些限制。
+### 6.3 集成中心（P25）入口
+
+左侧 `管理` → 子项 **集成中心**（P25，`/admin/integrations`）。应能看到种子写入的 **4 条** mock 连接器，名称分别为 `Local mock Jira` / `Local mock GitHub` / `Local mock Jenkins` / `Local mock Release`，类型徽标 + **`可写`** 绿标。项目 `Local Dev Project` 的 `jira_project_key` 为 `HT`（P02 可见）。
+
+`http://127.0.0.1:8091/confluence/` 只是演示 HTML + 可下载 OpenAPI，**不是** `Connector.type`，**不会**出现在 P25 列表里。完整走查见 **§7**。
+
+---
+
+## §7 质量闭环扩展（Jira · Release · 可选 Jenkins）
+
+> **这篇扩展给谁**：已完成 §1–§5（至少有一条 `ACTIVE` 用例、一个 `ACTIVE` 的 `platform_executor` 环境、一条门禁策略，并跑通过一次 `SUCCEEDED` 的 Script 执行）。§7 在同样数据上叠加 **失败证据 → Jira 写 → Release 编排 → webhook 观察**，教你看清「平台编排质量证据、不执行生产发布」的边界。
+>
+> 截图文件名以 `images/7-` 为前缀，由 `backend/scripts/capture_tutorial_screenshots.mjs` 拍摄（图下 ① ② ③ 角标与 [`images/README.md`](images/README.md) 规则一致）。重拍前可用 `uv run python scripts/bootstrap_tutorial_assets.py` 经公开 API 补齐 §2 数据。
+
+### 7.1 核对四条种子连接器（P25）
+
+**目标**：确认 loopback mock 已被产品识别为可写出站。
+
+**操作**
+
+1. 用 `local-dev-user` 登录。
+2. 左侧 `管理` → `集成中心`，进入 `/admin/integrations`（页面标题「集成中心」）。
+3. 打开 **连接器** 页签，核对列表里 **4 条**记录：
+
+| 名称 | 类型徽标 | 出站 |
+|---|---|---|
+| `Local mock Jira` | `jira` | `可写` |
+| `Local mock GitHub` | `github` | `可写` |
+| `Local mock Jenkins` | `ci` | `可写` |
+| `Local mock Release` | `release` | `可写` |
+
+![P25 集成中心：四条 Local mock 连接器均带「可写」徽标](images/7-a-p25-connectors.png)
+
+> ① `管理` 子导航里的 `集成中心` ② 连接器卡片上的名称与类型 ③ 绿色 `可写` 徽标（`outbound_write_enabled=true`）。
+
+**期望看到**：四条齐全；卡片小字含 `credential_present=…` 与「出站写入须审批放行」。**看不到 Confluence**——它不是连接器类型。
+
+**失败怎么办**
+
+| 现象 | 处理 |
+|---|---|
+| 列表为空 | 重跑 `cd backend && uv run python scripts/seed_local_identity.py` |
+| 8091 healthz 不通 | 启动 `uv run python scripts/mock_integrations.py`（§0.1 第四条 curl） |
+| 没有 `可写` | 检查种子是否写入 `outbound_write_enabled` |
+
+### 7.2 再跑一次 Script，故意 FAILED（制造聚类）
+
+**目标**：用**同一条** §2.3 的 `ACTIVE` 用例，换 `TARGET_ENV` 让请求 404，得到失败 run 与聚类输入。
+
+**操作**
+
+1. 左侧 `测试中心` → `发起执行`（P08），项目仍选 `Local Dev Project`，模式 `Script Mode`，环境仍选 §2.4 的 `本地教程环境`。
+2. 勾选同一条 `ACTIVE` 用例。
+3. **`TARGET_ENV（必填）` 改为 `http://127.0.0.1:8091`**（注意：不要带 path）。
+4. 点 `发起执行`。
+
+![P08：TARGET_ENV 填 mock 集成基地址](images/7-b-failed-run.png)
+
+> ① `TARGET_ENV` 填 `http://127.0.0.1:8091` ② 仍勾选 §2.3 的活跃用例。
+
+**为什么会 FAILED？** 用例 path 仍是 `/.well-known/openid-configuration`（来自 §2.2 的 curl 原文）。执行器做 `urljoin`：`http://127.0.0.1:8091` + `/.well-known/openid-configuration` → `http://127.0.0.1:8091/.well-known/openid-configuration`。8091 是 Jira/GitHub/Jenkins/Release mock，**没有** IdP 的 OpenID 配置路径 → HTTP 404 → 用例 `failed` → TestRun 终态 **`失败`**。这是**真实失败证据**，不是平台故障。
+
+**期望看到**（P09）：页头进度条终态 `失败`；第 2 区「聚类报告区」在终态后出现簇卡片（可能短暂显示「聚类生成中」）。
+
+![P09 失败 run：聚类报告区出现簇卡片](images/7-c-jira-cluster.png)
+
+> ① 执行进度终态 `失败` ② `聚类报告区` ③ 簇卡片（类别徽标 + 置信度条）。
+
+### 7.3 聚类上一键创建 Jira 缺陷（四眼 → mock HTTP）
+
+**前提**：§7.2 的 run 已是 `FAILED`；当前账号不是 `viewer`。
+
+**操作 A：发起人创建审批（`local-dev-user`）**
+
+1. 停留在 P09，在 **聚类报告区**（第 2 区）找到簇卡片。
+2. 点 **`一键创建 Jira 缺陷`**（`jira_write` 的 Preview，L2 须审批）。
+3. 成功后浏览器通常会**自动跳到** `审批中心`（带 `highlight` 参数）；若未跳转，手动打开 `待处理队列` 找 `action_type` 为 `jira_write` 的项。
+
+![聚类卡片上的「一键创建 Jira 缺陷」按钮](images/7-c-jira-cluster.png)
+
+> ① `一键创建 Jira 缺陷`（仅 `FAILED` run 且该簇尚无 Jira 时出现）。
+
+**操作 B：对端批准（`local-dev-user-2`）**
+
+4. 第二个身份打开 `审批中心` → `待处理队列` → 选中 `jira_write` → 点 `批准`。
+
+**期望看到**
+
+- 批准后执行钩子 httpx 到 mock Jira；簇卡片出现 **`Jira 缺陷：HT-<n>`**（`n` 递增）。
+- 证据中心或 P09 证据引用里能关联到 outbound 证据（append-only `EvidenceObject`）。
+
+![批准后簇卡片回显 HT- 键](images/7-d-jira-approval.png)
+
+> ① `Jira 缺陷：HT-…` 行。
+
+**可选：curl 对账 mock 上的 issue**
+
+```bash
+curl -s http://127.0.0.1:8091/jira/rest/api/2/issue/HT-<n>
+```
+
+把 `<n>` 换成卡片上的数字。这是 **mock 进程**上的只读核对，不是产品 API。
+
+**失败怎么办**
+
+| 现象 | 处理 |
+|---|---|
+| 看不到 `一键创建 Jira 缺陷` | run 不是 `FAILED`，或该簇已有 `jira_issue` |
+| 批准人 = 发起人 | 403 `HT-IAM-002`；换 `local-dev-user-2` |
+| 批准后无 `HT-` 键 | 确认 8091 活着、Jira 连接器 `base_url` 为 loopback；查后端日志 |
+| 误以为「批准 = 外部已落地」 | **`APPROVED` ≠ `EXECUTED` + ok**；以 GET 簇详情 / 证据为准 |
+
+### 7.4 Release 任务：圈定版本 → release_push 审批
+
+**目标**：创建 Release 任务，走 L4 `release_push` 四眼，批准后平台 **内部 prepare** release item（httpx → mock `/release`）。
+
+**操作**
+
+1. 左侧主导航点 **`发布`**，进入 `/releases`（页面标题「Release 任务」）。页顶 Alert 写明：**无「执行生产发布」路径；READY ≠ 生产已发布**。
+2. 填写：
+   - **`项目 ID`**：`00000000-0000-4000-8000-000000000003`
+   - **`Jira 版本号`**：`1.0.0`（mock `GET /jira/rest/api/2/project/HT/versions` 返回的 name；placeholder 显示 `v1.0` 但教程用 `1.0.0`）
+3. 点 **`圈定版本创建（API-152）`**。
+4. 左侧选中新建任务；状态徽标应为 **`待确认`**（`PENDING_CONFIRM`）。
+5. 在「范围快照」卡片点 **`发起 release_push 审批`** → 对话框 **`确认推送到 Release 系统？`** → **`发起审批`**。
+6. `local-dev-user-2` 在 `审批中心` 批准该 `release_push`（L4，四眼）。
+
+![Release 页：填写项目 ID 与 Jira 版本号](images/7-e-release-create.png)
+
+> ① `项目 ID` ② `Jira 版本号` `1.0.0` ③ `圈定版本创建（API-152）`。
+
+![待确认任务上的「发起 release_push 审批」](images/7-f-release-push.png)
+
+> ① 状态 `待确认` ② `发起 release_push 审批`。
+
+**期望看到**
+
+- 批准后任务变为 **`已提交`**（`SUBMITTED`）。
+- 「范围快照」JSON 中出现 `release_item`，含 `"external_system": "release_mock"` 与 `"external_item_id": "RI-…"`（`RI-` 前缀由 mock prepare 返回）。
+
+![SUBMITTED 且 scope 含 release_mock / RI-](images/7-f-release-push.png)
+
+> ① 状态 `已提交` ② `scope_snapshot` 里的 `release_item.external_system` / `external_item_id`。
+
+### 7.5 模拟 Release webhook：SUBMITTED → READY
+
+**目标**：用 mock 的 **`POST /dev/emit-webhook`** 代签 HMAC，把 `release_item_ready` 观察推入产品入站链；任务迁到 **`就绪`**（`READY`）。
+
+**操作**：在终端执行（把占位符换成 §7.4 的真实值）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8091/dev/emit-webhook \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "huntai_base": "http://127.0.0.1:8000",
+    "connector_id": "00000000-0000-4000-8000-000000000013",
+    "event": "release_item_ready",
+    "delivery_id": "00000000-0000-4000-8000-000000000099",
+    "body": {
+      "release_task_id": "<§7.4 的任务 UUID>",
+      "external_item_id": "<scope_snapshot.release_item.external_item_id>",
+      "status": "ready"
+    }
+  }'
+```
+
+- `connector_id` 固定为种子 Release 连接器 `…0013`。
+- **`delivery_id` 每次换新的 UUID**（去重键）；**不要把任何密钥写进 JSON**——签名由 mock 进程用 `.env` 的 `GITHUB_WEBHOOK_SECRET` 计算。
+- 仅 loopback 客户端可调用；mock 会 POST 到 `{huntai_base}/api/v1/inbound-webhooks/{connector_id}`。
+
+**期望看到**：curl 返回 `delivered: true`；刷新 Release 页，任务状态 **`就绪`**。P25 → **Webhook 投递** 页签可看到新投递（`accepted`）。
+
+![READY 状态与 Webhook 投递记录](images/7-g-release-ready.png)
+
+> ① 状态 `就绪` ② 仍无「生产发布」按钮——**READY 只表示外部 item 观察到位，不等于生产已发布**。
+
+**纪律**：入站 webhook **先验签、落 `external_observations`，再分派已登记命令**；禁止把 webhook 当命令通道直接改 `ReleaseTask`。平台**不执行**生产发布。
+
+### 7.6（可选）external_ci + mock Jenkins
+
+本地 Jenkins 形状在 8091，但 **不会自动注册执行环境**。若要体验 CI 回填，需额外造一条 `external_ci` 环境（**四眼 `env_register`**，与 §2.4 相同审批流）：
+
+| 字段 | 填什么 |
+|---|---|
+| 名称 | 任意，如 `本地 mock Jenkins` |
+| 类型 | `external_ci` |
+| 作用域 | `project` |
+| Endpoint | `http://127.0.0.1:8091/jenkins` |
+| 可选 Job ID | `local-demo` |
+| 报告适配器 | `junit`（选 Job ID 后出现） |
+
+**凭证陷阱**：P15 注册表单**没有** `credential_ref` 输入框；测试里常在审批前用 ORM 写入 `env:JENKINS_API_TOKEN`。教程最短路径是注册时通过 API-102 body 带上 `"credential_ref": "env:JENKINS_API_TOKEN"`（须已在 `.env` 配置 `JENKINS_API_TOKEN` 任意非空值），或批准后在库内补绑——**仅本地联调**。
+
+还需一条引用该 `job_id` 的 `ACTIVE` 用例，并从 P08 选 `external_ci` 环境发起执行。mock 的 `local-demo` build 会返回 **一 pass 一 fail** 的 JUnit，用于报告解析练手。细节与坑（Agent × external_ci 不支持、job schema 必填等）见 [`developer-guide.md`](./developer-guide.md) §4；主链路**可跳过**本节。
+
+### 7.7（可选）Confluence 演示 OpenAPI → 第二次 A1
+
+打开 <http://127.0.0.1:8091/confluence/> 阅读说明，下载或 `curl` OpenAPI：
+
+```bash
+curl -s http://127.0.0.1:8091/confluence/openapi.json
+```
+
+在 P07 **生成审阅** 把数据源改为 `openapi`，粘贴 JSON 原文，再 `发起 A1 生成`——与 §2.2 的 curl 数据源并列，**不是** RAG / M4 Confluence 连接器。该页**不会**出现在 P25。
 
 ---
 
@@ -639,4 +845,7 @@ M1–M3 切片已合入，页面不再是空壳。下面这些**仍然需要外�
 | [`developer-guide.md`](./developer-guide.md) | 每个 UI 操作背后的模块、原理与对应测试用例 |
 | [`tutorial/`](./tutorial/index.html) | 按后端模块分篇的代码教程 |
 
-**下一步**：想知道「我点的『批准』按钮，服务端到底执行了哪段代码、哪条测试在保护它」→ 打开 [`developer-guide.md`](./developer-guide.md)。
+**下一步**
+
+- 想走 Jira 写缺陷 / Release webhook / 可选 Jenkins → 继续 **§7**（假定 §2–§3 数据已存在）。
+- 想知道「我点的『批准』按钮，服务端到底执行了哪段代码、哪条测试在保护它」→ 打开 [`developer-guide.md`](./developer-guide.md)。

@@ -51,9 +51,12 @@ table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}t
 POST /api/v1/action-previews  {action_type: "jira_write", ...}   # Preview 校验证据/项目/描述
 # 2. 审批（L2）
 POST /api/v1/approval-requests/{id}/decisions  {decision: "approve"}
-# 3. 执行钩子：execute_jira_write_after_approval → jira_write_stub（无真实 HTTP）
+# 3. 执行钩子：execute_jira_write_after_approval → jira_write_stub
+#    若 connector.action_contract.base_url 为 loopback mock → httpx 到 8091/jira
+#    否则 → 进程内 stub（无 HTTP）
 #    external_request_id = sha256(org:approval:bound_hash)（幂等）
 #    成功写 append-only EvidenceObject（source_object.connector=jira）</code></pre>
+<div class="tip"><b>本地 mock</b>：loopback 进程 <code>backend/scripts/mock_integrations.py</code>（<code>127.0.0.1:8091</code>）+ 种子 Connector。<code>base_url</code> 指向 loopback 时 Jira 写 / GitHub check-run / Release prepare 经 <b>httpx</b>；缺失或非 loopback 仍 stub。入站 <code>POST /dev/emit-webhook</code> 代签 HMAC。测试：<code>test_jira_write_loopback_mock.py</code>、<code>test_check_run_release_loopback_mock.py</code>。启动见 <a href="../local-testing-guide.md">local-testing-guide.md</a> §3；UI §7 见 <a href="../user-ui-guide.md">user-ui-guide.md</a>。</div>
 <ul>
 <li>CI 触发绑定 API-167：项目内 repository+ref_pattern → test_plan_id，PUT 全量替换 + CAS。</li>
 <li>报告采集（FR-18 M2）：Jenkins progressiveText 增量拉日志分片 → 报告适配器（junit/allure/playwright/pytest）→ 归一化 CaseResult。</li>

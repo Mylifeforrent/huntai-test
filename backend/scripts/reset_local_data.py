@@ -1,7 +1,8 @@
 """Dev-only: wipe local business data and re-seed identity.
 
 Resets the local database back to the state `scripts/seed_local_identity.py`
-alone produces, so the tutorials can be replayed from scratch:
+produces (identity plus local integration connectors via the same seed entry
+point), so the tutorials can be replayed from scratch:
 
     cd backend && uv run python scripts/reset_local_data.py --yes
 

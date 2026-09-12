@@ -494,6 +494,8 @@ npm run lint && npx tsc --noEmit && npm run build && npm run test
 
 **模块化单体的约定**：每个 `app/modules/<module>/` 自成一个**私有 PostgreSQL schema**，禁止跨模块共享仓储或 ORM 实体。「共享数据库 ≠ 共享仓储」——跨模块只能走对方暴露的 query/command 函数，不能 import 对方的 repository。
 
+**本地 mock 集成（`feat/local-integration-mocks`）**：loopback 进程 `backend/scripts/mock_integrations.py`（默认 `127.0.0.1:8091`）模拟 Jira / GitHub / Jenkins / Release 的 HTTP 前缀；`seed_local_identity.py` 会种四条 Connector，`action_contract.base_url` 指向该地址。产品出站规则：**`base_url` 为 loopback mock 时经 httpx 打到 mock**（如 `jira_write_stub.py` / `check_run_stub.py` / `release_orchestration/service.py` 内的 loopback 分支）；**`base_url` 缺失或非 loopback 时仍走进程内 stub**（fail-close，HTTP 错误走既有 failed/审计路径，不把 mock 当生产）。入站 webhook 可用 mock `POST /dev/emit-webhook` 代签 HMAC。回归测试：`tests/test_jira_write_loopback_mock.py`、`tests/test_check_run_release_loopback_mock.py`、`tests/test_mock_integrations.py`。UI 走查见 [`user-ui-guide.md`](./user-ui-guide.md) §7；启动见 [`local-testing-guide.md`](./local-testing-guide.md) §3 步骤 5 与 [`tutorial/integration-hub.html`](./tutorial/integration-hub.html)。
+
 ---
 
 ## 附：本文与其它文档的关系

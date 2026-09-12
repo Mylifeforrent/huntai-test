@@ -30,6 +30,7 @@
 | `2.1-` … `2.5-` | §2 数据准备 |
 | `3.1-` … `3.5-` | §3 跑一次并看结果 |
 | `4-` | §4 审批中心与九要素卡片 |
+| `7-` | §7 质量闭环扩展（Jira / Release / 可选 Jenkins）；`7-a-p25-connectors.png` … `7-g-release-ready.png` 已入库 |
 
 其中 `1.1-a-idp-login.png` 与 `1.3-a-switch-account.png` 同时被 `local-testing-guide.md` §4 复用，不重复存两份。
 
@@ -44,9 +45,31 @@
 
    一条命令完成：清空本项目 schema 下的业务表并重跑身份种子，不动库结构（`alembic_version` 不受影响）。完整说明见 [`../local-testing-guide.md`](../local-testing-guide.md) §6.1。
 
-2. **起齐三件套**（见 [`../local-testing-guide.md`](../local-testing-guide.md) §3）：mock IdP(8090) + 后端(8000) + 前端(5173)。
+2. **起齐四件套**（见 [`../local-testing-guide.md`](../local-testing-guide.md) §3）：mock IdP(8090) + mock 集成(8091) + 后端(8000) + 前端(5173)。
 
-3. **用 Playwright 按教程顺序走查并截图**（示意；脚本本身不入库，因为 `docs/` 不放可执行代码）：
+3. **补齐 §2 教程数据**（公开 API，不写 SQL）：门禁策略、ACTIVE 用例、名为「本地教程环境」的 ACTIVE 执行环境。
+
+   ```bash
+   cd backend
+   uv run python scripts/bootstrap_tutorial_assets.py
+   ```
+
+   也可按 [`user-ui-guide.md`](../user-ui-guide.md) §2 在浏览器里手工造数。截图脚本本身不造数。
+
+4. **用 Playwright 按教程顺序走查并截图**：
+
+   **§7 质量闭环**（`feat/local-integration-mocks`）：
+
+   ```bash
+   cd backend
+   node scripts/capture_tutorial_screenshots.mjs
+   ```
+
+   脚本复用 `frontend/node_modules/playwright`（`channel: "chrome"`，headless），视口 1440×900、`zh-CN`；截图前在页面上注入红色描边框与 ① ② ③ 角标。前置须已完成 §2–§3 教程数据（策略 / 用例 / 环境），且四件套（8090 / 8091 / 8000 / 5173）均已启动；缺数据或进程未起时以中文报错 exit 1。本机须安装 Google Chrome（未安装时 exit 2）。
+
+   §7 产出：`7-a-p25-connectors.png` … `7-g-release-ready.png`（见 [`user-ui-guide.md`](../user-ui-guide.md) §7）。
+
+   §1–§5 仍按 [`user-ui-guide.md`](../user-ui-guide.md) 手工走查；登录片段示意：
 
    ```js
    const { chromium } = require("playwright"); // 复用 frontend/node_modules，无需安装
@@ -57,14 +80,12 @@
    });
    const page = await ctx.newPage();
 
-   // 登录：打开应用 → 自动跳 mock IdP → 填账号 → 回平台
    await page.goto("http://127.0.0.1:5173/");
    await page.waitForURL(/127\.0\.0\.1:8090\/authorize/);
    await page.fill('input[name="username"]', "local-dev-user");
    await page.fill('input[name="password"]', "local-dev");
    await page.click('button[type="submit"]');
 
-   // 截图：先在页面上注入标注层（红框 + 编号角标），再截当前视口
    await page.screenshot({ path: "docs/00_setup/images/<章节号>-<序号>-<语义>.png" });
    ```
 

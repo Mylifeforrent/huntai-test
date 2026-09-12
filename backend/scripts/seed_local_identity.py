@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -33,6 +35,17 @@ MEMBER2_ID = uuid.UUID("00000000-0000-4000-8000-000000000006")
 IDP_SUBJECT = "local-dev-user"
 IDP_SUBJECT_2 = "local-dev-user-2"
 ORG_SLUG = "local-dev"
+
+
+def _load_integrations_seed() -> ModuleType:
+    seed_path = Path(__file__).resolve().parent / "seed_local_integrations.py"
+    spec = importlib.util.spec_from_file_location("seed_local_integrations", seed_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {seed_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 async def seed() -> None:
@@ -87,7 +100,7 @@ async def seed() -> None:
                     created_by=USER_ID,
                     aggregate_version=1,
                     name="Local Dev Project",
-                    jira_project_key=None,
+                    jira_project_key="HT",
                     jira_sync_cursor=None,
                     bind_env_ids=None,
                 )
@@ -150,6 +163,14 @@ async def seed() -> None:
 
         await seed_default_model_routes(session, organization_id=org.id, created_by=USER_ID)
         await seed_default_org_quota(session, organization_id=org.id, created_by=USER_ID)
+        integrations_seed = _load_integrations_seed()
+        await integrations_seed.seed_local_integrations(
+            session,
+            organization_id=org.id,
+            project_id=PROJECT_ID,
+            created_by=USER_ID,
+            now=now,
+        )
 
         await session.commit()
     await dispose_engine()
