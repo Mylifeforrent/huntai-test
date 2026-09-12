@@ -14,7 +14,9 @@ services:
       POSTGRES_USER: huntai
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # postgres:18+ 官方镜像把 VOLUME/PGDATA 改到 /var/lib/postgresql（实际数据在
+      # 18/docker）。继续挂 /var/lib/postgresql/data 会让入口直接退出、healthcheck 失败。
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U huntai -d huntai"]
       interval: 10s

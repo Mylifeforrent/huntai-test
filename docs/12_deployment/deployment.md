@@ -2,7 +2,7 @@
 
 > - **阶段**：Stage 12（`docs/12_deployment`）—— 发布和部署
 > - **日期**：2026-09-12
-> - **代码基线**：`main` `57ce649`（PR #3 `feat/stage12-ci-verify` 合入后；Stage 12 产物自 `feat/stage12-deployment` `04ed250` 起）
+> - **代码基线**：`main` `6b6a11a`；compose 实起验证于 2026-09-12（postgres:18 数据卷挂载点已按官方镜像改为 `/var/lib/postgresql`）
 > - **权威**：部署形态与硬约束引用 [tech_stack_decision-v1.0.md](../06_architecture_design/tech_stack_decision-v1.0.md) §3.8、[AGENTS.md](../../AGENTS.md) §1/§6、[project_rules.md](../00_setup/project_rules.md) §2/§5.3。本文**不新增** US / FR / AC / API 编号，**不发明** TBD 数值（RPO/RTO、SLO、会话秒数、K8s 时点等一律留空并登记）。
 > - **配套产出**：`backend/Dockerfile`、`backend/.dockerignore`、`frontend/Dockerfile`、`frontend/nginx.conf`、`frontend/.dockerignore`；探针代码 `backend/app/api/ops.py`
 
@@ -77,7 +77,8 @@ services:
       POSTGRES_USER: huntai
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # postgres:18+：挂 /var/lib/postgresql（不是旧的 /var/lib/postgresql/data）
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U huntai -d huntai"]
       interval: 10s
@@ -137,6 +138,10 @@ volumes:
 ```
 
 `environment` 优先于 `env_file`，因此 `DATABASE_URL` 在容器内被改写为 `postgres` 主机（仓库根 `.env` 里通常指向 `127.0.0.1`，那是本地裸跑用的）。
+
+**PostgreSQL 18 数据卷**：官方镜像自 18 起 `VOLUME`/`PGDATA` 改为 `/var/lib/postgresql`（数据在 `18/docker`）。挂旧路径 `/var/lib/postgresql/data` 会让入口直接退出、healthcheck 失败。本文件与仓内 `docker-compose.yml` 均已按此挂载。
+
+**本次实起的口令插值**：仓库根 `.env` 当时没有 `POSTGRES_PASSWORD` 键。验证用 `docker compose --env-file` 指向进程外临时文件做插值，**未把口令写入仓库、未打印到文档或日志**。日常使用请在 gitignored 的 `.env` 自行补该键（仅键值，不要提交）。
 
 **迁移到 Kubernetes 的约束**：同一批镜像、同一套环境变量、同一个 `/data/artifacts` 语义（换成 PVC）、同样的 stdout 日志与探针路径。K8s 清单形态、Ingress/网关选型与迁移时点是 `tech_stack_decision-v1.0.md` 登记的 **G4 开放项**，本文不发明。
 
@@ -301,7 +306,7 @@ jobs:
 | 后端镜像依赖层（Dockerfile 第 1 步本体） | `UV_PROJECT_ENVIRONMENT=/tmp/... uv sync --frozen --no-dev` | 成功；`fastapi/uvicorn/sqlalchemy/alembic/asyncpg/authlib/playwright/locust` 均可导入；`ruff`/`mypy`/`pytest-asyncio` 确认不在运行时依赖中 |
 | 锁文件冻结一致性 | `uv lock --check` | 通过 |
 | 前端镜像构建步骤本体 | `npm ci && npm run build`（`VITE_API_BASE_URL` 留空） | `npm ci` 329 包、0 漏洞、lockfile 无失配；build 成功（同源默认基址生效） |
-| compose 结构（仓内 `docker-compose.yml`） | `POSTGRES_PASSWORD=… docker compose config -q` | 退出码 0，无错误/告警；相对 `build.context` 正确解析到 `backend/`、`frontend/`；缺 `POSTGRES_PASSWORD` 时**报错退出**（符合预期）。**说明**：这是无 daemon 的客户端解析——验证 YAML 结构、变量插值、`depends_on` 条件与 context 解析，**未验证**镜像构建与容器启动 |
+| compose 结构（仓内 `docker-compose.yml`） | `POSTGRES_PASSWORD=… docker compose config -q` | 退出码 0，无错误/告警；相对 `build.context` 正确解析到 `backend/`、`frontend/`；缺 `POSTGRES_PASSWORD` 时**报错退出**（符合预期）。容器启动见 §10.3 |
 | CI workflow 结构 | `yaml.safe_load` 解析 + job/step 计数 | 可解析；3 个 job（`backend` / `frontend` / `images`）、触发器 `push`(main) + `pull_request` + `workflow_dispatch`，与仓内 `ci.yml` 一致 |
 | 探针行为 | `uv run pytest tests/test_ops_probes.py` | 3 条通过：匿名 200、就绪 200、失败 503 且不泄露内部信息 |
 | 路由认证一致性（含新探针） | `uv run pytest tests/test_route_auth_conformance.py` | 4 条通过 |
@@ -317,14 +322,21 @@ jobs:
 | 6 | CI 是否真能跑绿 | PR #3 三个 job 全绿后合入；`workflow_dispatch` 现已在默认分支生效，可在 Actions 页手动再跑 | 同上 |
 | 2a | 前端镜像能否真正构建 | CI `images` job：`docker build -t huntai-frontend:${{ github.sha }} frontend` 成功 | 同上 |
 
-### 10.3 仍未验证（必须据此记录，不得声称已验证）
+### 10.3 已由 compose 实起验证（2026-09-12）
+
+Docker Desktop 29.7.2 可用后执行 `docker compose --env-file <临时文件> up -d`（镜像已构建）。验证人：本会话代理。首次因 `postgres:18` 仍挂 `/var/lib/postgresql/data` 不健康，已改为 `/var/lib/postgresql` 并重建 `pgdata` 卷后重试。
+
+| # | 验证项 | 结果 |
+|---|---|---|
+| 3 | compose 四服务顺序与健康门控 | **通过**。`postgres` Healthy → `migrate` 一次性 `alembic upgrade head`（`0001`…`0025`）Exited 0 → `backend` Healthy → `frontend` Healthy。`GET /healthz` 与 `GET /readyz` 在 **backend 容器内**均为 200（`{"status":"ok"}` / `{"status":"ready"}`）。命名卷 `huntai-test_pgdata`、`huntai-test_artifacts` 已创建；`/data/artifacts` 对运行用户可写 |
+| 2b | nginx 运行时（SPA / `/api` 反代 / SSE 关缓冲 / 边缘探针） | **通过**。`http://127.0.0.1:8080/` 与未知路径 `/projects/does-not-exist` 返回同一份 SPA `index.html`（200，`Cache-Control: no-store`）。`/api/v1/me` 经 nginx 反代到后端，401 `HT-AUTH-001`（ErrorEnvelope）。SSE 路径 `/api/v1/test-runs/{id}/events` 同样 401 JSON（不是 nginx 502）。容器内 `default.conf` 含 `proxy_buffering off`。边缘 `/healthz`、`/readyz` 为 nginx 404。hashed `/assets/*.js` 实测 `Cache-Control: max-age=31536000`（`expires 1y`）；配置里的 `public, immutable` 未出现在响应头（与 `expires` 同名头覆盖有关），**不阻断**本项 |
+| 4 | 镜像内 Playwright Chromium 可执行 | **通过**。以镜像用户 `appuser`（uid 10001）调用与 worker 相同的 `chromium.launch(headless=True)`，`set_content` 后读到 `ok`；可执行文件在 `PLAYWRIGHT_BROWSERS_PATH`（`/opt/ms-playwright/chromium-1234/...`）。本次是最小浏览器探针，**不是**完整 Web 用例走 `playwright_worker` 落制品 |
+
+### 10.4 仍未验证（必须据此记录，不得声称已验证）
 
 | # | 未验证项 | 验证方式 | 验证人 |
 |---|---|---|---|
-| 2b | 前端镜像**运行时** nginx 站点配置是否生效（SPA fallback、`/api` 反代、SSE 关缓冲） | `docker run` 或 `docker compose up` 后访问页面与 `/api` | 待指定 |
-| 3 | compose 能否真正起来（含 `migrate` 顺序、健康门控、卷挂载） | `docker compose up -d` 后核查四个服务状态与 `/readyz` | 待指定 |
-| 4 | Playwright 浏览器与系统库在镜像内是否可执行 | 镜像内跑一次 Web 用例（`playwright_worker`）。`images` job 只证明构建期 `playwright install` 成功，不等于运行时可用 | 待指定 |
-| 7 | 生产 IdP 真实对接 | 见 [test_report.md](../11_test/test_report.md) §7.4；真实凭证与端到端仍不可验证 | 待指定 |
+| 7 | 生产 IdP 真实对接 | 见 [test_report.md](../11_test/test_report.md) §7.4；compose 栈未包含 IdP，本地 `.env` 的 issuer 仍指向 loopback mock。真实凭证与端到端仍不可验证 | 待指定 |
 
 ## 11. 已裁定事项与开放项
 
@@ -339,7 +351,9 @@ jobs:
 3. 同步修订 `AGENTS.md` §1 与 `project_rules.md` §2（两处同改，均限定这两个条目只用于 Stage 12 的编排与 CI 门控，且 CI 门控命令必须与 §5 一致）。
 4. 落地仓库根 `docker-compose.yml` 与 `.github/workflows/ci.yml`。
 
-**「CI 为绿」已闭环（2026-09-12）**：PR #3 真实跑通三个 job 后合入 `main`（`57ce649`）。`project_rules.md` §5.3 对该阶段的判定标准已取得。仍未验证的是 compose 实起、镜像内 Playwright 执行、nginx 运行时行为与生产 IdP（见 §10.3），这些**不阻断** Stage 12 约定产出收口，按 §5.3 继续登记验证方式。
+**「CI 为绿」已闭环（2026-09-12）**：PR #3 真实跑通三个 job 后合入 `main`（`57ce649`）。`project_rules.md` §5.3 对该阶段的判定标准已取得。
+
+**compose 实起已闭环（2026-09-12）**：四服务健康门控、nginx 运行时、镜像内 Playwright 启动均已验证（§10.3）。仍未验证的是生产 IdP 端到端（§10.4），不阻断 Stage 12 约定产出收口。
 
 ### 11.2 已裁定：`.env.example` 新增键（2026-09-12）
 
