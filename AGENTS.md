@@ -31,7 +31,9 @@ backend/     后端源码与后端工程配置。禁止放设计文档或前端�
 docs/        全部设计资产的唯一存放地。禁止放可执行代码（Markdown 内示例除外）。
 ```
 
-仓库顶层只允许上述三个业务目录，以及：`README.md`、`AGENTS.md`、`CLAUDE.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.cursor/`、`.mcp.json`。
+仓库顶层只允许上述三个业务目录，以及：`README.md`、`AGENTS.md`、`CLAUDE.md`、`.gitignore`、`.env.example`、`.pre-commit-config.yaml`、`.zcode/`、`.cursor/`、`.mcp.json`、`docker-compose.yml`、`.github/`。
+
+- 顶层 `docker-compose.yml` 只做本地/单机编排（Stage 12），不得写入业务规则；`.github/` 只放 CI 门控工作流（Stage 12），其门控命令必须与 `project_rules.md` §5 一致，禁止另立一套。
 
 - `docs/` 阶段目录 `00_setup`–`13_changes`：序号与名称禁止变更；产出只进对应 `docs/NN_*`。
 - 阶段约定输出见各 `docs/NN_*/README.md`；约定文件不存在 ⇒ 该阶段未完成。
