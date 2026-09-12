@@ -22,7 +22,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}t
 <body><div class="wrap">
 <div class="crumb"><a href="index.html">总览</a> › run_orchestration</div>
 <h1>run_orchestration · 执行编排（核心模块）</h1>
-<p>模块位置：<code>backend/app/modules/run_orchestration/</code>。管「怎么跑」：TestRun 十态状态机、四条执行路径（script 接口 / Playwright Web / Agent / 外部 CI / 压测）、Worker 子进程、回执与 SSE。</p>
+<p>模块位置：<code>backend/app/modules/run_orchestration/</code>。管「怎么跑」：TestRun 十态状态机、五条执行路径（script 接口 / Playwright Web / Agent / 外部 CI / 压测）、Worker 子进程、回执与 SSE。</p>
 
 <h2>1. TestRun 十态（唯一权威在后端）</h2>
 <pre><code>[*] → PENDING → VALIDATING → RUNNING ─┬─▶ SUCCEEDED / FAILED（终态）
@@ -37,7 +37,7 @@ RUNNING 超过心跳窗口 ──僵尸回收──▶ TIMEOUT</code></pre>
 <li>自动重试只适用于功能回归 run；<b>压测与 Agent 任务禁止自动重试</b>。</li>
 </ul>
 
-<h2>2. 四条执行路径（都在 VALIDATING 后分叉）</h2>
+<h2>2. 五条执行路径（都在 VALIDATING 后分叉）</h2>
 <table>
 <tr><th>路径</th><th>执行者</th><th>要点</th></tr>
 <tr><td>script · api</td><td>进程内 httpx runner</td><td>六类断言、双层变量（params 覆盖步骤）、partial 检测</td></tr>
@@ -90,7 +90,7 @@ GET /api/v1/test-runs/{run_id}/events              # SSE 进度（只读 hint，
 <tr><td>§2 script·web / agent 路径</td><td>executor.py：<code>_execute_web_case</code>、<code>_invoke_playwright_worker</code> / <code>_invoke_agent_worker</code>（asyncio.create_subprocess_exec）；worker 侧 playwright_worker.py <code>run_worker</code>、agent_worker.py <code>run_agent_worker</code></td><td>pages/AgentTaskDetailPage.tsx（P14，轨迹 api.get API-067）</td></tr>
 <tr><td>§2 external_ci 路径</td><td>external_ci_executor.py：<code>execute_external_ci_run</code> / <code>collect_reports_for_run</code> / <code>collect_junit_for_run</code> / <code>resume_external_ci_run</code>；报告适配 report_adapters.py</td><td>TestRunListPage.tsx / TestRunDetailPage.tsx</td></tr>
 <tr><td>§2/§5 performance 路径</td><td>executor.py：<code>_promote_queued_perf_run</code>（审批后晋升）/ <code>_perf_requires_approval</code> / <code>_spawn_perf_worker_detached</code>；perf_worker.py <code>run_perf_worker</code>（Locust 包装）；并发预算经 quota_governance command_port</td><td>pages/PerformancePage.tsx（P16）</td></tr>
-<tr><td>§4 回执与 SSE</td><td>router.py：<code>api_071_get_command_receipt</code>、<code>api_210_test_run_events</code> / <code>api_212_command_receipt_events</code>（生成器 <code>_test_run_sse_events</code> / <code>_command_receipt_sse_events</code>）；repository.py <code>create_command_receipt</code> / <code>update_command_receipt_status</code></td><td>TestRunDetailPage.tsx 内 <code>new EventSource("/api/v1/test-runs/{id}/events")</code>（约 L57–82）；EvidenceCenterPage.tsx 订阅 API-212</td></tr>
+<tr><td>§4 回执与 SSE</td><td>router.py：<code>api_071_get_command_receipt</code>、<code>api_210_test_run_events</code> / <code>api_212_command_receipt_events</code>（生成器 <code>_test_run_sse_events</code> / <code>_command_receipt_sse_events</code>）；repository.py <code>create_command_receipt</code> / <code>update_command_receipt_status</code></td><td>TestRunDetailPage.tsx 内 <code>new EventSource("/api/v1/test-runs/{id}/events")</code>（约 L61）；EvidenceCenterPage.tsx 订阅 API-212</td></tr>
 <tr><td>§4 变量解析 / Job 契约</td><td>variable_resolver.py：<code>validate_and_resolve_snapshot</code> / <code>build_bindings</code> / <code>resolve_value</code>；job_schema_validator.py、ci_settings.py</td><td>ExecutionLaunchPage.tsx 提示性校验（权威在后端）</td></tr>
 </table>
 

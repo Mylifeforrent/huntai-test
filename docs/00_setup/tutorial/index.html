@@ -52,7 +52,7 @@ uv sync                                # 安装依赖
 uv run alembic upgrade head            # 数据库迁移（需本地 PostgreSQL）
 uv run python scripts/seed_local_identity.py   # 种下组织/两个账号/项目/成员关系
 uv run python scripts/mock_idp.py      # 本地 mock IdP（默认 127.0.0.1:8090）
-uv run uvicorn app.main:app --reload   # 启动 API
+uv run uvicorn app.main:app --reload   # 启动 API（探活：GET /healthz、GET /readyz）
 
 # 2. 前端（Node 24）
 cd frontend
@@ -83,7 +83,7 @@ npm run lint && npx tsc --noEmit && npm run build && npm run test</code></pre>
 <tr><th>概念</th><th>一句话解释</th><th>深入阅读</th></tr>
 <tr><td>五个状态机</td><td>TestRun / TestCase / ApprovalRequest / ExecutionEnvironment / ReleaseTask 的状态只由后端裁决，前端只渲染</td><td><a href="run-orchestration.html">执行编排</a>、<a href="release-orchestration.html">发布编排</a></td></tr>
 <tr><td>23 个领域对象</td><td>全部数据模型枚举在 problem_model.md，禁止新增第 24 个</td><td><a href="test-assets.html">测试资产</a></td></tr>
-<tr><td>受理 ≠ 完成</td><td>202 + 回执只是「收到了」；完成以权威 GET / 可授权下载为准</td><td><a href="run-orchestration.html">执行编排</a></td></tr>
+<tr><td>受理 ≠ 完成</td><td>命令被接受（API-062 当前为 200 + 回执；API-180 为 202）只是「收到了」；完成以权威 GET / 可授权下载为准</td><td><a href="run-orchestration.html">执行编排</a></td></tr>
 <tr><td>引用 ≠ 授权</td><td>object_key / artifact_id 不是下载令牌，每次代理下载都重验 RBAC</td><td><a href="results-evidence.html">结果与证据</a></td></tr>
 <tr><td>L0–L4 副作用分级</td><td>Policy Gate 按级放行 / 要求审批 / 拒绝；未声明默认拒绝</td><td><a href="approval-policy.html">审批与策略</a></td></tr>
 <tr><td>错误码三类</td><td>network / permission / business；跨租户一律 404 不泄露存在性</td><td><a href="dev-workflow.html">开发工作流</a></td></tr>
@@ -118,7 +118,7 @@ npm run lint && npx tsc --noEmit && npm run build && npm run test</code></pre>
 <tr><td>表结构 / 分级</td><td><code>docs/07_backend_design/data_model.md</code></td></tr>
 <tr><td>命名 / Git / 红线</td><td><code>docs/00_setup/project_rules.md</code> 与根 <code>AGENTS.md</code></td></tr>
 </table>
-<div class="tip"><b>新手任务</b>：跑通第 3 节的两个服务 → 打开前端登录 → 在 P01 工作台看到一个空的项目列表 → 你已经完成入职第一步。</div>
+<div class="tip"><b>新手任务</b>：跑通第 3 节的两个服务 → 打开前端登录 → 在 P01 工作台看到四个统计卡（待审批 / 执行中 / 门禁异常 / Token 余量）与空态卡片 → 你已经完成入职第一步。项目列表在左侧「项目」，不在工作台。</div>
 
 <div class="pager"><span></span><a href="identity-tenancy.html">下一篇：identity_tenancy →</a></div>
 </div></body></html>

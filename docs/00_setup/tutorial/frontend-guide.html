@@ -32,10 +32,10 @@ table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}t
 <tr><td>P08 执行发起 / P09 TestRun / P14 Agent</td><td><code>/test-center/...</code></td><td>API-062/061/210、067/068</td></tr>
 <tr><td>P10 审批中心</td><td><code>/approvals</code></td><td>API-110…112、120</td></tr>
 <tr><td>P11/P12 门禁策略/历史</td><td><code>/gates/...</code></td><td>API-140…146</td></tr>
-<tr><td>P15/P25 环境/集成</td><td><code>/environments</code>、<code>/admin/integrations</code></td><td>API-100–106、160–167</td></tr>
+<tr><td>P15/P25 环境/集成</td><td><code>/projects/:id/environments</code>、<code>/admin/environments</code>、<code>/admin/integrations</code></td><td>API-100–106、160–167</td></tr>
 <tr><td>P16 性能压测</td><td><code>/test-center/performance</code></td><td>API-062、056/057、199</td></tr>
 <tr><td>P17 Release</td><td><code>/releases</code></td><td>API-150…155、120</td></tr>
-<tr><td>P18 Copilot</td><td><code>/assistant</code></td><td>API-190…193</td></tr>
+<tr><td>P18 Copilot</td><td><code>/assistant</code>（<b>不在主导航</b>；P18/P19 按里程碑隐藏，直接打开路由）</td><td>API-190…193</td></tr>
 <tr><td>P20 证据中心 / P24 审计</td><td><code>/evidence</code>、<code>/admin/audit</code></td><td>API-026–028、223 / 024–025</td></tr>
 </table>
 
@@ -43,7 +43,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}t
 <div class="warn">
 <b>① 前端不是安全边界</b>：状态机、门禁、配额、聚类、param_hash、幂等键全部后端裁决；前端只渲染 + 提示性校验。<br>
 <b>② 不直连外部系统</b>：Jira/GitHub/CI/Release 一律经后端；不持有外部凭证；会话 Cookie 不进 localStorage。<br>
-<b>③ 受理 ≠ 完成</b>：收到 202 只显示「受理中」；网络未决先 GET 对账，禁止假定成功/失败。
+<b>③ 受理 ≠ 完成</b>：命令被接受只显示「受理中」（API-062 当前 200、API-180 为 202）；网络未决先 GET 对账，禁止假定成功/失败。
 </div>
 
 <h2>3. 代码结构与惯例</h2>
@@ -74,11 +74,11 @@ const blob = await api.getBlob("API-223", `/api/v1/export-packages/${id}/content
 <p>路径相对 <code>frontend/src/</code>。</p>
 <table>
 <tr><th>功能块</th><th>入口</th></tr>
-<tr><td>路由表（P01–P25）</td><td>App.tsx 的 <code>&lt;Routes&gt;</code>（外层 SessionGate → AppLayout，react-router v6；禁止 loader/action）</td></tr>
+<tr><td>路由表（P01–P25）</td><td>App.tsx 的 <code>&lt;Routes&gt;</code>（外层 SessionGate → AppLayout，React Router 7；禁止 loader/action）</td></tr>
 <tr><td>会话与登录</td><td>hooks/useSession.ts <code>useSession()</code>（API-005，401 自动 <code>startOidcLogin()</code>）；api/authFlow.ts：<code>startOidcLogin()</code> / <code>handleAuthApiError()</code> / <code>validateReturnPath()</code>；components/layout/SessionGate.tsx、SsoRecoveryPanel.tsx；api/session.ts <code>logoutSession()</code></td></tr>
 <tr><td>统一 API 调用</td><td>api/client.ts：<code>apiRequest</code> 与 <code>api.get|post|patch|put|delete|getBlob</code>（自动幂等键 + 401 处理）；api/apiConfig.ts <code>newIdempotencyKey()</code>；api/errors.ts <code>toApiError()</code> / <code>classifyHttpFailure()</code>；api/catalog.ts <code>PAGE_APIS</code>（页面→API 静态清单）；api/types.ts 全部 DTO</td></tr>
 <tr><td>领域组件（components/domain/）</td><td>RunProgressBar.tsx（<code>RunProgressBar</code> 十态进度条）、EvidenceViewer.tsx（<code>EvidenceViewer</code>）、ApprovalCard.tsx（<code>approvalCardFromRequest()</code>）、ClusterCard.tsx、PageState.tsx（QueryGate/PageHeader/EmptyState 七态基线）、AiDegradeBanner.tsx</td></tr>
-<tr><td>SSE（只作 hint）</td><td>pages/TestRunDetailPage.tsx（约 L57–82）与 pages/EvidenceCenterPage.tsx（约 L107–130）内 <code>new EventSource(...)</code>：<code>resource_changed</code> → <code>queryClient.invalidateQueries</code> 触发权威 GET 刷新；无全局 SSE hook / store</td></tr>
+<tr><td>SSE（只作 hint）</td><td>pages/TestRunDetailPage.tsx（约 L61）与 pages/EvidenceCenterPage.tsx（约 L112）内 <code>new EventSource(...)</code>：<code>resource_changed</code> → <code>queryClient.invalidateQueries</code> 触发权威 GET 刷新；无全局 SSE hook / store</td></tr>
 <tr><td>URL 状态 / 本地 UI store</td><td>hooks/useUrlState.ts <code>useUrlState()</code>（筛选/分页进 URL）；stores/uiStore.ts（仅 sidebarCollapsed）</td></tr>
 </table>
 

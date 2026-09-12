@@ -65,10 +65,21 @@ OIDC_CLIENT_SECRET             # 本地 mock 不校验真实密钥，填任意�
 OIDC_REDIRECT_URI              # 浏览器可达：http://127.0.0.1:5173/api/v1/auth/oidc/callback
 OIDC_CLAIM_SUBJECT             # 填 sub
 
+# 登录草稿 TTL（秒）；`config.py` 必填，空字符串无法解析为 int
+OIDC_LOGIN_DRAFT_TTL_SECONDS
+
 # 审批与再认证窗口
 REAUTH_WINDOW_SECONDS
 APPROVAL_TTL_SECONDS
+
+# 制品落盘根目录（M0/M1 本地卷；`config.py` 必填）
+ARTIFACT_ROOT
+
+# GitHub 入站 webhook HMAC（`config.py` 必填；本地可填任意非空字符串，不是产品密钥）
+GITHUB_WEBHOOK_SECRET
 ```
+
+`backend/app/core/config.py` 启动时读取上表全部无默认值的键；漏填或把整型键留空，uvicorn 会在导入阶段失败。Jenkins / CI 日志 / 心跳超时等键按 `.env.example` 注释可留空。
 
 本地 HTTP 必填原因：浏览器会丢弃 `Secure` Cookie，若 `SESSION_COOKIE_SECURE` 为 `true`，登录后立刻回到未登录态。生产 HTTPS 才设为 `true`。
 
@@ -146,9 +157,13 @@ npm run dev
 | 检查 | 命令 | 期望 |
 | --- | --- | --- |
 | mock IdP 活着 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/.well-known/openid-configuration` | `200` |
+| API 进程活着 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/healthz` | `200`（`{"status":"ok"}`；不碰数据库） |
+| API 能连库 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/readyz` | `200`（`{"status":"ready"}`；失败为 `503`） |
 | 前端活着 | 浏览器打开 `http://127.0.0.1:5173/` | 跳转到 mock IdP 登录页（未登录时） |
 
-> API 没有 `/health` 这类探活路由，`curl` 8000 返回 404 属正常；以 §3 步骤 5 的启动日志为准。
+> `/healthz` 与 `/readyz` 在 `backend/app/api/ops.py`，挂在 `/api/v1` **之外**，无会话、无 API 编号。访问 `http://127.0.0.1:8000/` 仍是 404，属正常。
+
+> 本教程走 **Vite 5173 + uvicorn 8000**，方便对照源码。若要用仓库根 `docker-compose.yml` 单机编排（对外默认 8080、前端是 nginx 静态产物），见 `docs/12_deployment/deployment.md`，不要把两套入口混用。
 
 ---
 
@@ -212,7 +227,7 @@ npm run dev
 | 审批按钮点不动 / 403 `HT-IAM-002` | 你就是发起人（四眼） | 换 `local-dev-user-2` 登录后批准 |
 | 注册环境返回 `401 HT-AUTH-002` | L3+ 动作超出再认证窗口 | 按页面提示完成 step-up 再认证（API-004）后重放同一请求 |
 | 发起执行后立刻 `FAILED` | 参数缺 `TARGET_ENV`，或目标不可达 | 见 `user-ui-guide.md` §3；`FAILED` 也是有效结果，可在 P09 查看 |
-| 跑完 `pytest` 后数据没了 | 测试会清空业务表 | `conftest.py` 会 TRUNCATE；按 §6.1 一条命令复位（清空业务数据 + 重建身份）后重来 |
+| 跑完 `pytest` 后教程数据没了 | 每个用例前 TRUNCATE 业务表 | 会话结束时 `pytest_sessionfinish` 会自动重跑 `seed_local_identity.py`，两个合成账号能再登录；你在 UI 里建的策略 / 用例 / 环境仍已清空。要按 UI 教程从零再走，用 §6.1 复位 |
 | mock IdP 登录页打不开 | 步骤 4 的 mock IdP 没启动 | 回到 §3 步骤 4 |
 
 ### 6.1 想从头再来一次（复位本地数据）

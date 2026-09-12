@@ -37,11 +37,11 @@
 
 ### 2. 受理 ≠ 完成
 
-写命令通常返回 **202 + 一个受理态**，真正的结果要再 GET：
+写命令被接受，不等于业务已完成。HTTP 状态因端点而异，**以权威 GET 为准**：
 
-- `POST /api/v1/test-runs`（API-062）返回受理信息，TestRun 初始是 `PENDING`；真实终态靠 `GET /api/v1/test-runs/{id}`（API-061）轮询。
-- A1 生成（API-180）同样是 202 + `accepted`，草稿要另查 API-182。
-- **禁止**收到 202 就显示「执行成功」。前端只能显示「受理中」，直到 GET 到终态。
+- `POST /api/v1/test-runs`（API-062）当前实现返回 **200** + 回执，TestRun 初始是 `PENDING`；真实终态靠 `GET /api/v1/test-runs/{id}`（API-061）轮询。
+- A1 生成（API-180）返回 **202** + `accepted`，草稿要另查 API-182。
+- **禁止**收到 200/202 就显示「执行成功」。前端只能显示「受理中」，直到 GET 到终态。
 
 ### 3. 写命令 = 幂等键 + 请求哈希
 
@@ -49,7 +49,7 @@
 
 - 查不到 → 执行，落一条记录（存 `request_hash` + `response_ref`）。
 - 查到且 `request_hash` **相同** → 直接回放原响应，**不重复产生副作用**。
-- 查到但 `request_hash` **不同** → `ValueError("idempotency_conflict")` → `409 HT-STATE-001`。
+- 查到但 `request_hash` **不同** → `ValueError("idempotency_conflict")` → `409 HT-IDEM-001`。
 
 代码锚点：
 
@@ -64,9 +64,9 @@
 
 ### 4. 可变聚合 = `expected_version` CAS
 
-改已有对象（改策略、禁用环境、审批决定）要带 `expected_version`；后端乐观锁比对，版本不符返回 `HT-STATE-001`。
+改已有对象（改策略、禁用环境、审批决定）要带 `expected_version`；后端乐观锁比对，版本不符返回 `HT-VER-001`。
 
-- 典型实现：`backend/app/modules/execution_registry/service.py:608 disable_execution_environment`、`backend/app/modules/quality_gates/service.py:237 patch_policy_for_caller`。
+- 典型实现：`backend/app/modules/execution_registry/service.py:628 disable_execution_environment`、`backend/app/modules/quality_gates/service.py:237 patch_policy_for_caller`。
 - 前端拿到老版本号时，正确做法是**刷新拿新版本再操作**，而不是本地自增。
 
 ### 5. 错误信封链路（`ValueError` → `AppError` → JSON）
@@ -80,23 +80,23 @@ service 抛 ValueError("state")
    → app_error_response → {"error": {code, class, subclass, message, retryable, trace_id}}
 ```
 
-`backend/app/modules/execution_registry/router.py:92 _map_write_error` 的映射表就是这份契约的实现：
+`backend/app/modules/execution_registry/router.py:92 _map_write_error` 的映射表就是这份契约的实现（工厂在 `app/core/errors.py`）：
 
 | service 短码 | HTTP / code |
 |---|---|
 | `forbidden` | 403 `HT-IAM-001` |
 | `not_found` | 404 `HT-RES-001` |
-| `validation` | 400 `HT-REQ-001` |
+| `validation` | 400 `HT-VAL-001` |
 | `policy_deny` / `policy_undeclared` | 403 `HT-POL-001` / `HT-POL-002` |
 | `require_reauth` | 401 `HT-AUTH-002` |
 | `state` | 409 `HT-STATE-001` |
-| `version` | 409 `HT-STATE-001` |
-| `idempotency_conflict` | 409 `HT-STATE-001` |
-| `four_eyes` | 403 `HT-IAM-002` |
+| `version` | 409 `HT-VER-001` |
+| `idempotency_conflict` | 409 `HT-IDEM-001` |
+| `four_eyes` | 403 `HT-IAM-002`（审批 router 另映射；环境注册走审批模块） |
 
-`run_orchestration/router.py:98` 在此基础上多了 `token_project` / `schema` / `perf_policy` 三条。
+`run_orchestration/router.py:98` 在此基础上多了 `token_project` / `schema` / `perf_policy` 三条。审批决定另有 `HT-STATE-002`（已消费）、`HT-APPR-001`（`param_hash` 失效）。
 
-> **调试含义**：在 service 里 grep 短码字符串，能立刻定位「这个报错从哪来」。完整码表见 `docs/07_backend_design/api_spec.md` §4.3。
+> **调试含义**：在 service 里 grep 短码字符串，能立刻定位「这个报错从哪来」。完整码表见 `docs/07_backend_design/api_spec.md` §4.3。不要把 `HT-IDEM-001` / `HT-VER-001` 记成 `HT-STATE-001`。
 
 ### 6. 副作用等级由代码冻结，不是配置
 
@@ -135,12 +135,12 @@ FROZEN_ACTION_LEVELS = {
 
 | UI 操作 | 页面文件 | 路由 | API | router | service | 主要表 | 关键错误码 |
 |---|---|---|---|---|---|---|---|
-| 列策略 / 创建 / 改策略 | `pages/QualityGatePolicyPage.tsx` | `/gates/policies` | API-140 / API-142 / API-143 | `quality_gates/router.py:102,144,183` | `quality_gates/service.py:166 create_policy_for_caller`、`:237 patch_policy_for_caller` | `quality_gate_policies` | `HT-STATE-001`、`HT-IAM-001` |
+| 列策略 / 创建 / 改策略 | `pages/QualityGatePolicyPage.tsx` | `/gates/policies` | API-140 / API-142 / API-143 | `quality_gates/router.py:102,144,183` | `quality_gates/service.py:166 create_policy_for_caller`、`:237 patch_policy_for_caller` | `quality_gate_policies` | `HT-VER-001`、`HT-IDEM-001`、`HT-IAM-001` |
 
 要点：
 
 - `report_only` 与 `blocking` 的差别体现在**创建/切换阻塞模式需要二次确认**（前端 `confirm` + 后端校验）；语义上「记录 fail」≠「阻断发布」。
-- 阈值合法性在 `quality_gates/service.py:38 _validate_thresholds`；留空 = 后端不对此项设限。
+- 阈值合法性在 `quality_gates/service.py:38 _validate_thresholds`：三个键必须都在且为数字，缺键即 `validation`。前端空输入会 `Number("") === 0` 再提交，不是「留空就不设限」。
 - 改策略**不会重写历史评估**：`gate_evaluations` 是 append-only，策略版本与历史评估解耦（有测试保护，见 §4）。
 
 ### 2.3 生成并采纳用例（P07 → P05）
@@ -156,7 +156,7 @@ FROZEN_ACTION_LEVELS = {
 - **A1 在本仓库是本地确定性 stub**：`ai_governance/llm_factory.py` 的 `invoke`（`llm_factory.py:119`）不调用任何厂商 API，因此本地不需要模型 Key、也不需要外网。`InvokeInput`/`InvokeOutput` 在 `llm_factory.py:24,38`。
 - **必须写 `AIInvocationLog`**：`a1_service.py` 生成后会落 `ai_invocation_logs`，这是「AI 不得绕过日志」红线的实现。工单号 `run_generation_background`。
 - **数据源类型**：`a1_service.py:29 VALID_SOURCE_TYPES = {"openapi", "postman", "curl"}`；`test_assets/service.py:46` 有同名常量。
-- **YAML 仅 openapi/postman 被拒**：`a1_service.py:93 _reject_non_json_spec` 里第一条就是 `if source_type not in {"openapi","postman"}: return`，所以 `curl` 不受「必须 JSON」的限制。解析器 `_CURL_URL_RE` 在 `test_assets/source_parser.py:136`（`a1_service.py:24` 从这里 import `parse_source_content`）。
+- **YAML 前缀一律被拒**：`a1_service.py:93 _reject_non_json_spec` 先检查原文是否以 `---` / `openapi:` / `swagger:` 开头（含 `curl`）；随后仅 `openapi`/`postman` 再强制 `json.loads`。所以 `curl` 不受「必须是 JSON 对象」限制，但 YAML 外观的原文仍会被拒。解析器 `_CURL_URL_RE` 在 `test_assets/source_parser.py:136`。
 - **采纳 ≠ 落库生效**：API-032 建的是 `DRAFT`；`API-032` 之前生成草稿**不会**自动建用例（有测试保护）。
 - **kill switch**：AI 总开关关闭时 API-180 被拦、API-205（登记原文）不被拦——见 `a1_service.py:83 _kill_switch_blocks`。
 
@@ -175,13 +175,13 @@ FROZEN_ACTION_LEVELS = {
 
 | UI 操作 | 页面文件 | 路由 | API | router | service | 主要表 | 关键错误码 |
 |---|---|---|---|---|---|---|---|
-| 注册环境 | `pages/EnvironmentPage.tsx` | `/projects/:projectId/environments` | API-102 | `execution_registry/router.py:158` | `service.py:358 register_execution_environment` | `execution_environments`、`job_contracts`、`approval_requests` | `HT-POL-001/002`、`HT-AUTH-002`、`HT-IAM-001` |
+| 注册环境 | `pages/EnvironmentPage.tsx` | `/projects/:projectId/environments` | API-102 | `execution_registry/router.py:158` | `service.py:391 register_execution_environment` | `execution_environments`、`job_contracts`、`approval_requests` | `HT-POL-001/002`、`HT-AUTH-002`、`HT-IAM-001` |
 | 列环境 / 详情 | 同上 | 同上 | API-100 / API-101 | `execution_registry/router.py:116,143` | `service.py:196,274` | `execution_environments` | `HT-RES-001` |
 | 参数 Schema | `pages/ExecutionLaunchPage.tsx` | `/test-center/kickoff` | API-070 | `execution_registry/router.py:261` | `service.py:339 get_params_schema_for_caller` | `job_contracts` | — |
 | 审批队列 | `pages/ApprovalCenterPage.tsx` | `/approvals` | API-110 / API-111 | `approval_policy/router.py:214,246` | `service.py:935,1036` | `approval_requests` | — |
-| 批准 / 拒绝 / 重新提交 | 同上 | 同上 | API-112 / API-113 | `approval_policy/router.py:289,321` | `service.py:1092 submit_approval_decision`、`:1515 resubmit_approval_request` | `approval_requests` | `HT-IAM-002`、`HT-STATE-001` |
+| 批准 / 拒绝 / 重新提交 | 同上 | 同上 | API-112 / API-113 | `approval_policy/router.py:289,321` | `service.py:1092 submit_approval_decision`、`:1515 resubmit_approval_request` | `approval_requests` | `HT-IAM-002`、`HT-VER-001`、`HT-STATE-002`、`HT-APPR-001` |
 
-**环境注册的完整链路**（`execution_registry/service.py:358`，值得精读一遍）：
+**环境注册的完整链路**（`execution_registry/service.py:391`，值得精读一遍）：
 
 1. 幂等回放检查：`get_idempotency_record`；命中且哈希一致直接返回。
 2. 禁写字段：`FORBIDDEN_REGISTER_KEYS` 命中任一 → `policy_deny`。
@@ -270,9 +270,9 @@ approval_policy/service.py:1166      raise ValueError("four_eyes")
 
 | 名称 | 位置 | 作用 |
 |---|---|---|
-| `_truncate_tables` | `tests/conftest.py:104`（**autouse**） | 每个用例前 TRUNCATE 所有模块 schema 的表；`HUNTAI_LIVE=="1"` 时**自动跳过**（保护真实库） |
-| `seeded_identity` | `tests/conftest.py:174` | 建 1 组织 / 1 用户（`idp_subject="test-subject-001"`）/ 1 项目 / 角色 `owner`；返回 `{org_id, user_id, project_id, idp_subject}` |
-| `client` | `tests/conftest.py:247` | `create_app()` + `ASGITransport`，`base_url="https://test"` |
+| `_truncate_tables` | `tests/conftest.py:128`（**autouse**） | 每个用例前按硬编码表清单 TRUNCATE；`HUNTAI_LIVE=="1"` 时**自动跳过**（保护真实库）。会话结束 `pytest_sessionfinish`（`conftest.py:93`）会重跑 `seed_local_identity.py`，避免本地登录被清空 |
+| `seeded_identity` | `tests/conftest.py:198` | 建 1 组织 / 1 用户（`idp_subject="test-subject-001"`）/ 1 项目 / 角色 `owner`；返回 `{org_id, user_id, project_id, idp_subject}` |
+| `client` | `tests/conftest.py:271` | `create_app()` + `ASGITransport`，`base_url="https://test"` |
 | `login_as` | `tests/helpers.py:10` | patch 掉 `exchange_oidc_code` / `verify_id_token`，然后驱动 start→callback 建会话 |
 | `_seed_admin_peer` | **`tests/test_api_120_action_previews.py:59`** | 建第二个用户（默认 `idp_subject="admin-peer-120"`）+ 项目 `admin` 成员。**所有四眼测试的前提** |
 
@@ -290,8 +290,8 @@ approval_policy/service.py:1166      raise ValueError("four_eyes")
 |---|---|---|
 | 创建策略 | `test_api_140_143_quality_gate_policies.py::test_happy_path_crud_and_idempotency` | 创建 200；同幂等键重放返回同一策略 |
 | 切到阻塞模式 | `::test_create_blocking_requires_confirm` / `::test_patch_blocking_requires_confirm` | 缺二次确认被拒 |
-| 改策略并发 | `::test_patch_cas_stale` | `expected_version` 过期 → `HT-STATE-001` |
-| 幂等键复用但 body 变了 | `::test_idempotency_conflict` | `request_hash` 不符 → 冲突 |
+| 改策略并发 | `::test_patch_cas_stale` | `expected_version` 过期 → `HT-VER-001` |
+| 幂等键复用但 body 变了 | `::test_idempotency_conflict` | `request_hash` 不符 → `HT-IDEM-001` |
 | 只读角色 | `::test_tester_viewer_read_only` | tester/viewer 不能写 |
 | 列表筛选 | `::test_list_mode_filter` | `mode` 过滤生效 |
 
@@ -344,7 +344,7 @@ approval_policy/service.py:1166      raise ValueError("four_eyes")
 | 只读角色不能决定 | `::test_api_112_viewer_cannot_decide` | viewer 403 |
 | 带理由驳回 | `::test_api_112_peer_reject_with_reason` | 驳回需理由 |
 
-> **注意文件归属**：「批准后激活」在 `test_api_100_106_env_registry.py:235`，「四眼拦截」在 `test_api_110_113_approval_queue.py:149`——两条容易记混。
+> **注意文件归属**：「批准后激活」在 `test_api_100_106_env_registry.py:242`，「四眼拦截」在 `test_api_110_113_approval_queue.py:149`——两条容易记混。
 
 #### P08 发起执行 → P09 看结果
 
@@ -402,7 +402,7 @@ uv run pytest tests/test_policy_gate.py -q
 uv run ruff check . && uv run ruff format --check . && uv run mypy app && uv run pytest
 ```
 
-> **注意**：pytest 的 `_truncate_tables` 是 autouse 的，会**清空本地库**。跑完 pytest 后要重新 `uv run python scripts/seed_local_identity.py`，才回到 UI 教程可用的状态。`HUNTAI_LIVE=1` 会让它跳过——**只在你确定目标是真实库时才这么设**。
+> **注意**：pytest 的 `_truncate_tables` 是 autouse 的，会**清空本地库**。会话结束会自动重跑 `seed_local_identity.py`（见 `conftest.py:93 pytest_sessionfinish`），两个合成账号能再登录；你在 UI 教程里建的策略 / 用例 / 环境不会回来。要回到干净种子态，用 `uv run python scripts/reset_local_data.py --yes`。`HUNTAI_LIVE=1` 会跳过 TRUNCATE——**只在你确定目标是真实库时才这么设**。
 
 前端侧对应的组件测试在同名 `.test.tsx`：`pages/EnvironmentPage.test.tsx`、`pages/ApprovalCenterPage.test.tsx`、`pages/ExecutionLaunchPage.test.tsx`、`pages/TestRunDetailPage.test.tsx`、`pages/TestCaseListPage.test.tsx`、`pages/QualityGatePolicyPage.test.tsx`、`pages/GenerationReviewPage.test.tsx`。在 `frontend/` 下 `npm run test`。
 
@@ -471,7 +471,7 @@ npm run lint && npx tsc --noEmit && npm run build && npm run test
 |---|---|---|---|
 | 身份 / 租户 / 会话 | `identity_tenancy/router.py` | `identity_tenancy/service.py` | `identity_tenancy/models.py` |
 | 用例 / 计划 | `test_assets/router.py` | `test_assets/service.py`、`test_assets/source_parser.py`（原文解析纯函数） | `test_assets/models.py` |
-| A1 / 模型路由 / 成本 | `ai_governance/router.py` | `ai_governance/a1_service.py`、`service.py`、`llm_factory.py` | `ai_governance/models.py` |
+| A1 / 模型路由 / 成本 / Copilot | `ai_governance/router.py`、`ai_governance/copilot_router.py` | `ai_governance/a1_service.py`、`service.py`、`llm_factory.py`、`copilot_service.py` | `ai_governance/models.py` |
 | 执行环境 / Job 契约 | `execution_registry/router.py` | `execution_registry/service.py` | `execution_registry/models.py` |
 | 审批 / Policy Gate | `approval_policy/router.py` | `approval_policy/service.py`、`policy_gate.py` | `approval_policy/models.py` |
 | TestRun 编排 | `run_orchestration/router.py` | `run_orchestration/service.py`、`executor.py`、`http_runner.py` | `run_orchestration/models.py` |
@@ -480,16 +480,17 @@ npm run lint && npx tsc --noEmit && npm run build && npm run test
 | 集成 / 连接器 / Token | `integration_hub/router.py` | `integration_hub/service.py` | `integration_hub/models.py` |
 | 发布编排 | `release_orchestration/router.py` | `release_orchestration/service.py` | `release_orchestration/models.py` |
 | 配额 | `quota_governance/router.py` | `quota_governance/service.py` | `quota_governance/models.py` |
-| 跨模块基础设施 | `app/core/middleware.py`、`app/core/errors.py`、`app/core/logging.py` | `app/modules/*/repository.py`（含 `hash_request_body`） | 每模块私有 schema |
+| 跨模块基础设施 | `app/core/middleware.py`、`app/core/errors.py`、`app/core/logging.py`、`app/api/ops.py`（`/healthz` `/readyz`） | `app/modules/*/repository.py`（含 `hash_request_body`） | 每模块私有 schema |
 
 **前端入口**：
 
 | 关注点 | 文件 |
 |---|---|
-| 路由表（BrowserRouter + `<Routes>`，无 loader/action） | `frontend/src/App.tsx:57` 起 |
+| 路由表（BrowserRouter + `<Routes>`，无 loader/action） | `frontend/src/App.tsx:53` 起 |
 | HTTP 客户端（Cookie 携带、幂等键、错误拦截） | `frontend/src/api/client.ts` |
 | `API-NNN` ↔ 路径映射（`PAGE_APIS` P01–P25） | `frontend/src/api/catalog.ts` |
 | 会话门 | `frontend/src/components/layout/SessionGate.tsx` |
+| 探活（无会话） | `GET /healthz`、`GET /readyz`（`backend/app/api/ops.py`） |
 
 **模块化单体的约定**：每个 `app/modules/<module>/` 自成一个**私有 PostgreSQL schema**，禁止跨模块共享仓储或 ORM 实体。「共享数据库 ≠ 共享仓储」——跨模块只能走对方暴露的 query/command 函数，不能 import 对方的 repository。
 

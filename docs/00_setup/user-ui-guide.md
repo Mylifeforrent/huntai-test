@@ -31,7 +31,7 @@
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8090/.well-known/openid-configuration   # 期望 200（mock IdP: 本教程的「被测目标」）
-curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8000/api/v1/auth/oidc/start"           # 期望 200；后端没有 /health 路由，访问根路径 404 是正常的
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/healthz                             # 期望 200（进程探活；/readyz 再确认数据库）
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                                   # 期望 200（前端）
 ```
 
@@ -154,7 +154,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                 
    - **这一步不能跳**：门禁策略按项目查询，`projectId` 为空时页面只显示「请填写 projectId」，下面的创建卡片根本不会出现。
 3. 创建卡片里的**模式**默认就是 `仅报告`（按钮高亮），保持不动即可。要改成阻断得走二次确认。
 4. `scope（JSON 对象）` 保持默认 `{}`。
-5. 三项阈值默认已填 `95` / `500` / `1`，本地练手保持默认即可（清空某一项等于该项填 0）。
+5. 三项阈值默认已填 `95` / `500` / `1`，本地练手保持默认即可。后端要求三项键都在且为数字；前端把空输入转成 `0` 再提交，不是「留空就不设限」。
 6. 点 `创建策略（API-142）`。
 
 ![P11 门禁策略：先填 projectId，再用默认的「仅报告」模式创建](images/2.1-a-policy-form.png)
@@ -579,6 +579,8 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                 
 | 提示要重新认证 | `401` `HT-AUTH-002` | L3+ 动作超出再认证时间窗 | 重新登录完成 step-up 后，用**同一个幂等键**重放（请求体不能变） |
 | 资源打不开 | `404` `HT-RES-001` | 跨租户或无权感知 | **一律显示「资源不存在」是设计如此**，不要用 403/404 差异去探测存在性 |
 | 状态不对 | `409` `HT-STATE-001` | 当前对象状态不允许该动作（如 `APPROVED` 不等于已执行） | 刷新拿最新状态再决定 |
+| 版本冲突 | `409` `HT-VER-001` | `expected_version` 对不上（别人先改过） | 刷新拿新版本再操作，不要本地自增 |
+| 幂等键冲突 | `409` `HT-IDEM-001` | 同一 `Idempotency-Key` 但请求体变了 | 换新键，或把 body 对齐后再用原键 |
 | 策略拒绝 | `403` `HT-POL-001/002` | Policy DENY / 未声明副作用 / 压测白名单外 | 检查动作是否声明了合法副作用等级 |
 | 外部结果未知 | `409` `HT-EXT-002` | `execution_result=unknown` | 对账或人工接管，**禁止盲重试、禁止当成功** |
 | 网络未决 | `5xx` / 超时 `HT-NET-*` | 不知道成没成 | **先 GET 对账**；不要换新幂等键重发 |
@@ -607,19 +609,22 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/                 
 | P09 TestRun 详情 | `/test-center/runs/<runId>` | 无 |
 | 证据中心（读已产生证据） | `/evidence` | 先有一次执行 |
 
-### 6.2 本地无法端到端（需要外部系统或凭证）
+### 6.2 代码已落地、但本地干净库走不通真实外部闭环
 
-| 能力 | 为什么本地不行 | 缺什么 |
+M1–M3 切片已合入，页面不再是空壳。下面这些**仍然需要外部系统或明确被禁用**，不要把 stub / 拒绝当成「已经对接成功」。
+
+| 能力 | 代码现状 | 本地干净库上实际怎样 |
 |---|---|---|
-| Jira 写缺陷 / 关联 fixVersion | 需要真实 Jira 站点与凭证 | Jira 连接器 + 网络 |
-| Release 编排 / Release Notes | 需要 Release 系统；且平台**只准备 item，不执行生产发布** | Release 连接器 |
-| CI 回填（Jenkins 采集 / 报告解析） | 需要 `external_ci` 环境 + Jenkins 连接器 | Jenkins 实例与 Token |
-| 性能压测（Locust） | 需要 `perf_whitelist` 命中的目标 | 压测目标 + 白名单 |
-| Agent Mode 完整链路 | 一期外部 CI 不支持 Agent | 外部 CI |
-| Copilot 写操作（`copilot_write`） | 代码内为 `DISABLED` | M4 能力 |
-| 定时回归 / 计划级报告 | 需要调度与外部系统配合 | 见 P06 |
+| Jira 写缺陷 / 关联 fixVersion | 审批后走 `jira_write_stub`（无真实 HTTP） | 需要真实 Jira 站点与凭证；stub 不能当成功证据 |
+| Release 编排 | API-150–155 已落地；平台**只准备 item，不执行生产发布** | 创建任务需要 Jira 连接器；webhook 腿在干净库上会 skip（见 live smoke `test_08`） |
+| CI 回填（Jenkins 采集 / 报告解析） | 多格式适配器已落地 | 需要 `external_ci` 环境 + Jenkins 实例与 Token |
+| 性能压测（P16 `/test-center/performance`） | Locust 包装已落地 | 目标必须命中 `perf_whitelist`；未命中直接 `HT-POL-002` |
+| Agent Mode（P14） | 试点已落地，**不进门禁** | 一期 `external_ci` 不支持 Agent |
+| Copilot 只读（P18 `/assistant`） | 本地 stub 可提问 | **不在主导航**（P18/P19 按里程碑隐藏）；请直接打开 `/assistant` |
+| Copilot 写操作（`copilot_write`） | 代码冻结为 `DISABLED` | M4 能力，不要当已启用 |
+| 定时回归 / 计划级报告 | API-055 可存绑定 | cron/时区仍 TBD，本地不会按点触发 |
 
-**这些页面长什么样**：能用 `viewer` 身份打开、能看到空态与未开发提示，但**不产出真实结果**。不要把它们当成「配置一下就能跑」的模块。
+**这些页面长什么样**：能打开、能看到空态或策略拒绝，但**没有外部凭证就不会产出真实外部结果**。不要把它们当成「配一下就能对接生产」的模块。
 
 > **红线提醒**：Agent Mode 的结果**不进质量门禁，也不作为发布证据**。不要试图用它来「绕过」上面这些限制。
 

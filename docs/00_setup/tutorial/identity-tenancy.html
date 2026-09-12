@@ -63,9 +63,9 @@ if role not in WRITE_ROLES: # 同租户但角色不够：403 HT-IAM-001
 
 <h2>4. 会话与再认证（step-up）</h2>
 <ul>
-<li>Cookie 名称 / TTL 由 <code>.env</code>（<code>SESSION_COOKIE_NAME</code>、<code>SESSION_TTL_SECONDS</code>）注入，代码不硬编码。</li>
+<li>Cookie 名称 / TTL 由 <code>.env</code>（<code>SESSION_COOKIE_NAME</code>、<code>SESSION_TTL_SECONDS</code>、<code>OIDC_LOGIN_DRAFT_TTL_SECONDS</code>）注入，代码不硬编码。</li>
 <li>L3+ 高危动作超时窗口内要求再认证：返回 <code>401 + HT-AUTH-002</code>（<code>REQUIRE_REAUTH</code>）；完成后同一 <code>Idempotency-Key</code> 仅当请求哈希不变才可重放。</li>
-<li>登录态本身也是资源：API-003 登出、API-004 再认证、API-005 <code>/me</code> 返回用户 + 组织 + 成员关系。</li>
+<li>登录态本身也是资源：API-003 登出、API-004 再认证、API-005 <code>/me</code>、API-006 <code>/auth/session</code>（过期提示）返回用户 + 组织 + 成员关系。</li>
 </ul>
 
 <h2>5. kill switch（组织级关停）</h2>
@@ -89,7 +89,7 @@ if role not in WRITE_ROLES: # 同租户但角色不够：403 HT-IAM-001
 <tr><td>§2 ApiToken 认证</td><td>api/deps.py：<code>require_api_token(required_scope=...)</code> / <code>assert_token_project_allowed</code>；实际校验在 modules/integration_hub/service.py：<code>authenticate_api_token</code> / <code>authenticate_api_token_by_prefix</code></td><td>—（机器身份，无页面）</td></tr>
 <tr><td>§2 HMAC 入站 Webhook</td><td>modules/integration_hub/service.py：<code>verify_github_hmac</code>（入口 router.py <code>api_090_inbound_webhook</code>）</td><td>—</td></tr>
 <tr><td>§3 项目成员与 RBAC</td><td>service.py：<code>add_project_member</code> / <code>patch_project_member_role</code> / <code>remove_project_member</code>（最后 owner 保护 <code>is_last_owner_violation</code>）；角色常量 <code>PROJECT_ROLES</code> / <code>WRITE_ROLES</code> 在 repository.py</td><td>ProjectSettingsPage.tsx（成员管理）</td></tr>
-<tr><td>§4 登出 / step-up / /me</td><td>router.py：<code>api_003_logout</code> / <code>api_004_reauth</code> / <code>api_005_me</code>；service.py：<code>logout_session</code>、<code>load_session_context</code></td><td>api/session.ts <code>logoutSession()</code>；components/layout/AppLayout.tsx 登出按钮</td></tr>
+<tr><td>§4 登出 / step-up / /me / session</td><td>router.py：<code>api_003_logout</code> / <code>api_004_reauth</code> / <code>api_005_me</code> / <code>api_006_session</code>；service.py：<code>logout_session</code>、<code>load_session_context</code></td><td>api/session.ts <code>logoutSession()</code>；components/layout/AppLayout.tsx 登出按钮；SessionReauthNotice.tsx</td></tr>
 <tr><td>§5 kill switch（API-199）</td><td>router.py <code>api_199_capability_tighten</code>；service.py：<code>tighten_capability_controls</code> / <code>_tighten_controls</code></td><td>AiSwitchPage.tsx（P23，api.post API-199）</td></tr>
 </table>
 

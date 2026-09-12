@@ -82,7 +82,7 @@ uv run alembic upgrade head</code></pre>
 <p>后端路径相对 <code>backend/app/</code>。各业务模块的入口在各篇教程末尾的速查表。</p>
 <table>
 <tr><th>关注点</th><th>入口</th></tr>
-<tr><td>应用装配</td><td>main.py <code>create_app()</code>（注册 TraceIdMiddleware、异常处理器、api_router；lifespan 退出 <code>dispose_engine</code>）；api/router.py <code>api_router</code> 聚合 12 个模块 router（均 <code>prefix="/api/v1"</code>）</td></tr>
+<tr><td>应用装配</td><td>main.py <code>create_app()</code>（注册 TraceIdMiddleware、异常处理器、api_router、ops_router；lifespan 退出 <code>dispose_engine</code>）；api/router.py <code>api_router</code> 聚合 12 个模块 router（均 <code>prefix="/api/v1"</code>）；api/ops.py <code>/healthz</code> <code>/readyz</code>（无会话、无 API 编号）</td></tr>
 <tr><td>错误信封与错误码（§3）</td><td>core/errors.py：<code>error_envelope(...)</code> 与约 25 个错误码工厂（<code>unauthenticated</code> / <code>forbidden</code> / <code>policy_deny</code> / <code>hmac_failed</code> / <code>four_eyes_violation</code> / <code>quota_exceeded</code> / <code>version_conflict</code> / <code>idempotency_conflict</code>…）；<code>register_exception_handlers(app)</code></td></tr>
 <tr><td>trace_id / 日志</td><td>core/middleware.py <code>TraceIdMiddleware.dispatch</code>；core/logging.py <code>configure_logging</code> / <code>log_with_trace</code></td></tr>
 <tr><td>数据库与配置</td><td>core/db.py：<code>get_engine</code> / <code>get_session_factory</code> / <code>get_db_session</code>（FastAPI 依赖）；core/config.py <code>get_settings()</code>（pydantic-settings，只从 .env 注入）</td></tr>
