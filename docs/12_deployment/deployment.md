@@ -64,7 +64,7 @@
 
 **为什么迁移是独立服务**：迁移需要 Postgres 先行可达，且多副本滚动时必须只跑一次；放在应用启动钩子里会导致并发迁移与启动耦合。
 
-> ⚠️ **落位待裁定**：`AGENTS.md` §1 的仓库顶层白名单是封闭列表，**不含** `docker-compose.yml`。因此以下内容目前只作为本文档内的规范片段，**尚未落地为仓内文件**；落位方案见 §11.1。
+> ✅ **已落地**：顶层白名单已于 2026-09-12 经用户批准修订（登记见 `docs/13_changes/change_log.md`），本片段与仓库根 `docker-compose.yml` 内容一致。校验：`POSTGRES_PASSWORD=… docker compose config -q` 退出码 0（相对 context 正确解析到 `backend/`、`frontend/`），缺 `POSTGRES_PASSWORD` 时报错退出。
 
 ```yaml
 name: huntai-test
@@ -193,7 +193,7 @@ volumes:
 
 `pytest` 需要 PostgreSQL：CI 用 service 容器提供，并通过 `DATABASE_URL` 指向它（`conftest.py` 优先读取已存在的 `DATABASE_URL`，取不到才回落到本地默认值）。
 
-> ⚠️ **落位待裁定**：`.github/` 同样不在顶层白名单内，以下 workflow **尚未落地为仓内文件**，见 §11.1。
+> ✅ **已落地**：`.github/` 已于 2026-09-12 经用户批准加入顶层白名单，本片段与 `.github/workflows/ci.yml` 内容一致（校验：YAML 可解析，3 个 job：`backend` / `frontend` / `images`）。**但「CI 为绿」尚未取得**——`gh` 在本环境未登录、无 PR 运行记录，首次真实运行结果仍属未验证项（见 §10.2 #6）。
 
 ```yaml
 name: ci
@@ -298,7 +298,8 @@ jobs:
 | 后端镜像依赖层（Dockerfile 第 1 步本体） | `UV_PROJECT_ENVIRONMENT=/tmp/... uv sync --frozen --no-dev` | 成功；`fastapi/uvicorn/sqlalchemy/alembic/asyncpg/authlib/playwright/locust` 均可导入；`ruff`/`mypy`/`pytest-asyncio` 确认不在运行时依赖中 |
 | 锁文件冻结一致性 | `uv lock --check` | 通过 |
 | 前端镜像构建步骤本体 | `npm ci && npm run build`（`VITE_API_BASE_URL` 留空） | `npm ci` 329 包、0 漏洞、lockfile 无失配；build 成功（同源默认基址生效） |
-| compose 结构 | `POSTGRES_PASSWORD=… docker compose config` | 退出码 0，无错误/告警；缺 `POSTGRES_PASSWORD` 时**报错退出**（符合预期）。**说明**：该校验为无 daemon 的客户端解析，且为绕开相对路径在 `/tmp` 用绝对 `build.context` 进行——验证的是 YAML 结构、变量插值与 `depends_on` 条件，**未验证**相对 context 解析与镜像构建 |
+| compose 结构（仓内 `docker-compose.yml`） | `POSTGRES_PASSWORD=… docker compose config -q` | 退出码 0，无错误/告警；相对 `build.context` 正确解析到 `backend/`、`frontend/`；缺 `POSTGRES_PASSWORD` 时**报错退出**（符合预期）。**说明**：这是无 daemon 的客户端解析——验证 YAML 结构、变量插值、`depends_on` 条件与 context 解析，**未验证**镜像构建与容器启动 |
+| CI workflow 结构 | `yaml.safe_load` 解析 + job/step 计数 | 可解析；3 个 job（`backend` / `frontend` / `images`）、触发器 `push`(main) + `pull_request`，与文档片段一致 |
 | 探针行为 | `uv run pytest tests/test_ops_probes.py` | 3 条通过：匿名 200、就绪 200、失败 503 且不泄露内部信息 |
 | 路由认证一致性（含新探针） | `uv run pytest tests/test_route_auth_conformance.py` | 4 条通过 |
 
@@ -316,18 +317,24 @@ jobs:
 | 6 | CI 是否真能跑绿 | 落到 `.github/workflows/` 后在 PR 上运行（依赖 §11.1 裁定） | 待指定 |
 | 7 | 生产 IdP 真实对接 | 见 [test_report.md](../11_test/test_report.md) §7.4；真实凭证与端到端仍不可验证 | 待指定 |
 
-## 11. 待裁定与开放项
+## 11. 已裁定事项与开放项
 
-### 11.1 【待裁决】compose 与 CI 工作流的仓内落位
+两处原先待裁定的冻结资产改动（§11.1、§11.2）已于 2026-09-12 经用户批准落地；其余开放项见 §11.3，均为「登记不发明」。
 
-`AGENTS.md` §1 与 `project_rules.md` §2 规定仓库顶层只允许 `frontend/`、`backend/`、`docs/` 加固定几个配置文件，且可执行代码只能在 `frontend/`、`backend/` 内。`docker-compose.yml` 与 `.github/workflows/` **不在白名单内**，因此本轮**未落地**这两个文件，只把内容作为本文档片段。
+### 11.1 已裁定：compose 与 CI 工作流的仓内落位（2026-09-12）
 
-- **推荐**：按 `AGENTS.md` §8 / `project_rules.md` R2 流程 — 先登记 `docs/13_changes/change_log.md` → 获用户显式批准 → 同步修订 `AGENTS.md` §1 与 `project_rules.md` §2（两处同改，展示 diff）→ 落地根 `docker-compose.yml` 与 `.github/workflows/ci.yml`。
-- **未批准前**：Stage 12 在 `project_rules.md` §5.3「CI 为绿」这一判定标准上**存在明确未完成缺口**，不得视为已闭环。
+原先受阻于 `AGENTS.md` §1 / `project_rules.md` §2 的顶层白名单为封闭列表（不含 `docker-compose.yml` 与 `.github/`）。**已按 R2 流程闭环**：
 
-### 11.2 【待裁决】`.env.example` 需要新增一个键
+1. 登记 `docs/13_changes/change_log.md`（2026-09-12 行）。
+2. 获用户显式批准。
+3. 同步修订 `AGENTS.md` §1 与 `project_rules.md` §2（两处同改，均限定这两个条目只用于 Stage 12 的编排与 CI 门控，且 CI 门控命令必须与 §5 一致）。
+4. 落地仓库根 `docker-compose.yml` 与 `.github/workflows/ci.yml`。
 
-compose 用 `POSTGRES_PASSWORD` 注入数据库口令（`POSTGRES_DB`/`POSTGRES_USER` 已固定在 compose 内，非秘密）。`.env.example` 是**冻结资产**，新增键名必须走 change_log + 批准。建议与 §11.1 一并裁决：在 `.env.example` 增补 `POSTGRES_PASSWORD=`（仅键名与说明，不填值）。
+**剩余缺口（据实登记）**：`project_rules.md` §5.3 的「CI 为绿」需要一次真实 CI 运行才能判定，本环境 `gh` 未登录、无法触发或观测，因此该判定标准**尚未取得**，不得视为已闭环。
+
+### 11.2 已裁定：`.env.example` 新增键（2026-09-12）
+
+compose 用 `POSTGRES_PASSWORD` 注入数据库口令（`POSTGRES_DB`/`POSTGRES_USER` 已固定在 compose 内，非秘密）。已在 `.env.example` 的「部署（docker compose，Stage 12）」段增补 `POSTGRES_PASSWORD=`（仅键名与说明，不填值），并随本次白名单修订一并登记 change_log。`HTTP_PORT` 不入 `.env.example`——compose 已给默认值 `8080`。
 
 ### 11.3 其他开放项（登记，不发明）
 
