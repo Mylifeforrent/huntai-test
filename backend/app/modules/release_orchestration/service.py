@@ -17,12 +17,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session_factory
 from app.modules.ai_governance.llm_factory import InvokeInput, invoke
 from app.modules.identity_tenancy import query_port as identity_query
 from app.modules.identity_tenancy.service import SessionContext
+from app.modules.integration_hub.query_port import get_loopback_outbound_target
 from app.modules.quality_gates import query_port as gate_query
 from app.modules.release_orchestration import repository as repo
 from app.modules.release_orchestration.models import ReleaseTask
@@ -526,11 +528,46 @@ async def _release_connector_create_item(
     organization_id: uuid.UUID,
     task: ReleaseTask,
     prepare_key: str,
+    session: AsyncSession,
 ) -> dict[str, Any]:
-    """Release connector stub: prepares an item without any production push."""
+    """Release connector stub or loopback mock prepare (never production push)."""
+    target = await get_loopback_outbound_target(
+        session,
+        organization_id=organization_id,
+        connector_type="release",
+    )
+    if target is None:
+        return {
+            "external_system": "release_stub",
+            "external_item_id": f"RI-{str(task.id)[:8]}-{prepare_key[:8]}",
+        }
+    base_url = str(target["base_url"]).rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{base_url}/items",
+                json={
+                    "release_task_id": str(task.id),
+                    "prepare_key": prepare_key,
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise RuntimeError("release prepare failed") from exc
+    if response.status_code != 201:
+        raise RuntimeError("release prepare failed")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError("release prepare invalid response") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("release prepare invalid response")
+    external_system = payload.get("external_system")
+    external_item_id = payload.get("external_item_id")
+    if not isinstance(external_system, str) or not isinstance(external_item_id, str):
+        raise RuntimeError("release prepare missing fields")
     return {
-        "external_system": "release_stub",
-        "external_item_id": f"RI-{str(task.id)[:8]}-{prepare_key[:8]}",
+        "external_system": external_system,
+        "external_item_id": external_item_id,
     }
 
 
@@ -635,6 +672,7 @@ async def _prepare_item(
             organization_id=organization_id,
             task=task,
             prepare_key=prepare_key,
+            session=session,
         )
     except Exception:
         await repo.cas_transition(

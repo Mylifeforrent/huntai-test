@@ -15,7 +15,7 @@
 | 想改代码的程序员 | [`developer-guide.md`](developer-guide.md) | 每个 UI 操作对应的页面文件 / `API-NNN` / router / service / 数据表，以及能单跑的测试用例 |
 | 想先理解模块设计 | [`tutorial/index.html`](tutorial/index.html) | 按后端模块分篇的教程（浏览器直接打开） |
 
-> 重要：本仓库**没有**「一条命令灌入演示数据」的种子脚本。除租户/用户/项目这三样由 `seed_local_identity.py` 写入外，用例、执行环境、门禁策略等全部由你在 UI 里创建——`user-ui-guide.md` 会一步步带做。早先版本教程提到的「临时种子脚本」（放在 `/tmp` 下的那种）**从来不在仓库里，已废弃，不要去找**。
+> 重要：本仓库**没有**「一条命令灌入演示数据」的种子脚本。除租户/用户/项目/四条本地 mock 连接器外，其余业务对象由你在 UI 里创建——`seed_local_identity.py` 会写入组织、两个合成账号、项目（含 `jira_project_key=HT`）与 Jira / GitHub / CI / Release 四条 Connector（指向 `127.0.0.1:8091`）；**仍不写入**用例、执行环境、门禁策略。`user-ui-guide.md` 会一步步带做。早先版本教程提到的「临时种子脚本」（放在 `/tmp` 下的那种）**从来不在仓库里，已废弃，不要去找**。
 
 ---
 
@@ -87,9 +87,9 @@ GITHUB_WEBHOOK_SECRET
 
 ---
 
-## 3. 启动顺序（六步）
+## 3. 启动顺序（七步）
 
-按顺序执行，每步都给出「期望看到」。
+按顺序执行，每步都给出「期望看到」。本地联调需 **四个 loopback 进程**：mock IdP(8090) + mock 集成(8091) + API(8000) + Vite(5173)。
 
 ### 步骤 1 · 装后端依赖
 
@@ -116,9 +116,10 @@ cd backend
 uv run python scripts/seed_local_identity.py
 ```
 
-**期望看到**（一行）：
+**期望看到**（两行：先连接器，再身份）：
 
 ```text
+seeded connectors: jira, github, ci, release (ids 00000000-0000-4000-8000-000000000010 … 00000000-0000-4000-8000-000000000013)
 seeded org=local-dev idp_subject=local-dev-user user2=<uuid> approver_subject=local-dev-user-2 project=<uuid>
 ```
 
@@ -131,9 +132,20 @@ cd backend
 uv run python scripts/mock_idp.py
 ```
 
-**期望看到**：Uvicorn 监听 `127.0.0.1:8090`。这是本地的 OIDC 提供方，只允许 loopback，**不是产品端点**，不要用于任何共享环境。
+**期望看到**：Uvicorn 监听 `127.0.0.1:8090`。这是本地的 OIDC 提供方，只允许 loopback，**不是产品端点**，不要用于任何共享环境。本教程里 mock IdP 还承担 Script Mode 的 `TARGET_ENV`（见 `user-ui-guide.md` §3.1）。
 
-### 步骤 5 · 启动后端（新开一个终端）
+### 步骤 5 · 启动本地 mock 集成（新开一个终端）
+
+```bash
+cd backend
+uv run python scripts/mock_integrations.py
+```
+
+**期望看到**：Uvicorn 监听 `127.0.0.1:8091`。这是本地的 Jira / GitHub / Jenkins / Release HTTP 替身，只允许 loopback，**不是产品 API**（无 OpenAPI 文档页）。同进程还提供 Confluence **演示页** `http://127.0.0.1:8091/confluence/`——仅供 A1 粘贴 OpenAPI 原文练手，**不是** `Connector.type`，P25 里不会出现 Confluence 连接器。
+
+就绪：`curl -s http://127.0.0.1:8091/healthz` 应返回 `200` 与 `{"status":"ok"}`。
+
+### 步骤 6 · 启动后端（新开一个终端）
 
 ```bash
 cd backend
@@ -142,7 +154,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 **期望看到**：`Application startup complete.` 与 `Uvicorn running on http://127.0.0.1:8000`。
 
-### 步骤 6 · 启动前端（新开一个终端）
+### 步骤 7 · 启动前端（新开一个终端）
 
 ```bash
 cd frontend
@@ -157,6 +169,7 @@ npm run dev
 | 检查 | 命令 | 期望 |
 | --- | --- | --- |
 | mock IdP 活着 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/.well-known/openid-configuration` | `200` |
+| mock 集成活着 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8091/healthz` | `200`（`{"status":"ok"}`） |
 | API 进程活着 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/healthz` | `200`（`{"status":"ok"}`；不碰数据库） |
 | API 能连库 | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/readyz` | `200`（`{"status":"ready"}`；失败为 `503`） |
 | 前端活着 | 浏览器打开 `http://127.0.0.1:5173/` | 跳转到 mock IdP 登录页（未登录时） |
@@ -205,12 +218,13 @@ npm run dev
 | --- | --- |
 | 组织 | `Local Dev Org`（slug `local-dev`） |
 | 用户 | `local-dev-user`（owner）、`local-dev-user-2`（admin） |
-| 项目 | `Local Dev Project` |
+| 项目 | `Local Dev Project`（`jira_project_key=HT`） |
 | 成员关系 | 上述 2 条（user 是 owner，user2 是 admin） |
+| Connector | 4 条本地 mock：`jira` / `github` / `ci` / `release`，`action_contract.base_url` 指向 `http://127.0.0.1:8091/...`；GitHub / CI / Release 的 `webhook_secret_ref` 经种子 ORM 写入（公开 API-162 仍不接受该字段） |
 | ModelRoute | 3 条（Internal / Confidential / Restricted 各一条，A1 生成走本地 stub） |
 | OrgQuota | 1 条组织配额 |
 
-其余对象全部由 [`user-ui-guide.md`](user-ui-guide.md) 带你在 UI 里创建。
+**仍不写入**：TestCase、ExecutionEnvironment、GatePolicy、TestRun 等——这些全部由 [`user-ui-guide.md`](user-ui-guide.md) 带你在 UI 里创建。
 
 > 重新执行本步骤不会刷新或作废登录态；登录态由 mock IdP 会话决定，不是脚本生成 Cookie。
 
@@ -222,7 +236,10 @@ npm run dev
 | --- | --- | --- |
 | 登录后立即回到未登录 | `SESSION_COOKIE_SECURE=true` 而本地是 HTTP | 改为 `false`，重启后端 |
 | 回调后报 `state` / `nonce` 校验失败 | `OIDC_REDIRECT_URI` 与浏览器地址不一致 | 确保为 `http://127.0.0.1:5173/api/v1/auth/oidc/callback`，且用 5173 访问 |
-| 端口被占 | 8000 / 5173 / 8090 已被别的进程占用 | `lsof -i :8000 -sTCP:LISTEN` 找到 PID 杀掉后重启；Vite 端口被占会顺延到 5174，此时回调地址要同步改 |
+| 端口被占 | 8000 / 5173 / 8090 / 8091 已被别的进程占用 | `lsof -i :8000 -sTCP:LISTEN`（或 `:8091` 等）找到 PID 杀掉后重启；Vite 端口被占会顺延到 5174，此时回调地址要同步改 |
+| 把 Confluence 演示页当成连接器 | `http://127.0.0.1:8091/confluence/` 只是 HTML 说明 + 可下载的演示 OpenAPI | **不是** `Connector.type`；P25 只列种子里的四条 mock 连接器 |
+| mock 集成 healthz 失败 | 步骤 5 的 `mock_integrations.py` 没启动 | 回到 §3 步骤 5 |
+| Release 任务卡在 `已提交` 不变 `就绪` | 还没模拟外部 webhook | 对 `SUBMITTED` 任务用 mock 代签：`curl -s -X POST http://127.0.0.1:8091/dev/emit-webhook -H 'Content-Type: application/json' -d '{"huntai_base":"http://127.0.0.1:8000","connector_id":"00000000-0000-4000-8000-000000000013","event":"release_item_ready","delivery_id":"<新 UUID>","body":{"release_task_id":"<任务ID>","external_item_id":"<RI-…>","status":"ready"}}'`（JSON 里**不要**放密钥；详见 [`user-ui-guide.md`](user-ui-guide.md) §7.5） |
 | 项目列表为空 | 当前账号不是任何项目成员 | 用 owner 身份在 P02 项目里加成员 |
 | 审批按钮点不动 / 403 `HT-IAM-002` | 你就是发起人（四眼） | 换 `local-dev-user-2` 登录后批准 |
 | 注册环境返回 `401 HT-AUTH-002` | L3+ 动作超出再认证窗口 | 按页面提示完成 step-up 再认证（API-004）后重放同一请求 |
@@ -239,7 +256,7 @@ cd backend
 uv run python scripts/reset_local_data.py --yes
 ```
 
-它只做三件事：**清空**本项目 11 个 schema 下的全部业务表（表清单从库里动态枚举，以后新增表也不会漏）→ **保留**库结构与 `alembic_version`（迁移状态不受影响，不需要重跑 `alembic upgrade`）→ **重跑**身份种子（组织 / 两个账号 / 项目 / 成员关系 / 模型路由 / 配额）。
+它只做三件事：**清空**本项目 11 个 schema 下的全部业务表（表清单从库里动态枚举，以后新增表也不会漏）→ **保留**库结构与 `alembic_version`（迁移状态不受影响，不需要重跑 `alembic upgrade`）→ **重跑**身份种子（组织 / 两个账号 / 项目 / 成员关系 / 四条 mock 连接器 / 模型路由 / 配额）。
 
 | 你可能会问 | 实际行为 |
 | --- | --- |
@@ -264,19 +281,19 @@ HUNTAI_LIVE=1 uv run pytest tests/test_live_smoke.py -q
 
 **它是自助的**：不依赖任何演示数据和预发 Cookie。套件自己走一遍 mock IdP 的 OIDC
 Authorization Code + PKCE 链拿到 `huntai_session`，再用公开 API 自建所需资产
-（blocking 门禁策略 / jira 连接器 / 3 条 ACTIVE 用例 / ACTIVE 执行环境）。所以按 §3
+（blocking 门禁策略 / 3 条 ACTIVE 用例 / ACTIVE 执行环境；Jira 连接器若已随种子存在则复用）。
+所以按 §3
 从干净库启动、只跑过 `seed_local_identity.py` 时即可运行。
 
 **运行前提**：
 
 - 后端在 `http://127.0.0.1:8000`（可用 `HUNTAI_BASE_URL` 覆盖）。
-- mock IdP 已启动（§3 步骤 4）。
+- mock IdP 已启动（§3 步骤 4）；mock 集成已启动（§3 步骤 5，若用例会触发出站 HTTP）。
 - 账号只有 §4 的两个合成账号（`local-dev-user` 是项目 owner、`local-dev-user-2` 是项目
   admin，口令 `local-dev`），因此套件只覆盖 owner/admin 边界；仓库没有 tester/viewer
   账号。若想复用已有会话 Cookie，可用 `HUNTAI_OWNER` / `HUNTAI_ADMIN` 覆盖。
-- `test_08_release_webhook_observation` 需要「带 webhook secret 的 release 连接器」，
-  而当前公开 API 无法设置 `webhook_secret_ref`（API-162 不接受该字段、API-163 不能改），
-  干净库上它会**如实 skip**，不会用 ORM 伪造数据。
+- `test_08_release_webhook_observation` 依赖带 `webhook_secret_ref` 的 release 连接器。
+  跑过 `seed_local_identity.py` 后种子已写入该字段（ORM，非 API-162）；若库是更旧的种子态仍可能 skip。
 
 在干净的本地库上实测结果为 `7 passed, 1 skipped`。
 
@@ -284,12 +301,22 @@ Authorization Code + PKCE 链拿到 `huntai_session`，再用公开 API 自建�
 
 ## 附录：模拟 Release webhook（可选进阶）
 
-只有先创建了 release 连接器（webhook secret 引用 `env:GITHUB_WEBHOOK_SECRET`，对应 `.env` 中的 `GITHUB_WEBHOOK_SECRET`）才可用。这是可选进阶，不影响主链路。
+种子 Release 连接器 id 为 `00000000-0000-4000-8000-000000000013`（`webhook_secret_ref` → `.env` 的 `GITHUB_WEBHOOK_SECRET`）。**推荐**走 mock 代签（须先起步骤 5 的 `mock_integrations.py`）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8091/dev/emit-webhook \
+  -H 'Content-Type: application/json' \
+  -d '{"huntai_base":"http://127.0.0.1:8000","connector_id":"00000000-0000-4000-8000-000000000013","event":"release_item_ready","delivery_id":"<新 UUID>","body":{"release_task_id":"<task_id>","external_item_id":"<RI-…>","status":"ready"}}'
+```
+
+mock 用 `GITHUB_WEBHOOK_SECRET` 计算 `x-hub-signature-256` 并 POST 到产品入站链；**请求 JSON 里禁止放密钥**。逐步说明见 [`user-ui-guide.md`](user-ui-guide.md) §7.5。
+
+也可手工直连产品（等同冒烟套件 `test_08_release_webhook_observation`）：
 
 ```bash
 BODY='{"release_task_id":"<task_id>","external_item_id":"RI-DEMO","status":"ready"}'
 SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$GITHUB_WEBHOOK_SECRET" -r | cut -d' ' -f1)"
-curl -s -X POST "http://127.0.0.1:8000/api/v1/inbound-webhooks/<release_connector_id>" \
+curl -s -X POST "http://127.0.0.1:8000/api/v1/inbound-webhooks/00000000-0000-4000-8000-000000000013" \
   -H "content-type: application/json" -H "x-hub-signature-256: $SIG" \
   -H "x-github-delivery: demo-$(date +%s)" -H "x-github-event: release_item_ready" \
   -d "$BODY"

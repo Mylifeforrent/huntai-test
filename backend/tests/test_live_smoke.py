@@ -647,9 +647,8 @@ async def test_07_evidence_from_failed_run_export_and_proxy_download() -> None:
 async def test_08_release_webhook_observation() -> None:
     """webhook 观察 → READY；需要已存在带 webhook secret 的 release 连接器。
 
-    当前公开 API 无法为连接器配置 `webhook_secret_ref`（API-162 不接受该字段，API-163
-    也不能改），干净本地库上不存在这样的连接器，此时如实 skip；绝不用 ORM 直接写一行
-    来伪造前置条件。
+    本地 seed（`seed_local_integrations`）会为 release 连接器写入 `webhook_secret_ref`；
+    若当前库上仍无带 webhook secret 的 release 连接器则 skip。
     """
     connectors = await _get_json("owner", "/api/v1/connectors")
     release_connector = next(
@@ -662,8 +661,8 @@ async def test_08_release_webhook_observation() -> None:
     )
     if release_connector is None:
         pytest.skip(
-            "no release connector carries a webhook secret: no public API can set "
-            "webhook_secret_ref (API-162 ignores it, API-163 cannot patch it)"
+            "no release connector with webhook secret present; run seed_local_identity "
+            "(includes seed_local_integrations) or bind webhook_secret_ref manually"
         )
 
     task_id = STATE.get("release_task_id") or await _release_task_to_submitted()

@@ -1,12 +1,14 @@
-"""GitHub Check Run three-phase writeback stub (no real HTTP)."""
+"""GitHub Check Run three-phase writeback stub (in-process or loopback mock HTTP)."""
 
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.integration_hub.query_port import get_loopback_outbound_target
 from app.modules.results_evidence.audit_port import AuditAppendInput, append_audit_event
 
 MAX_SYNC_ATTEMPTS = 3
@@ -39,6 +41,67 @@ async def _apply_phase(
     return ref
 
 
+def _github_owner_repo(action_contract: dict[str, Any]) -> tuple[str, str]:
+    owner = action_contract.get("owner")
+    repo = action_contract.get("repo")
+    if not isinstance(owner, str) or not owner.strip():
+        owner = "local-dev"
+    if not isinstance(repo, str) or not repo.strip():
+        repo = "demo"
+    return owner.strip(), repo.strip()
+
+
+async def _sync_check_run_loopback(
+    target: dict[str, Any],
+    *,
+    conclusion: str,
+    evaluation_id: uuid.UUID,
+    attempt: int,
+) -> dict[str, Any]:
+    contract = target.get("action_contract")
+    action_contract = contract if isinstance(contract, dict) else {}
+    owner, repo = _github_owner_repo(action_contract)
+    base_url = str(target["base_url"]).rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            create_resp = await client.post(
+                f"{base_url}/repos/{owner}/{repo}/check-runs",
+                json={"name": f"HuntAI Gate {evaluation_id}", "head_sha": "local"},
+            )
+            if create_resp.status_code != 201:
+                raise CheckRunSyncError("check run create failed")
+            try:
+                created = create_resp.json()
+            except ValueError as exc:
+                raise CheckRunSyncError("check run create invalid response") from exc
+            if not isinstance(created, dict) or "id" not in created:
+                raise CheckRunSyncError("check run create invalid response")
+            check_id = created["id"]
+            in_progress_resp = await client.patch(
+                f"{base_url}/repos/{owner}/{repo}/check-runs/{check_id}",
+                json={"status": "in_progress"},
+            )
+            if in_progress_resp.status_code != 200:
+                raise CheckRunSyncError("check run in_progress failed")
+            completed_resp = await client.patch(
+                f"{base_url}/repos/{owner}/{repo}/check-runs/{check_id}",
+                json={"status": "completed", "conclusion": conclusion},
+            )
+            if completed_resp.status_code != 200:
+                raise CheckRunSyncError("check run completed failed")
+    except httpx.HTTPError as exc:
+        raise CheckRunSyncError(str(exc)) from exc
+    html_url = created.get("html_url") if isinstance(created.get("html_url"), str) else None
+    return {
+        "phases": ["queued", "in_progress", "completed"],
+        "sync_status": "completed",
+        "conclusion": conclusion,
+        "external_check_id": check_id,
+        "html_url": html_url,
+        "attempts": attempt,
+    }
+
+
 async def sync_check_run_stub(
     session: AsyncSession,
     *,
@@ -56,12 +119,28 @@ async def sync_check_run_stub(
         conclusion = "failure" if policy_mode == "blocking" else "neutral"
     ref: dict[str, Any] = dict(check_run_ref or {})
     ref["external_id"] = str(evaluation_id)
+    loopback_target = await get_loopback_outbound_target(
+        session,
+        organization_id=organization_id,
+        connector_type="github",
+    )
 
     for attempt in range(1, MAX_SYNC_ATTEMPTS + 1):
         try:
-            ref = await _apply_phase(ref, phase="queued", conclusion=None, attempt=attempt)
-            ref = await _apply_phase(ref, phase="in_progress", conclusion=None, attempt=attempt)
-            ref = await _apply_phase(ref, phase="completed", conclusion=conclusion, attempt=attempt)
+            if loopback_target is None:
+                ref = await _apply_phase(ref, phase="queued", conclusion=None, attempt=attempt)
+                ref = await _apply_phase(ref, phase="in_progress", conclusion=None, attempt=attempt)
+                ref = await _apply_phase(
+                    ref, phase="completed", conclusion=conclusion, attempt=attempt
+                )
+            else:
+                ref = await _sync_check_run_loopback(
+                    loopback_target,
+                    conclusion=conclusion,
+                    evaluation_id=evaluation_id,
+                    attempt=attempt,
+                )
+                ref["external_id"] = str(evaluation_id)
             return ref
         except CheckRunSyncError:
             if attempt >= MAX_SYNC_ATTEMPTS:
