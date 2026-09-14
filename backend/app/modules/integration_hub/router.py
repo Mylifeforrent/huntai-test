@@ -28,10 +28,12 @@ from app.modules.integration_hub.service import (
     issue_api_token_for_caller,
     list_api_tokens_for_caller,
     list_connectors_for_caller,
+    list_outbound_channels_for_caller,
     list_webhook_deliveries_for_caller,
     patch_connector_for_caller,
     process_inbound_webhook,
     put_ci_trigger_bindings_for_caller,
+    put_outbound_channels_for_caller,
     revoke_api_token_for_caller,
 )
 
@@ -98,6 +100,21 @@ class CiTriggerBindingsPut(BaseModel):
 
     expected_version: int = Field(ge=1)
     bindings: list[CiTriggerBindingItem]
+
+
+class OutboundChannelPutItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    is_primary: bool
+    endpoint_ref: str | None = None
+
+
+class OutboundChannelsPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    channels: list[OutboundChannelPutItem]
 
 
 def _parse_body[TModel: BaseModel](model: type[TModel], raw: bytes, trace_id: str) -> TModel:
@@ -198,6 +215,68 @@ async def api_164_list_webhook_deliveries(
     except ValueError as exc:
         _map_read_error(trace_id, exc)
     return {"data": {"items": payload["items"]}, "page": payload["page"]}
+
+
+@router.get("/connectors/{connector_id}/outbound-channels")
+async def api_165_list_outbound_channels(
+    request: Request,
+    connector_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    try:
+        payload = await list_outbound_channels_for_caller(
+            db,
+            ctx,
+            connector_id=connector_id,
+        )
+    except ValueError as exc:
+        _map_read_error(trace_id, exc)
+    return {
+        "data": payload,
+        "page": {"next_cursor": None, "has_more": False},
+    }
+
+
+@router.put("/connectors/{connector_id}/outbound-channels")
+async def api_166_put_outbound_channels(
+    request: Request,
+    connector_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    ctx: Annotated[SessionContext, Depends(require_session)],
+) -> dict[str, Any]:
+    trace_id = get_trace_id(request)
+    raw = await request.body()
+    body = _parse_body(OutboundChannelsPut, raw, trace_id)
+    try:
+        idempotency_key = require_idempotency_key(request.headers.get("idempotency-key"))
+    except ValueError:
+        raise validation_failed(trace_id) from None
+    request_hash = repo.hash_request_body(raw)
+    channels = [
+        {
+            "kind": item.kind,
+            "is_primary": item.is_primary,
+            **({"endpoint_ref": item.endpoint_ref} if item.endpoint_ref is not None else {}),
+        }
+        for item in body.channels
+    ]
+    try:
+        payload = await put_outbound_channels_for_caller(
+            db,
+            ctx,
+            connector_id=connector_id,
+            expected_version=body.expected_version,
+            channels=channels,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+    except ValueError as exc:
+        await db.commit()
+        _map_write_error(trace_id, exc)
+    await db.commit()
+    return payload
 
 
 @router.post("/connectors/{connector_id}/credential-refs")
