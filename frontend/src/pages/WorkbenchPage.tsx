@@ -143,6 +143,43 @@ export function WorkbenchPage() {
             ))}
           </CardContent>
         </Card>
+        <Card className="xl:col-span-2">
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle>门禁异常</CardTitle>
+            <Link to="/test-center/runs" className="text-xs text-primary">
+              查看全部
+            </Link>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {workbench.isPending ? <Skeleton className="h-20 w-full" /> : null}
+            {workbenchUndeveloped ? (
+              <UndevelopedCallout compact apis={PAGE_APIS.P01.filter((item) => item.id === "API-020")} action="门禁异常" />
+            ) : null}
+            {workbenchBlocked && !workbenchUndeveloped ? <ErrorState error={workbench.error} /> : null}
+            {!workbench.isPending && !workbenchBlocked && gates.length === 0 ? (
+              <EmptyState compact title="无门禁异常" hint="空集是服务端下发。" />
+            ) : null}
+            {gates.map((item) => (
+              <Link
+                key={`${item.kind}-${item.test_run_id ?? item.gate_evaluation_id ?? "unknown"}`}
+                to={`/test-center/runs/${item.test_run_id}`}
+                className="rounded-md border p-3 hover:bg-muted/40"
+              >
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={item.kind} />
+                  {item.test_run_id ? (
+                    <span className="font-mono text-xs text-muted-foreground">{item.test_run_id}</span>
+                  ) : null}
+                </div>
+                {item.unevaluated_reason ? (
+                  <p className="text-xs text-muted-foreground">未评估原因 {item.unevaluated_reason}</p>
+                ) : item.result ? (
+                  <p className="text-xs text-muted-foreground">评估结果 {item.result}</p>
+                ) : null}
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
       </div>
     </>
   );

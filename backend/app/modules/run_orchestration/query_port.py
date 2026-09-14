@@ -36,6 +36,10 @@ class RunGateContext(TypedDict):
     gate_evaluation_id: uuid.UUID | None
 
 
+class TerminalRunGateContext(RunGateContext):
+    updated_at: datetime
+
+
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
@@ -221,6 +225,33 @@ async def list_workbench_active_runs(
         limit=effective_limit,
     )
     return [_serialize_workbench_run(row, now=now) for row in rows]
+
+
+async def list_recent_terminal_runs_for_projects(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    project_ids: list[uuid.UUID],
+    limit: int,
+) -> list[TerminalRunGateContext]:
+    rows = await repo.list_recent_terminal_runs_for_projects(
+        session,
+        organization_id=organization_id,
+        project_ids=project_ids,
+        limit=limit,
+    )
+    return [
+        {
+            "id": row.id,
+            "project_id": row.project_id,
+            "status": row.status,
+            "execution_source": row.execution_source,
+            "result_summary": dict(row.result_summary) if row.result_summary else None,
+            "gate_evaluation_id": row.gate_evaluation_id,
+            "updated_at": row.updated_at,
+        }
+        for row in rows
+    ]
 
 
 async def get_latest_run_for_plan(

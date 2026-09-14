@@ -300,3 +300,51 @@ async def get_policy_for_project(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def list_workbench_anomaly_evaluations(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_ids: list[uuid.UUID],
+    limit: int,
+) -> list[GateEvaluation]:
+    if not test_run_ids:
+        return []
+    sync_failed = GateEvaluation.check_run_ref["sync_status"].astext == "failed"
+    fail_without_waiver = and_(
+        GateEvaluation.result == "fail",
+        GateEvaluation.waiver_approval_id.is_(None),
+    )
+    query = (
+        select(GateEvaluation)
+        .where(
+            GateEvaluation.organization_id == organization_id,
+            GateEvaluation.test_run_id.in_(test_run_ids),
+            GateEvaluation.waiver_approval_id.is_(None),
+            or_(fail_without_waiver, sync_failed),
+        )
+        .order_by(GateEvaluation.created_at.desc(), GateEvaluation.id.desc())
+        .limit(limit)
+    )
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def list_evaluated_test_run_ids(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    test_run_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    if not test_run_ids:
+        return set()
+    result = await session.execute(
+        select(GateEvaluation.test_run_id)
+        .where(
+            GateEvaluation.organization_id == organization_id,
+            GateEvaluation.test_run_id.in_(test_run_ids),
+        )
+        .distinct()
+    )
+    return {row[0] for row in result.all()}
