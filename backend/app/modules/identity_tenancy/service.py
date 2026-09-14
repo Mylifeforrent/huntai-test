@@ -1306,8 +1306,15 @@ async def get_workbench_for_caller(
         project_ids=filter_project_ids,
         limit=WORKBENCH_LIST_LIMIT,
     )
+    from app.modules.quality_gates import query_port as gate_query
     from app.modules.quota_governance import query_port as quota_query
 
+    gate_anomalies = await gate_query.list_workbench_gate_anomalies(
+        session,
+        organization_id=org_id,
+        project_ids=filter_project_ids,
+        limit=WORKBENCH_LIST_LIMIT,
+    )
     quota = await quota_query.get_current_quota(session, organization_id=org_id)
     if quota is None:
         raise ValueError("not_found")
@@ -1315,6 +1322,6 @@ async def get_workbench_for_caller(
     return {
         "pending_approvals": pending,
         "active_runs": active_runs,
-        "gate_anomalies": [],
+        "gate_anomalies": gate_anomalies,
         "quota": quota,
     }
