@@ -174,6 +174,8 @@ export const PAGE_APIS = {
   P25: [
     { id: "API-160", method: "GET", path: "/api/v1/connectors", summary: "组织级连接器" },
     { id: "API-164", method: "GET", path: "/api/v1/connectors/{connector_id}/webhook-deliveries", summary: "Webhook 投递" },
+    { id: "API-165", method: "GET", path: "/api/v1/connectors/{connector_id}/outbound-channels", summary: "出站通知渠道" },
+    { id: "API-166", method: "PUT", path: "/api/v1/connectors/{connector_id}/outbound-channels", summary: "配置出站渠道" },
     { id: "API-170", method: "GET", path: "/api/v1/api-tokens", summary: "ApiToken 列表" },
     { id: "API-171", method: "POST", path: "/api/v1/api-tokens", summary: "签发 Token" },
   ],

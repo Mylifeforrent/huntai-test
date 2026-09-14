@@ -196,6 +196,7 @@ async def create_connector(
     webhook_secret_ref: str | None = None,
     config_version: int = 1,
     health_status: dict[str, Any] | None = None,
+    outbound_channels: list[dict[str, Any]] | None = None,
 ) -> Connector:
     connector = Connector(
         id=uuid.uuid4(),
@@ -214,6 +215,7 @@ async def create_connector(
         standing_auth_metadata=None,
         config_version=config_version,
         health_status=health_status,
+        outbound_channels=outbound_channels if outbound_channels is not None else [],
     )
     session.add(connector)
     await session.flush()

@@ -3,18 +3,24 @@ import { act, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConnectorListItem, ListEnvelope, WebhookDeliveryItem } from "@/api/types";
+import type {
+  ConnectorListItem,
+  ListEnvelope,
+  OutboundChannelsListEnvelope,
+  WebhookDeliveryItem,
+} from "@/api/types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiGet = vi.fn();
 const apiPost = vi.fn();
+const apiPut = vi.fn();
 
 vi.mock("@/api/client", () => ({
   api: {
     get: (...args: unknown[]) => apiGet(...args),
     post: (...args: unknown[]) => apiPost(...args),
-    put: vi.fn(),
+    put: (...args: unknown[]) => apiPut(...args),
     patch: vi.fn(),
     delete: vi.fn(),
   },
@@ -100,10 +106,33 @@ async function flush() {
   }
 }
 
+const outboundEmpty: OutboundChannelsListEnvelope = {
+  data: { items: [], connector_version: 1 },
+  page: { has_more: false, next_cursor: null },
+};
+
+const outboundWithChannel: OutboundChannelsListEnvelope = {
+  data: {
+    items: [
+      {
+        id: "ch-1",
+        enabled: true,
+        is_primary: true,
+        channel_type: "wecom",
+        endpoint_present: true,
+      },
+    ],
+    connector_version: 2,
+  },
+  page: { has_more: false, next_cursor: null },
+};
+
 beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
+  apiPut.mockReset();
   apiPost.mockResolvedValue({ data: { token: "ht_live_test" } });
+  apiPut.mockResolvedValue(outboundWithChannel);
   apiGet.mockImplementation((apiId: string, path: string) => {
     if (apiId === "API-160") {
       return Promise.resolve({
@@ -122,6 +151,9 @@ beforeEach(() => {
         data: { items: [deliveryItem] },
         page: { has_more: false, next_cursor: null },
       } satisfies ListEnvelope<WebhookDeliveryItem>);
+    }
+    if (apiId === "API-165") {
+      return Promise.resolve(outboundEmpty);
     }
     return Promise.reject(new Error(`unexpected ${apiId} ${path}`));
   });
@@ -181,6 +213,125 @@ describe("AdminIntegrationPage", () => {
     expect(body.project_ids?.length).toBeGreaterThan(0);
   });
 
+  it("renders outbound endpoint_present from API-165", async () => {
+    apiGet.mockImplementation((apiId: string, path: string) => {
+      if (apiId === "API-160") {
+        return Promise.resolve({
+          data: { items: [connectorItem] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<ConnectorListItem>);
+      }
+      if (apiId === "API-170") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      if (apiId === "API-164") {
+        return Promise.resolve({
+          data: { items: [deliveryItem] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<WebhookDeliveryItem>);
+      }
+      if (apiId === "API-165") {
+        return Promise.resolve(outboundWithChannel);
+      }
+      return Promise.reject(new Error(`unexpected ${apiId} ${path}`));
+    });
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const outboundTab = container.querySelector("[data-testid='integration-tab-outbound']");
+    act(() => {
+      (outboundTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const presentCell = container.querySelector("[data-testid='endpoint-present']");
+    expect(presentCell?.textContent).toBe("true");
+    expect(container.textContent).toContain("wecom");
+  });
+
+  it("PUT outbound channels without URL in body", async () => {
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const outboundTab = container.querySelector("[data-testid='integration-tab-outbound']");
+    act(() => {
+      (outboundTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const addButton = Array.from(container.querySelectorAll("button")).find((btn) =>
+      btn.textContent?.includes("新增草稿行"),
+    );
+    act(() => {
+      addButton?.click();
+    });
+    await flush();
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const kindInput = container.querySelector("[aria-label='kind']") as HTMLInputElement;
+    const endpointInput = container.querySelector("[aria-label='endpoint_ref']") as HTMLInputElement;
+    act(() => {
+      valueSetter?.call(kindInput, "wecom");
+      kindInput.dispatchEvent(new Event("input", { bubbles: true }));
+      valueSetter?.call(endpointInput, "env:WECOM_WEBHOOK_SECRET");
+      endpointInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const saveButton = container.querySelector("[data-testid='save-outbound-channels']") as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+    act(() => {
+      saveButton.click();
+    });
+    await flush();
+    const putCall = apiPut.mock.calls.find((call) => call[0] === "API-166");
+    expect(putCall).toBeDefined();
+    const body = putCall?.[2] as { channels?: Array<{ endpoint_ref?: string }> };
+    expect(JSON.stringify(body)).not.toContain("http");
+    expect(body.channels?.[0]?.endpoint_ref).toBe("env:WECOM_WEBHOOK_SECRET");
+  });
+
+  it("does not PUT empty outbound draft and requires confirm to clear", async () => {
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const outboundTab = container.querySelector("[data-testid='integration-tab-outbound']");
+    act(() => {
+      (outboundTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    expect(container.textContent).not.toContain("从服务端加载到草稿");
+    const saveButton = container.querySelector("[data-testid='save-outbound-channels']") as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+    act(() => {
+      saveButton.click();
+    });
+    await flush();
+    expect(apiPut.mock.calls.find((call) => call[0] === "API-166")).toBeUndefined();
+
+    const clearButton = container.querySelector("[data-testid='clear-outbound-channels']") as HTMLButtonElement;
+    act(() => {
+      clearButton.click();
+    });
+    await flush();
+    expect(apiPut.mock.calls.find((call) => call[0] === "API-166")).toBeUndefined();
+    expect(clearButton.textContent).toContain("确认清空渠道");
+    act(() => {
+      clearButton.click();
+    });
+    await flush();
+    const putCall = apiPut.mock.calls.find((call) => call[0] === "API-166");
+    expect(putCall).toBeDefined();
+    const body = putCall?.[2] as { channels?: unknown[] };
+    expect(body.channels).toEqual([]);
+  });
+
+  it("shows empty outbound state when API-165 items are empty", async () => {
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const outboundTab = container.querySelector("[data-testid='integration-tab-outbound']");
+    act(() => {
+      (outboundTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    expect(container.textContent).toContain("无出站渠道");
+  });
+
   it("list does not show token_hash", async () => {
     apiGet.mockImplementation((apiId: string, path: string) => {
       if (apiId === "API-160") {
@@ -210,6 +361,9 @@ describe("AdminIntegrationPage", () => {
           data: { items: [deliveryItem] },
           page: { has_more: false, next_cursor: null },
         } satisfies ListEnvelope<WebhookDeliveryItem>);
+      }
+      if (apiId === "API-165") {
+        return Promise.resolve(outboundEmpty);
       }
       return Promise.reject(new Error(`unexpected ${apiId} ${path}`));
     });

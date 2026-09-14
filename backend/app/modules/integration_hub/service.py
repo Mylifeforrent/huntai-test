@@ -28,6 +28,7 @@ COMMAND_TYPE_ISSUE_TOKEN = "api_token.issue"
 COMMAND_TYPE_REVOKE_TOKEN = "api_token.revoke"
 COMMAND_TYPE_CONNECTOR_REGISTER = "connector.register"
 COMMAND_TYPE_CONNECTOR_PATCH = "connector.patch"
+COMMAND_TYPE_OUTBOUND_CHANNELS = "connector.put_outbound_channels"
 COMMAND_TYPE_CI_TRIGGER_BINDINGS = "project.put_ci_trigger_bindings"
 TOKEN_PREFIX_LITERAL = "ht_live_"
 TOKEN_PREFIX_DISPLAY_LEN = 16
@@ -39,6 +40,8 @@ SECRET_PATTERN = re.compile(
     r"(password|secret|token|credential)",
     re.IGNORECASE,
 )
+OUTBOUND_KIND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+OUTBOUND_ENV_REF_PATTERN = re.compile(r"^env:[A-Z][A-Z0-9_]*$")
 WEBHOOK_SOURCE = "webhook"
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 100
@@ -1079,6 +1082,167 @@ async def patch_connector_for_caller(
         session,
         organization_id=org_id,
         command_type=COMMAND_TYPE_CONNECTOR_PATCH,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        response_ref=response,
+        created_by=ctx.user.id,
+        created_at=now,
+    )
+    return {"data": response}
+
+
+def _validate_outbound_channel_kind(kind: str) -> str:
+    stripped = kind.strip()
+    if not stripped or len(stripped) > 64:
+        raise ValueError("validation")
+    if not OUTBOUND_KIND_PATTERN.match(stripped):
+        raise ValueError("validation")
+    return stripped
+
+
+def _validate_outbound_endpoint_ref(ref: str) -> str:
+    stripped = ref.strip()
+    if not stripped:
+        raise ValueError("validation")
+    lowered = stripped.lower()
+    if "http://" in lowered or "https://" in lowered:
+        raise ValueError("validation")
+    if SECRET_PATTERN.search(stripped) and not stripped.startswith("env:"):
+        raise ValueError("validation")
+    if not OUTBOUND_ENV_REF_PATTERN.match(stripped):
+        raise ValueError("validation")
+    return stripped
+
+
+def _serialize_outbound_channel_item(channel: dict[str, Any]) -> dict[str, Any]:
+    endpoint_ref = channel.get("endpoint_ref", "")
+    endpoint_present = bool(isinstance(endpoint_ref, str) and endpoint_ref.strip())
+    return {
+        "id": str(channel["id"]),
+        "enabled": True,
+        "is_primary": bool(channel.get("is_primary")),
+        "channel_type": str(channel["kind"]),
+        "endpoint_present": endpoint_present,
+    }
+
+
+def _serialize_outbound_channels_payload(
+    connector: Connector,
+) -> dict[str, Any]:
+    channels = connector.outbound_channels if isinstance(connector.outbound_channels, list) else []
+    return {
+        "items": [_serialize_outbound_channel_item(item) for item in channels],
+        "connector_version": connector.aggregate_version,
+    }
+
+
+async def list_outbound_channels_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    connector_id: uuid.UUID,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    connector = await repo.get_connector(
+        session,
+        organization_id=ctx.organization.id,
+        connector_id=connector_id,
+    )
+    if connector is None:
+        raise ValueError("not_found")
+    return _serialize_outbound_channels_payload(connector)
+
+
+async def put_outbound_channels_for_caller(
+    session: AsyncSession,
+    ctx: SessionContext,
+    *,
+    connector_id: uuid.UUID,
+    expected_version: int,
+    channels: list[dict[str, Any]],
+    idempotency_key: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    await _require_owner_or_admin(session, ctx)
+    org_id = ctx.organization.id
+    now = datetime.now(UTC)
+
+    existing = await repo.get_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_OUTBOUND_CHANNELS,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict")
+        if existing.response_ref is not None:
+            return {"data": existing.response_ref}
+
+    connector = await repo.get_connector(
+        session,
+        organization_id=org_id,
+        connector_id=connector_id,
+        for_update=True,
+    )
+    if connector is None:
+        raise ValueError("not_found")
+    if connector.aggregate_version != expected_version:
+        raise ValueError("version")
+
+    normalized: list[dict[str, Any]] = []
+    primary_count = 0
+    for item in channels:
+        if not isinstance(item, dict):
+            raise ValueError("validation")
+        kind_raw = item.get("kind")
+        if not isinstance(kind_raw, str):
+            raise ValueError("validation")
+        kind = _validate_outbound_channel_kind(kind_raw)
+        is_primary = item.get("is_primary")
+        if not isinstance(is_primary, bool):
+            raise ValueError("validation")
+        if is_primary:
+            primary_count += 1
+        endpoint_ref = ""
+        if "endpoint_ref" in item and item["endpoint_ref"] is not None:
+            if not isinstance(item["endpoint_ref"], str):
+                raise ValueError("validation")
+            endpoint_ref = _validate_outbound_endpoint_ref(item["endpoint_ref"])
+        normalized.append(
+            {
+                "id": str(uuid.uuid4()),
+                "kind": kind,
+                "is_primary": is_primary,
+                "endpoint_ref": endpoint_ref,
+            }
+        )
+
+    if normalized and primary_count != 1:
+        raise ValueError("validation")
+
+    connector.outbound_channels = normalized
+    connector.aggregate_version += 1
+    connector.config_version += 1
+    connector.updated_at = now
+
+    response = _serialize_outbound_channels_payload(connector)
+    await append_audit_event(
+        session,
+        AuditAppendInput(
+            organization_id=org_id,
+            actor_user_id=ctx.user.id,
+            action="connector.put_outbound_channels",
+            resource_type="connector",
+            resource_id=connector.id,
+            result="ok",
+            request_hash=request_hash,
+        ),
+    )
+    await repo.create_idempotency_record(
+        session,
+        organization_id=org_id,
+        command_type=COMMAND_TYPE_OUTBOUND_CHANNELS,
         idempotency_key=idempotency_key,
         request_hash=request_hash,
         response_ref=response,

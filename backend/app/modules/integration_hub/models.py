@@ -67,6 +67,11 @@ class Connector(Base):
     standing_auth_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     config_version: Mapped[int] = mapped_column(Integer, nullable=False)
     health_status: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    outbound_channels: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    )
 
 
 class ExternalObservation(Base):
