@@ -324,10 +324,18 @@ export interface WorkbenchActiveRun {
   last_heartbeat_at?: string | null;
 }
 
+export interface WorkbenchGateAnomaly {
+  kind: string;
+  test_run_id?: string;
+  gate_evaluation_id?: string | null;
+  result?: string | null;
+  unevaluated_reason?: string | null;
+}
+
 export interface WorkbenchProjection {
   pending_approvals: WorkbenchPendingApproval[];
   active_runs: WorkbenchActiveRun[];
-  gate_anomalies: JsonObject[];
+  gate_anomalies: WorkbenchGateAnomaly[];
   quota: OrgQuotaCurrent;
 }
 

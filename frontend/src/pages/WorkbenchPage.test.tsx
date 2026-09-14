@@ -140,4 +140,51 @@ describe("WorkbenchPage", () => {
     expect(statOne).toBeTruthy();
     expect(apiGet.mock.calls.filter((call) => call[0] === "API-020").length).toBe(1);
   });
+
+  it("renders gate anomaly kind and links to run detail", async () => {
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-020") {
+        return Promise.resolve({
+          data: {
+            ...workbenchData,
+            gate_anomalies: [
+              {
+                kind: "fail_evaluation",
+                test_run_id: "run-gate-fail",
+                gate_evaluation_id: "eval-1",
+                result: "fail",
+                unevaluated_reason: null,
+              },
+            ],
+          },
+        } satisfies ResourceEnvelope<WorkbenchProjection>);
+      }
+      if (apiId === "API-017") {
+        return Promise.resolve({
+          data: {
+            version: 1,
+            token_budget: 1000,
+            token_reserved: 0,
+            token_consumed: 100,
+            token_remaining: 900,
+            executor_slot_quota: 5,
+            perf_concurrency_quota: 2,
+          },
+        } satisfies ResourceEnvelope<OrgQuotaCurrent>);
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    const container = mount(<WorkbenchPage />);
+    await flush();
+    expect(container.textContent).toContain("fail_evaluation");
+    expect(container.textContent).toContain("run-gate-fail");
+    expect(container.querySelector('a[href="/test-center/runs/run-gate-fail"]')).not.toBeNull();
+  });
+
+  it("shows empty gate anomaly state and zero count", async () => {
+    const container = mount(<WorkbenchPage />);
+    await flush();
+    expect(container.textContent).toContain("无门禁异常");
+    expect(container.textContent).toMatch(/门禁异常[\s\S]*?0/);
+  });
 });
