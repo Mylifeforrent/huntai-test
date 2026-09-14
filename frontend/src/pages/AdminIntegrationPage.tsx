@@ -9,6 +9,8 @@ import type {
   ApiTokenScope,
   ConnectorListItem,
   ListEnvelope,
+  OutboundChannelPutItem,
+  OutboundChannelsListEnvelope,
   ResourceEnvelope,
   WebhookDeliveryItem,
 } from "@/api/types";
@@ -40,6 +42,10 @@ export function AdminIntegrationPage() {
   const [issueError, setIssueError] = useState<unknown>(null);
   const [revokeError, setRevokeError] = useState<unknown>(null);
   const [selectedConnector, setSelectedConnector] = useState("");
+  const [outboundConnectorId, setOutboundConnectorId] = useState("");
+  const [outboundDraft, setOutboundDraft] = useState<OutboundChannelPutItem[]>([]);
+  const [outboundClearArmed, setOutboundClearArmed] = useState(false);
+  const [outboundSaveError, setOutboundSaveError] = useState<unknown>(null);
 
   const connectors = useQuery({
     queryKey: queryKeys.connectors({ scope: "org" }),
@@ -50,6 +56,16 @@ export function AdminIntegrationPage() {
     queryFn: () => api.get<ListEnvelope<ApiTokenListItem>>("API-170", "/api/v1/api-tokens"),
   });
   const connectorId = selectedConnector || String(connectors.data?.data.items[0]?.id ?? "");
+  const outboundId = outboundConnectorId || String(connectors.data?.data.items[0]?.id ?? "");
+  const outboundChannels = useQuery({
+    queryKey: ["connectors", outboundId, "outbound-channels"],
+    queryFn: () =>
+      api.get<OutboundChannelsListEnvelope>(
+        "API-165",
+        `/api/v1/connectors/${outboundId}/outbound-channels`,
+      ),
+    enabled: Boolean(outboundId),
+  });
   const deliveries = useQuery({
     queryKey: ["connectors", connectorId, "webhook-deliveries"],
     queryFn: () =>
@@ -63,7 +79,59 @@ export function AdminIntegrationPage() {
   const connectorItems = connectors.data?.data.items ?? [];
   const tokenItems = tokens.data?.data.items ?? [];
   const deliveryItems = deliveries.data?.data.items ?? [];
+  const outboundItems = outboundChannels.data?.data.items ?? [];
+  const outboundVersion = outboundChannels.data?.data.connector_version ?? 1;
   const pageError = connectors.error ?? tokens.error;
+  const canSaveOutboundDraft =
+    Boolean(outboundId) &&
+    outboundDraft.length > 0 &&
+    outboundDraft.every((item) => {
+      const kind = item.kind.trim();
+      const ref = item.endpoint_ref?.trim() ?? "";
+      return kind.length > 0 && /^env:[A-Z][A-Z0-9_]*$/.test(ref);
+    });
+
+  function putOutboundChannels(channels: OutboundChannelPutItem[]) {
+    if (!outboundId) return;
+    setOutboundSaveError(null);
+    void api
+      .put<OutboundChannelsListEnvelope>(
+        "API-166",
+        `/api/v1/connectors/${outboundId}/outbound-channels`,
+        {
+          expected_version: outboundVersion,
+          channels,
+        },
+      )
+      .then(() => {
+        setOutboundDraft([]);
+        setOutboundClearArmed(false);
+        void queryClient.invalidateQueries({ queryKey: ["connectors", outboundId, "outbound-channels"] });
+      })
+      .catch((error: unknown) => {
+        setOutboundSaveError(error);
+      });
+  }
+
+  function saveOutboundChannels() {
+    if (!canSaveOutboundDraft) return;
+    putOutboundChannels(
+      outboundDraft.map((item) => ({
+        kind: item.kind.trim(),
+        is_primary: item.is_primary,
+        endpoint_ref: item.endpoint_ref?.trim() ?? "",
+      })),
+    );
+  }
+
+  function clearOutboundChannels() {
+    if (!outboundId) return;
+    if (!outboundClearArmed) {
+      setOutboundClearArmed(true);
+      return;
+    }
+    putOutboundChannels([]);
+  }
 
   function toggleScope(scope: ApiTokenScope) {
     setSelectedScopes((prev) => {
@@ -129,7 +197,7 @@ export function AdminIntegrationPage() {
           <TabsList>
             <TabsTrigger value="connectors">连接器</TabsTrigger>
             <TabsTrigger value="webhooks">Webhook 投递</TabsTrigger>
-            <TabsTrigger value="outbound">出站渠道</TabsTrigger>
+            <TabsTrigger value="outbound" data-testid="integration-tab-outbound">出站渠道</TabsTrigger>
             <TabsTrigger value="tokens" data-testid="integration-tab-tokens">ApiToken</TabsTrigger>
           </TabsList>
           <TabsContent value="connectors">
@@ -200,23 +268,156 @@ export function AdminIntegrationPage() {
               </Table>
             )}
           </TabsContent>
-          <TabsContent value="outbound">
+          <TabsContent value="outbound" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>出站通知渠道（主备容灾）</CardTitle>
               </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                {connectorItems.filter((item) => item.outbound_write_enabled === true).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">无已启用出站写入的连接器。主备由连接器配置投影，不在前端推演。</p>
+              <CardContent className="flex flex-col gap-4">
+                <Alert>
+                  <AlertTitle>配置 ≠ 投递</AlertTitle>
+                  <AlertDescription>
+                    配置成功不等于通知已投递。站内通知中心属 G4 未做；主备由服务端投影，前端不推演。
+                  </AlertDescription>
+                </Alert>
+                {connectorItems.length === 0 ? (
+                  <EmptyState title="无组织级连接器" />
                 ) : (
-                  connectorItems
-                    .filter((item) => item.outbound_write_enabled === true)
-                    .map((item, index) => (
-                      <div key={String(item.id ?? index)} className="flex items-center justify-between rounded-md border p-3">
-                        <span className="text-sm">{String(item.name ?? "")}</span>
-                        <Badge variant="outline">{String(item.type ?? "")}</Badge>
+                  <>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="outbound-connector">连接器</Label>
+                      <select
+                        id="outbound-connector"
+                        className="rounded-md border px-3 py-2 text-sm"
+                        value={outboundId}
+                        onChange={(e) => {
+                          setOutboundConnectorId(e.target.value);
+                          setOutboundDraft([]);
+                          setOutboundClearArmed(false);
+                        }}
+                      >
+                        {connectorItems.map((item, index) => {
+                          const id = String(item.id ?? index);
+                          return (
+                            <option key={id} value={id}>
+                              {String(item.name ?? id)} ({String(item.type ?? "")})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    {outboundChannels.error ? (
+                      <UndevelopedCallout
+                        apis={PAGE_APIS.P25}
+                        error={outboundChannels.error}
+                        action="出站渠道 API-165"
+                      />
+                    ) : outboundChannels.isPending ? (
+                      <p className="text-sm text-muted-foreground">加载渠道配置…</p>
+                    ) : outboundItems.length === 0 ? (
+                      <EmptyState title="无出站渠道" hint="保存后将写入服务端配置" />
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>channel_type</TableHead>
+                            <TableHead>is_primary</TableHead>
+                            <TableHead>endpoint_present</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {outboundItems.map((item, index) => (
+                            <TableRow key={String(item.id ?? index)}>
+                              <TableCell className="text-xs">{item.channel_type}</TableCell>
+                              <TableCell className="text-xs">{String(item.is_primary)}</TableCell>
+                              <TableCell className="text-xs" data-testid="endpoint-present">
+                                {String(item.endpoint_present)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                    <div className="flex flex-col gap-2 rounded-md border p-3">
+                      <p className="text-xs text-muted-foreground">
+                        GET 不返回 endpoint_ref。改配必须重新填写 env:KEY，禁止从服务端列表回填 PUT。空草稿不会保存。
+                      </p>
+                      {outboundDraft.map((item, index) => (
+                        <div key={index} className="grid gap-2 md:grid-cols-3">
+                          <Input
+                            aria-label="kind"
+                            placeholder="kind"
+                            value={item.kind}
+                            onChange={(e) => {
+                              const next = [...outboundDraft];
+                              next[index] = { ...item, kind: e.target.value };
+                              setOutboundDraft(next);
+                            }}
+                          />
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={item.is_primary}
+                              onChange={(e) => {
+                                const next = [...outboundDraft];
+                                next[index] = { ...item, is_primary: e.target.checked };
+                                setOutboundDraft(next);
+                              }}
+                            />
+                            is_primary
+                          </label>
+                          <Input
+                            aria-label="endpoint_ref"
+                            placeholder="env:KEY"
+                            value={item.endpoint_ref ?? ""}
+                            onChange={(e) => {
+                              const next = [...outboundDraft];
+                              next[index] = { ...item, endpoint_ref: e.target.value };
+                              setOutboundDraft(next);
+                            }}
+                          />
+                        </div>
+                      ))}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setOutboundDraft((prev) => [
+                              ...prev,
+                              { kind: "", is_primary: prev.length === 0, endpoint_ref: "" },
+                            ])
+                          }
+                        >
+                          新增草稿行
+                        </Button>
+                        <MutateOnly>
+                          <Button
+                            data-testid="save-outbound-channels"
+                            size="sm"
+                            disabled={!canSaveOutboundDraft}
+                            onClick={saveOutboundChannels}
+                          >
+                            保存（API-166）
+                          </Button>
+                        </MutateOnly>
+                        <MutateOnly>
+                          <Button
+                            data-testid="clear-outbound-channels"
+                            size="sm"
+                            variant="destructive"
+                            disabled={!outboundId}
+                            onClick={clearOutboundChannels}
+                          >
+                            {outboundClearArmed ? "确认清空渠道" : "清空渠道"}
+                          </Button>
+                        </MutateOnly>
                       </div>
-                    ))
+                    </div>
+                    {outboundSaveError ? (
+                      <UndevelopedCallout apis={PAGE_APIS.P25} error={outboundSaveError} action="保存出站渠道 API-166" />
+                    ) : null}
+                  </>
                 )}
               </CardContent>
             </Card>

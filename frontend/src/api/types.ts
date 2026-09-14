@@ -808,6 +808,33 @@ export interface ConnectorDetail extends ConnectorListItem {
   } | null;
 }
 
+/** API-165 OutboundChannelItem. */
+export interface OutboundChannelItem {
+  id: string;
+  enabled: boolean;
+  is_primary: boolean;
+  channel_type: string;
+  endpoint_present: boolean;
+}
+
+/** API-165 GET outbound-channels list data. */
+export interface OutboundChannelsListData {
+  items: OutboundChannelItem[];
+  connector_version: number;
+}
+
+export interface OutboundChannelsListEnvelope {
+  data: OutboundChannelsListData;
+  page: PageCursor;
+}
+
+/** API-166 PUT outbound channel input. */
+export interface OutboundChannelPutItem {
+  kind: string;
+  is_primary: boolean;
+  endpoint_ref?: string;
+}
+
 /** API-164 WebhookDeliveryItem. */
 export interface WebhookDeliveryItem {
   id: string;
