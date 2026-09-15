@@ -188,6 +188,14 @@ def iter_report_rows(adapter: str, report_text: str) -> Iterator[dict[str, str]]
     yield from parser(report_text)
 
 
+def iter_report_rows_from_files(
+    adapter: str,
+    report_files: list[tuple[str, str]],
+) -> Iterator[dict[str, str]]:
+    for _path, text in report_files:
+        yield from iter_report_rows(adapter, text)
+
+
 def parse_report_rows(adapter: str, report_text: str) -> list[dict[str, str]]:
     return list(iter_report_rows(adapter, report_text))
 
@@ -237,6 +245,7 @@ __all__ = [
     "ReportParseError",
     "SUPPORTED_REPORT_ADAPTERS",
     "iter_report_rows",
+    "iter_report_rows_from_files",
     "parse_report_rows",
     "resolve_report_paths",
 ]
