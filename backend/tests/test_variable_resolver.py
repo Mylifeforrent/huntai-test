@@ -17,4 +17,15 @@ def test_function_placeholder_always_unresolved() -> None:
         steps=[{"action": "request", "params": {"method": "GET", "path": "/${uuid()}"}}],
         assertions=[],
     )
-    assert "${uuid()}" in errors
+    assert "function_catalog_unavailable: ${uuid()}" in errors
+    assert "${uuid()}" not in errors
+
+
+def test_unbound_mustache_without_function_catalog_prefix() -> None:
+    _, _, errors = validate_and_resolve_snapshot(
+        params={"TARGET_ENV": "https://example.test"},
+        steps=[{"action": "request", "params": {"method": "GET", "path": "/{{missing}}"}}],
+        assertions=[],
+    )
+    assert errors == ["{{missing}}"]
+    assert not any(item.startswith("function_catalog_unavailable:") for item in errors)

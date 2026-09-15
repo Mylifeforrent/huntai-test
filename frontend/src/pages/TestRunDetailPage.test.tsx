@@ -540,6 +540,47 @@ describe("TestRunDetailPage", () => {
     expect(container.textContent).toContain("聚类生成中");
   });
 
+  it("renders variable_unresolved result_summary reason and function catalog details", async () => {
+    const failedRun: TestRunDetail = {
+      ...pendingRun,
+      status: "FAILED",
+      result_summary: {
+        reason: "variable_unresolved",
+        details: ["function_catalog_unavailable: ${uuid()}"],
+      },
+    };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: failedRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [],
+            unclustered_refs: [],
+            generation_status: "ready",
+            degraded: false,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    expect(container.textContent).toContain("失败原因：variable_unresolved");
+    expect(container.textContent).toContain("function_catalog_unavailable: ${uuid()}");
+    expect(container.textContent).toContain("动态函数目录未启用，占位符未解析。");
+    expect(container.textContent).not.toContain("已解析");
+    expect(container.textContent).not.toContain("变量解析失败");
+  });
+
   it("posts jira_write preview on failed run and hides button for viewer role", async () => {
     const failedRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
     apiGet.mockImplementation((apiId: string) => {

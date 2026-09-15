@@ -415,6 +415,9 @@ async def test_ac_041_unresolved_func_failed(
     assert detail["status"] == "FAILED"
     summary = detail.get("result_summary") or {}
     assert summary.get("reason") == "variable_unresolved"
+    details = summary.get("details") or []
+    assert any("function_catalog_unavailable" in str(item) for item in details)
+    assert any("${uuid()}" in str(item) for item in details)
 
 
 @pytest.mark.asyncio
