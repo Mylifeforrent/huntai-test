@@ -556,6 +556,9 @@ async def test_perf_gate_evaluates_p95_and_error_rate(
     assert details["max_error_rate"]["not_measured"] is False
     assert details["max_error_rate"]["actual"] == 100.0
     assert details["max_error_rate"]["passed"] is False
+    p95_detail = details.get("max_p95_ms")
+    if p95_detail is not None and isinstance(p95_detail.get("actual"), (int, float)):
+        assert p95_detail["not_measured"] is False
 
     # AC-056: 压测 run 的 GateEvaluation 出现在门禁历史检索
     listing = await client.get("/api/v1/gate-evaluations", params={"project_id": str(project_id)})
