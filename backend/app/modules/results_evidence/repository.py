@@ -280,6 +280,29 @@ async def mark_case_result_partial(
     return True
 
 
+async def update_case_result_ingest(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+    outcome: str | None = None,
+    is_partial: bool | None = None,
+) -> bool:
+    row = await get_case_result(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+    if row is None:
+        return False
+    if outcome is not None:
+        row.outcome = outcome
+    if is_partial is not None:
+        row.is_partial = is_partial
+    await session.flush()
+    return True
+
+
 async def artifact_key_exists(
     session: AsyncSession,
     *,

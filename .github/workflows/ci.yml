@@ -1,44 +1,127 @@
-# Stage 12 CI 门控。门控命令与 docs/00_setup/project_rules.md §5 完全一致，
-# 本地与 CI 不各立一套。说明见 docs/12_deployment/deployment.md §7。
+# =============================================================================
+# HuntAI Test · Stage 12 CI 门控（GitHub Actions）
+# =============================================================================
+#
+# 这份 YAML 是 GitHub Actions 的「工作流定义」。GitHub 约定：只要文件放在
+# `.github/workflows/*.yml`，平台就会自动识别，不需要在网页里再点一次「新建」。
+#
+# 机制速览（读本文件时按这个层次理解）：
+#
+#   仓库事件  →  触发本工作流（on）
+#        ↓
+#   一次运行（Run）里有若干 job
+#        ↓
+#   每个 job 租一台临时虚拟机（runs-on），上面再跑若干 step（从上到下）
+#        ↓
+#   任一 step 失败 → 该 job 失败；任一必跑 job 失败 → 整次 Run 红灯
+#
+# 本文件做什么
+#   合入前质量门控：后端 lint/类型/测试、前端 lint/类型/构建/测试、Docker 镜像能否构建。
+#   命令与本地完全一致，见 docs/00_setup/project_rules.md §5；禁止在 CI 另立一套。
+#   设计说明见 docs/12_deployment/deployment.md §7。
+#
+# 本文件不做什么
+#   不部署、不推镜像仓库、不改业务状态。这是 CI（Continuous Integration），不是 CD。
+#
+# 怎么看结果
+#   GitHub 仓库 → Actions 页，或 Pull Request 底部的 checks。绿 = 三个 job 都成功。
+#   点进某次 Run 可看每个 job / step 的日志。
+#
+# 怎么手动再跑
+#   Actions → 左侧选 workflow「ci」→ Run workflow。对应下面的 workflow_dispatch。
+# =============================================================================
+
+# Actions 页和 PR checks 上显示的名字。文件名是 ci.yml，显示名是这里的 name。
 name: ci
 
+# -----------------------------------------------------------------------------
+# on：什么事件会启动一次 Run。满足其中任一条件就会跑，不是「三个都要发生」。
+# -----------------------------------------------------------------------------
 on:
+  # 有人把代码 push 到 main（含直接 push 与 PR merge 后的 push）。
+  # 只监听 main，避免每个功能分支的每次 push 都打镜像（费 runner 时间）。
+  # 功能分支的门控靠下面的 pull_request。
   push:
     branches: [main]
+
+  # 针对本仓库的 Pull Request：打开、同步新 commit、重新打开时都会跑。
+  # 未写 branches 表示目标分支不限；fork PR 是否跑还受仓库 Settings → Actions 策略约束。
   pull_request:
-  # 允许在 Actions 页手动运行——本地无 Docker daemon 时，用它验证镜像构建与门控，
-  # 不必为一个纯验证性的触发专门开 PR。
+
+  # 允许在 Actions 页手动点「Run workflow」。
+  # 典型用途：本地没有 Docker daemon 时，不必为纯验证专门开 PR，也能跑镜像构建。
   workflow_dispatch:
 
+# -----------------------------------------------------------------------------
+# jobs：一次 Run 里要做的几块独立工作。默认彼此并行（各租一台虚拟机）。
+#
+# 本工作流三个 job：
+#   backend  ──┐
+#   frontend ──┼─→ 两者同时开始
+#              └──→ 都成功后才跑 images（见 images.needs）
+#
+# 虚拟机用完即销毁，下次 Run 是全新环境，不能指望上次留下的文件还在。
+# -----------------------------------------------------------------------------
 jobs:
+  # ---------------------------------------------------------------------------
+  # backend：在干净 Linux 上装 Python 依赖，跑与本地相同的四条合入命令。
+  # pytest 需要 PostgreSQL，所以用 services 再起一个附属容器（不是单独 job）。
+  # ---------------------------------------------------------------------------
   backend:
+    # GitHub 托管的 Ubuntu runner。ubuntu-latest 是当前默认镜像，不是业务锁定的 OS。
+    # 业务锁定的是 Python 3.14 / uv 0.12.7（见下方 step），不是这台机器的发行版号。
     runs-on: ubuntu-latest
+
+    # services：和本 job 的 runner 一起启动的 Docker 容器。
+    # runner 里的进程通过下面映射的端口访问它；job 结束后容器一并销毁。
     services:
       postgres:
+        # 与技术栈冻结的 PostgreSQL 主版本一致。
         image: postgres:18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: huntai_test
+        # "5432:5432" = 容器 5432 → runner 本机 5432。
+        # 因此 DATABASE_URL 写 127.0.0.1:5432，不是写服务名 postgres。
         ports:
           - 5432:5432
+        # 健康检查：pg 还没就绪就跑 pytest 会连库失败。
+        # GitHub 会等到 health 成功（或重试耗尽）再开始 steps。
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+    # job 级环境变量：下面每个 step 都能读到。
     env:
       # conftest 优先读取已存在的 DATABASE_URL，取不到才回落到本地默认值。
+      # 这里显式注入，保证 CI 连的是上面这个 service，而不是开发者本机习惯的 URL。
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/huntai_test
+
+    # steps：同一台虚拟机上按顺序执行。上一步失败则默认跳过后续 step，job 失败。
+    # uses: 引用别人写好的可复用 action；run: 在 runner 上执行 shell 命令。
     steps:
+      # 把当前触发这次 Run 的 commit 检出到工作目录。没有这一步，后面没有代码可测。
       - uses: actions/checkout@v4
+
+      # 安装包管理器 uv。version 与技术栈锁定的 0.12.7 对齐，禁止随 runner 预装版本漂。
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.12.7"
+
+      # runner 默认 Python 未必是 3.14。业务运行时锁定 3.14，这里显式安装。
       - run: uv python install 3.14
+
+      # --frozen：严格按 backend/uv.lock 安装，lock 与 pyproject 不一致则失败。
+      # 这能拦住「改了依赖声明但没更新 lock」的合入。
       - name: Install dependencies
         working-directory: backend
         run: uv sync --frozen
+
+      # 与 project_rules.md §5.1 四条命令逐字相同：检查 → 格式 → 类型 → 测试。
+      # 多行 run 等于本地用 && 串起来；任一条非零退出码，本 job 失败。
       - name: Lint, types and tests
         working-directory: backend
         run: |
@@ -47,18 +130,28 @@ jobs:
           uv run mypy app
           uv run pytest
 
+  # ---------------------------------------------------------------------------
+  # frontend：与 backend 并行。不需要数据库。Node 主版本锁定 24（LTS）。
+  # ---------------------------------------------------------------------------
   frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # cache: npm 会按 lockfile 缓存 node_modules 相关层，加快重复 Run。
+      # cache-dependency-path 必须指向真正的 lockfile，否则缓存键对不上。
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      # npm ci：按 package-lock.json 干净安装；lock 失配会失败。不要在 CI 用 npm install。
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      # 与 project_rules.md §5.2 四条命令逐字相同。
       - name: Lint, types, build and tests
         working-directory: frontend
         run: |
@@ -67,12 +160,21 @@ jobs:
           npm run build
           npm run test
 
-  # 镜像可用性的唯一自动化验证：本地环境无 Docker daemon，只有 CI 能真正构建。
+  # ---------------------------------------------------------------------------
+  # images：确认 Dockerfile 在 Linux runner 上能 docker build 成功。
+  #
+  # 这是镜像可用性的唯一自动化验证——开发机常常没有 Docker daemon。
+  # 只构建、打 tag，不 docker push，也不部署。
+  #
+  # needs：必须等 backend 与 frontend 都成功。任一门控红灯就不必浪费时间打镜像。
+  # ---------------------------------------------------------------------------
   images:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
+      # ${{ github.sha }} 是 GitHub Actions 表达式，运行时替换成这次 commit 的完整 SHA。
+      # 例如 huntai-backend:57ce649… 便于在日志里把镜像和某次提交对上。
       - name: Build backend image
         run: docker build -t huntai-backend:${{ github.sha }} backend
       - name: Build frontend image

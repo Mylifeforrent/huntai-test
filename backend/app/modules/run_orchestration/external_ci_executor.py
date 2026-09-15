@@ -8,7 +8,9 @@ import hashlib
 import json
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from itertools import islice
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urljoin
@@ -33,8 +35,10 @@ from app.modules.results_evidence.command_port import (
     append_step_run,
     artifact_object_key_exists,
     find_case_result_id_by_attempt,
+    get_case_result_ingest_outcome,
     mark_case_result_partial,
     schedule_failure_triage,
+    update_case_result_ingest,
 )
 from app.modules.results_evidence.object_store import (
     sanitize_filename,
@@ -47,7 +51,7 @@ from app.modules.run_orchestration.models import TestRun
 from app.modules.run_orchestration.report_adapters import (
     SUPPORTED_REPORT_ADAPTERS,
     ReportParseError,
-    iter_report_rows,
+    iter_report_rows_from_files,
     resolve_report_paths,
 )
 from app.modules.test_assets import command_port as test_assets_command
@@ -113,6 +117,31 @@ def _worst_outcome(rows: list[dict[str, str]]) -> str:
         if outcome == "incomplete":
             worst = "incomplete"
     return worst
+
+
+def _outcome_rank(outcome: str) -> int:
+    if outcome == "failed":
+        return 2
+    if outcome == "incomplete":
+        return 1
+    return 0
+
+
+def _merge_worst_outcome(current: str, candidate: str) -> str:
+    return candidate if _outcome_rank(candidate) > _outcome_rank(current) else current
+
+
+def _take_report_batch(
+    rows_iter: Iterator[dict[str, str]],
+    batch_size: int,
+) -> list[dict[str, str]]:
+    batch: list[dict[str, str]] = []
+    while len(batch) < batch_size:
+        try:
+            batch.append(next(rows_iter))
+        except StopIteration:
+            break
+    return batch
 
 
 def split_log_payload(
@@ -622,7 +651,7 @@ async def _write_report_results(
     cases: list[dict[str, Any]],
     contracts: list[dict[str, Any]],
     adapter: str,
-    report_rows: list[dict[str, str]],
+    report_rows_iter: Iterator[dict[str, str]],
     report_files: list[tuple[str, str]],
     now: datetime,
     resume_step_index: int = 0,
@@ -636,23 +665,18 @@ async def _write_report_results(
     combined = "\n".join(text for _path, text in report_files)
     checksum = hashlib.sha256(combined.encode("utf-8")).hexdigest()
     checksum16 = checksum[:16]
-    claim = f"{adapter} report checksum={checksum16} cases={len(report_rows)}"
+    total_rows_written = 0
 
     if len(cases) == 1:
-        mapped = [(cases[0], report_rows)]
+        case_targets = [cases[0]]
+        row_sources: list[Iterator[dict[str, str]]] = [report_rows_iter]
     else:
-        mapped = [(case_item["case"], report_rows) for case_item in contracts]
+        case_targets = [item["case"] for item in contracts]
+        row_sources = [iter_report_rows_from_files(adapter, report_files) for _ in case_targets]
 
-    for case, rows in mapped:
-        if not rows:
-            return False, False, False
-
+    for case, row_source in zip(case_targets, row_sources, strict=True):
         version_raw = case.get("version_id")
         version_id = uuid.UUID(str(version_raw)) if version_raw else None
-        worst = _worst_outcome(rows)
-        if worst != "passed":
-            all_passed = False
-
         case_id = uuid.UUID(str(case["id"]))
         chunk_key = f"report:{checksum16}:{case_id}"
         case_result_id = await find_case_result_id_by_attempt(
@@ -662,15 +686,36 @@ async def _write_report_results(
             test_case_id=case_id,
             attempt_seq=1,
         )
-        rows_done = resume_step_index * batch_size
+        skip_rows = resume_step_index * batch_size
+        rows_iter = islice(row_source, skip_rows, None) if skip_rows > 0 else row_source
+        running_worst = "passed"
+        if case_result_id is not None:
+            existing_outcome = await get_case_result_ingest_outcome(
+                session,
+                organization_id=run.organization_id,
+                case_result_id=case_result_id,
+            )
+            if existing_outcome is not None:
+                running_worst = existing_outcome
+        rows_done = skip_rows
         step_index = resume_step_index
+        wrote_any = False
 
-        for batch_start in range(resume_step_index * batch_size, len(rows), batch_size):
+        while True:
             if timeout is not None and time.monotonic() - started > timeout:
                 parse_incomplete = True
                 break
-            batch = rows[batch_start : batch_start + batch_size]
-            is_last_batch = batch_start + batch_size >= len(rows)
+
+            batch = _take_report_batch(rows_iter, batch_size)
+            if not batch:
+                break
+
+            wrote_any = True
+            batch_worst = _worst_outcome(batch)
+            running_worst = _merge_worst_outcome(running_worst, batch_worst)
+            if batch_worst != "passed":
+                all_passed = False
+
             if case_result_id is None:
                 try:
                     async with session.begin_nested():
@@ -684,12 +729,12 @@ async def _write_report_results(
                                 test_case_id=case_id,
                                 test_case_version_id=version_id,
                                 attempt_seq=1,
-                                outcome=worst,
-                                is_partial=False,
+                                outcome=running_worst,
+                                is_partial=True,
                                 chunk_key=chunk_key,
                                 normalized_summary={
                                     "adapter": adapter,
-                                    "report_cases": len(rows),
+                                    "report_cases": rows_done + len(batch),
                                 },
                             ),
                         )
@@ -703,8 +748,19 @@ async def _write_report_results(
                     )
                     if case_result_id is None:
                         return all_passed, False, False
+            else:
+                await update_case_result_ingest(
+                    session,
+                    organization_id=run.organization_id,
+                    case_result_id=case_result_id,
+                    outcome=running_worst,
+                    is_partial=True,
+                )
+
             if case_result_id is None:
                 return all_passed, False, False
+
+            is_last_batch = len(batch) < batch_size
             with contextlib.suppress(IntegrityError):
                 async with session.begin_nested():
                     await append_step_run(
@@ -722,16 +778,20 @@ async def _write_report_results(
                     )
 
             rows_done += len(batch)
+            total_rows_written = max(total_rows_written, rows_done)
             step_index += 1
             await _update_parse_progress(
                 session,
                 run=run,
                 adapter=adapter,
                 rows_done=rows_done,
-                rows_total=len(rows),
+                rows_total=None,
                 step_index=step_index,
                 now=now,
             )
+
+        if not wrote_any and case_result_id is None:
+            return False, False, False
 
         if parse_incomplete:
             if case_result_id is None:
@@ -747,12 +807,12 @@ async def _write_report_results(
                                 test_case_id=case_id,
                                 test_case_version_id=version_id,
                                 attempt_seq=1,
-                                outcome="incomplete",
+                                outcome=running_worst,
                                 is_partial=True,
                                 chunk_key=chunk_key,
                                 normalized_summary={
                                     "adapter": adapter,
-                                    "report_cases": len(rows),
+                                    "report_cases": rows_done,
                                 },
                             ),
                         )
@@ -775,6 +835,15 @@ async def _write_report_results(
         if case_result_id is None:
             return False, False, False
 
+        await update_case_result_ingest(
+            session,
+            organization_id=run.organization_id,
+            case_result_id=case_result_id,
+            outcome=running_worst,
+            is_partial=False,
+        )
+
+        claim = f"{adapter} report checksum={checksum16} cases={rows_done}"
         content_ref: str | None = None
         for path, text in report_files:
             content_ref = await _store_report_artifact(
@@ -811,7 +880,7 @@ async def _write_report_results(
             "report_parse": {
                 "status": "done",
                 "adapter": adapter,
-                "rows_done": len(report_rows),
+                "rows_done": total_rows_written,
             }
         },
         now=now,
@@ -942,10 +1011,22 @@ async def collect_reports_for_run(
         )
         return True
 
-    report_rows: list[dict[str, str]] = []
+    rows_iter = iter_report_rows_from_files(adapter, report_files)
     try:
-        for _path, text in report_files:
-            report_rows.extend(list(iter_report_rows(adapter, text)))
+        first_row = next(rows_iter)
+    except StopIteration:
+        fail_status = "CANCELLED" if cancel_mode else "FAILED"
+        await repo.update_test_run_status(
+            session,
+            run=run,
+            new_status=fail_status,
+            updated_at=now,
+            result_summary=merge_result_summary(
+                run.result_summary if isinstance(run.result_summary, dict) else None,
+                patch={"ci": {"collect_state": "failed", "reason": "report_empty"}},
+            ),
+        )
+        return True
     except ReportParseError:
         fail_status = "CANCELLED" if cancel_mode else "FAILED"
         await repo.update_test_run_status(
@@ -960,19 +1041,9 @@ async def collect_reports_for_run(
         )
         return True
 
-    if not report_rows:
-        fail_status = "CANCELLED" if cancel_mode else "FAILED"
-        await repo.update_test_run_status(
-            session,
-            run=run,
-            new_status=fail_status,
-            updated_at=now,
-            result_summary=merge_result_summary(
-                run.result_summary if isinstance(run.result_summary, dict) else None,
-                patch={"ci": {"collect_state": "failed", "reason": "report_empty"}},
-            ),
-        )
-        return True
+    def _report_rows_after_peek() -> Iterator[dict[str, str]]:
+        yield first_row
+        yield from rows_iter
 
     live_ci = _ci_summary(run)
     parse_state = live_ci.get("report_parse")
@@ -981,17 +1052,31 @@ async def collect_reports_for_run(
         resume_step = int(parse_state["step_index"])
 
     case_rows = [item["case"] for item in contracts]
-    all_passed, accounted, parse_incomplete = await _write_report_results(
-        session,
-        run=run,
-        cases=case_rows,
-        contracts=contracts,
-        adapter=adapter,
-        report_rows=report_rows,
-        report_files=report_files,
-        now=now,
-        resume_step_index=resume_step,
-    )
+    try:
+        all_passed, accounted, parse_incomplete = await _write_report_results(
+            session,
+            run=run,
+            cases=case_rows,
+            contracts=contracts,
+            adapter=adapter,
+            report_rows_iter=_report_rows_after_peek(),
+            report_files=report_files,
+            now=now,
+            resume_step_index=resume_step,
+        )
+    except ReportParseError:
+        fail_status = "CANCELLED" if cancel_mode else "FAILED"
+        await repo.update_test_run_status(
+            session,
+            run=run,
+            new_status=fail_status,
+            updated_at=now,
+            result_summary=merge_result_summary(
+                run.result_summary if isinstance(run.result_summary, dict) else None,
+                patch={"ci": {"collect_state": "failed", "reason": "report_parse_error"}},
+            ),
+        )
+        return True
 
     if not accounted:
         return False

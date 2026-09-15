@@ -154,6 +154,39 @@ async def mark_case_result_partial(
     )
 
 
+async def update_case_result_ingest(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+    outcome: str | None = None,
+    is_partial: bool | None = None,
+) -> bool:
+    return await repo.update_case_result_ingest(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+        outcome=outcome,
+        is_partial=is_partial,
+    )
+
+
+async def get_case_result_ingest_outcome(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    case_result_id: uuid.UUID,
+) -> str | None:
+    row = await repo.get_case_result(
+        session,
+        organization_id=organization_id,
+        case_result_id=case_result_id,
+    )
+    if row is None:
+        return None
+    return row.outcome
+
+
 async def find_case_result_id_by_attempt(
     session: AsyncSession,
     *,
@@ -580,6 +613,8 @@ __all__ = [
     "artifact_object_key_exists",
     "find_case_result_id_by_attempt",
     "mark_case_result_partial",
+    "get_case_result_ingest_outcome",
+    "update_case_result_ingest",
     "prepare_failure_triage",
     "run_failure_triage_background",
     "schedule_failure_triage",
