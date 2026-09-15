@@ -105,7 +105,7 @@
 
 | # | 级别 | 缺口 | 说明 |
 |---|---|---|---|
-| G4 | 中 | P03 集成页无独立前端测试文件 | 31 个前端测试文件中无 `IntegrationPage.test.tsx`；该页在 M2 有真实交互（CI 触发绑定、webhook），建议补组件交互测试 |
+| G4 | 中 | P03 集成页已补 `IntegrationPage.test.tsx` | 覆盖 API-160 列表、API-167 保存 body、保存失败 CommandFeedback、空连接器 EmptyState、缺 projectId 提示；通知角标 API-022 仍属 G4 另一缺口 |
 | G6 | 中 | Stage 5/7 产品原型缺位，`docs/09_figma_highfi/highfi_design.md` 未产出 | 页面以 `frontend_design_spec-v1.0.md` 为临时权威；七态呈现、审批九要素分区、等待态滞留等 UX 一致性**无法跨阶段复核**；原型产出后须重跑 Stage 5/6 UX 评审并登记 |
 | — | 低 | P19 技能页（`SkillsPage`）无测试 | M4 愿景页面，本阶段不启用，无测试符合预期 |
 
