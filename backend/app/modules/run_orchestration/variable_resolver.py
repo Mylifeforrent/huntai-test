@@ -7,6 +7,11 @@ from typing import Any
 
 FUNC_PATTERN = re.compile(r"\$\{[^}]+\}")
 VAR_PATTERN = re.compile(r"\{\{([^}]+)\}\}")
+FUNCTION_CATALOG_UNAVAILABLE_PREFIX = "function_catalog_unavailable: "
+
+
+def _function_catalog_unavailable_detail(token: str) -> str:
+    return f"{FUNCTION_CATALOG_UNAVAILABLE_PREFIX}{token}"
 
 
 def _collect_strings(value: Any, out: list[str]) -> None:
@@ -31,7 +36,7 @@ def find_unresolved_functions(texts: list[str]) -> list[str]:
     unresolved: list[str] = []
     for text in texts:
         for match in FUNC_PATTERN.finditer(text):
-            unresolved.append(match.group(0))
+            unresolved.append(_function_catalog_unavailable_detail(match.group(0)))
     return unresolved
 
 
@@ -39,7 +44,7 @@ def resolve_text(text: str, bindings: dict[str, str]) -> tuple[str, list[str]]:
     errors: list[str] = []
     if FUNC_PATTERN.search(text):
         for match in FUNC_PATTERN.finditer(text):
-            errors.append(match.group(0))
+            errors.append(_function_catalog_unavailable_detail(match.group(0)))
         return text, errors
 
     def replacer(match: re.Match[str]) -> str:
