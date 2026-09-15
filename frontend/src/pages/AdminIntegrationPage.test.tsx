@@ -332,6 +332,52 @@ describe("AdminIntegrationPage", () => {
     expect(container.textContent).toContain("无出站渠道");
   });
 
+  it("renders last_used_at from token list", async () => {
+    apiGet.mockImplementation((apiId: string, path: string) => {
+      if (apiId === "API-160") {
+        return Promise.resolve({
+          data: { items: [connectorItem] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<ConnectorListItem>);
+      }
+      if (apiId === "API-170") {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "token-1",
+                token_prefix: "ht_live_abc",
+                scopes: ["read"],
+                project_ids: ["proj-1"],
+                expires_at: "2030-01-01T00:00:00.000Z",
+                last_used_at: "2026-09-01T12:00:00.000Z",
+              },
+            ],
+          },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      if (apiId === "API-164") {
+        return Promise.resolve({
+          data: { items: [deliveryItem] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<WebhookDeliveryItem>);
+      }
+      if (apiId === "API-165") {
+        return Promise.resolve(outboundEmpty);
+      }
+      return Promise.reject(new Error(`unexpected ${apiId} ${path}`));
+    });
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const tokensTab = container.querySelector("[data-testid='integration-tab-tokens']");
+    act(() => {
+      (tokensTab as HTMLButtonElement)?.click();
+    });
+    await flush();
+    expect(container.textContent).toContain("2026-09-01T12:00:00.000Z");
+  });
+
   it("list does not show token_hash", async () => {
     apiGet.mockImplementation((apiId: string, path: string) => {
       if (apiId === "API-160") {

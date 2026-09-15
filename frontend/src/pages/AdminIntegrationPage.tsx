@@ -486,6 +486,7 @@ export function AdminIntegrationPage() {
                     <TableHead>前缀</TableHead>
                     <TableHead>scopes</TableHead>
                     <TableHead>到期</TableHead>
+                    <TableHead>最近使用</TableHead>
                     <TableHead>吊销</TableHead>
                     <TableHead />
                   </TableRow>
@@ -498,6 +499,7 @@ export function AdminIntegrationPage() {
                         <TableCell className="font-mono text-xs">{item.token_prefix}</TableCell>
                         <TableCell className="text-xs">{item.scopes.join(", ")}</TableCell>
                         <TableCell className="text-xs">{item.expires_at}</TableCell>
+                        <TableCell className="text-xs">{item.last_used_at ?? "—"}</TableCell>
                         <TableCell className="text-xs">{item.revoked_at ?? "—"}</TableCell>
                         <TableCell>
                           {item.revoked_at ? null : (
