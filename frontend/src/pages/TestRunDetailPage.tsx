@@ -397,6 +397,28 @@ export function TestRunDetailPage() {
                 CI 采集失败：{String((run.result_summary.ci as Record<string, unknown>).reason)}
               </p>
             ) : null}
+            {typeof run?.result_summary?.reason === "string" && run.result_summary.reason ? (
+              <p className="text-xs text-destructive" data-testid="run-failure-reason">
+                失败原因：{run.result_summary.reason}
+              </p>
+            ) : null}
+            {Array.isArray(run?.result_summary?.details) &&
+            (run.result_summary.details as unknown[]).length > 0 ? (
+              <ul className="list-disc pl-4 text-xs text-destructive">
+                {(run.result_summary.details as unknown[])
+                  .filter((item): item is string => typeof item === "string")
+                  .map((detail) => (
+                    <li key={detail}>
+                      {detail}
+                      {detail.startsWith("function_catalog_unavailable:") ? (
+                        <span className="mt-0.5 block text-muted-foreground">
+                          动态函数目录未启用，占位符未解析。
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+              </ul>
+            ) : null}
             {sseHint ? (
               <p className="text-xs text-muted-foreground">SSE 提示（非终态）：{sseHint}。权威状态以 GET API-061 为准。</p>
             ) : null}
