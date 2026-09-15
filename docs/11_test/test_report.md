@@ -86,7 +86,7 @@
 |---|---|---|---|---|
 | D1 | 中 | **2026-09-11 部分闭环**（详见 §7）。已补：租户边界强制（路由认证一致性测试 + AC-003 跨租户系统级回归 + 无上下文拒绝）、生产 IdP 对接能力（discovery 端点 / `iss`·`aud`·`azp` 与算法白名单 / 生产拒绝 loopback issuer）、API-006 过期提示 UI。**仍残留**：ORM 层租户自动过滤未做（本轮按用户决定只做 API 边界）；生产 IdP 真实凭证与端到端验证未做 | S-M0-01（部分完成） | 前者需单开切片评估收益与回归面；后者待 IdP 选型与凭证就位 |
 | D2 | 中 | API-022 通知角标未做（前端缺口 G4）；`is_expiring` 阈值 TBD 故省略；`gate_anomalies` 恒 `[]`（M0 登记理由为「无 GateEvaluation 表」，而迁移 `0019_gate_evaluations` 已在 S-M2-03 落地，**是否已解除未回写待核**） | S-M0-11 | 先核实 `gate_anomalies` 现状再决定是否补；补 TBD 阈值需产品裁决 |
-| D3 | 中 | API-165 / API-166 缺失；`waived` 结论的 Check Run 回写语义未定义；p95 / error_rate 在 S-M2-08 时固定 `not_measured` | S-M2-03、S-M2-04、S-M2-08 | S-M3-02 已接 PerfBaseline，需核实 `not_measured` 是否已解除并补 API-165/166 |
+| D3 | 中 | `waived` 结论的 Check Run 回写语义未定义（CONFLICT-5 未裁决） | S-M2-03、S-M2-08 | 待产品/契约裁决；p95/error_rate 已核实（功能域 `not_measured` 为设计，压测由 S-M3-02 实测）；API-165/166 已落地 |
 | D4 | 中 | 无真实外部系统 E2E：Jenkins / Jira REST / GitHub Check Run / Release 系统（均 stub 或 mock 服务） | S-M1-05、S-M2-03/04/05、S-M3-03 | 见 [implementation_notes.md](implementation_notes.md) §6 未本地验证清单 |
 | D5 | 中 | API-222 预签名下载未实现（MinIO 未启用）；保留期 / Legal Hold 策略 TBD 未实现 | S-M2-06 | 待 MinIO 启用（M2+ 前置满足后）；保留期需产品与法务裁决 |
 | D6 | 低 | `HT-QUOTA-002` 未实现（签发限流窗口 TBD）；`last_used_at` 未异步更新；无 API-080 | S-M0-03 | TBD 数值须产品裁决，禁止臆造默认值 |
@@ -98,7 +98,7 @@
 | D12 | 低 | 性能：真实目标系统 E2E 未做；`run_time>60s` 长时压测未实测；Locust 未用分布式；基线容忍度 API-059 不参与自动判定；压测 `min_pass_rate` 仍按 CaseResult 通过率 | S-M3-01、S-M3-02 | 补长时压测与真实目标演练；容忍度语义待契约确认 |
 | D13 | 低 | Copilot：无真实 LLM；工具白名单仅 `query_test_assets`；citations 的 `evidence_ref` 无实值；`copilot_write` / API-194/195 属 M4 | S-M3-04 | M4 范围；M3 只读最小版符合切片口径 |
 | D14 | 低 | Release：Readiness 无 yellow 分支（策略 TBD）；`scope.plan_ids` 留空，P06/P25 无新增入口 | S-M3-03 | 策略待裁决 |
-| D15 | 低 | S-M2-05：allure 路径须 manifest / collect_config 显式声明；超大报告先全量 parse 再分批入库 | S-M2-05 | 流式解析优化待排期 |
+| D15 | 低 | S-M2-05：allure 路径须 manifest / collect_config 显式声明；artifact 仍整文件载入内存（PR #9 已合入流式解析，大块报告不再先全量 parse） | S-M2-05 | 边下边解析 / 显式 allure 路径配置 |
 | D16 | — | **[CONFLICT-5]** `gate_waiver` 是否覆盖 Readiness 豁免：C1 与边界规范 §2.7 不一致 | 跨切片 | **禁止自行裁决**；须用户裁决后登记 `change_log` |
 
 ### 4.3 范围性缺口
