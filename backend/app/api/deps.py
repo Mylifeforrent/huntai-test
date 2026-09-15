@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import BackgroundTasks, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -17,7 +17,10 @@ from app.core.errors import (
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy import repository as repo
 from app.modules.identity_tenancy.service import SessionContext, load_session_context
-from app.modules.integration_hub.service import authenticate_api_token_by_prefix
+from app.modules.integration_hub.service import (
+    authenticate_api_token_by_prefix,
+    queue_api_token_last_used_touch,
+)
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,7 @@ def _extract_bearer_token(request: Request) -> str | None:
 
 async def require_api_token(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     *,
     required_scope: str,
@@ -125,6 +129,11 @@ async def require_api_token(
     token = await authenticate_api_token_by_prefix(db, raw_token=raw)
     if token is None:
         raise token_revoked(trace_id)
+    queue_api_token_last_used_touch(
+        background_tasks,
+        organization_id=token.organization_id,
+        api_token_id=token.id,
+    )
     scopes = list(token.scopes or [])
     if required_scope not in scopes:
         raise token_cannot_approve(trace_id, "Token scope not allowed")
@@ -138,6 +147,7 @@ async def require_api_token(
 
 async def require_session_or_token_read(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     optional: Annotated[OptionalSession, Depends(get_optional_session)],
 ) -> SessionOrToken:
@@ -150,6 +160,11 @@ async def require_session_or_token_read(
     token = await authenticate_api_token_by_prefix(db, raw_token=raw)
     if token is None:
         raise token_revoked(trace_id)
+    queue_api_token_last_used_touch(
+        background_tasks,
+        organization_id=token.organization_id,
+        api_token_id=token.id,
+    )
     if "read" not in list(token.scopes or []):
         raise token_cannot_approve(trace_id, "Token scope not allowed")
     return SessionOrToken(

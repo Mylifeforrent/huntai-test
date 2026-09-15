@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.integration_hub.models import (
@@ -440,6 +440,23 @@ async def list_api_tokens_by_prefix_global(
 ) -> list[ApiToken]:
     result = await session.execute(select(ApiToken).where(ApiToken.token_prefix == token_prefix))
     return list(result.scalars().all())
+
+
+async def touch_api_token_last_used(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    api_token_id: uuid.UUID,
+    used_at: datetime,
+) -> None:
+    await session.execute(
+        update(ApiToken)
+        .where(
+            ApiToken.organization_id == organization_id,
+            ApiToken.id == api_token_id,
+        )
+        .values(last_used_at=used_at)
+    )
 
 
 async def list_api_tokens(

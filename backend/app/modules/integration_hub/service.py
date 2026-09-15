@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import uuid
@@ -9,6 +10,7 @@ from typing import Any
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -33,6 +35,7 @@ COMMAND_TYPE_CI_TRIGGER_BINDINGS = "project.put_ci_trigger_bindings"
 TOKEN_PREFIX_LITERAL = "ht_live_"
 TOKEN_PREFIX_DISPLAY_LEN = 16
 PASSWORD_HASHER = PasswordHasher()
+_LOG = logging.getLogger(__name__)
 ALLOWED_ENV_REF_KEYS = frozenset(
     {"GITHUB_WEBHOOK_SECRET", "JENKINS_WEBHOOK_SECRET", "JENKINS_API_TOKEN"}
 )
@@ -847,6 +850,44 @@ async def revoke_api_token_for_caller(
         created_at=now,
     )
     return response
+
+
+async def touch_api_token_last_used_best_effort(
+    *,
+    organization_id: uuid.UUID,
+    api_token_id: uuid.UUID,
+) -> None:
+    from app.core.db import get_session_factory
+
+    factory = get_session_factory()
+    try:
+        async with factory() as session:
+            await repo.touch_api_token_last_used(
+                session,
+                organization_id=organization_id,
+                api_token_id=api_token_id,
+                used_at=datetime.now(UTC),
+            )
+            await session.commit()
+    except Exception:
+        _LOG.warning(
+            "api_token.last_used_at touch failed org_id=%s token_id=%s",
+            organization_id,
+            api_token_id,
+        )
+
+
+def queue_api_token_last_used_touch(
+    background_tasks: BackgroundTasks,
+    *,
+    organization_id: uuid.UUID,
+    api_token_id: uuid.UUID,
+) -> None:
+    background_tasks.add_task(
+        touch_api_token_last_used_best_effort,
+        organization_id=organization_id,
+        api_token_id=api_token_id,
+    )
 
 
 async def authenticate_api_token(
