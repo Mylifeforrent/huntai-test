@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { PAGE_APIS } from "@/api/catalog";
@@ -8,6 +8,7 @@ import type {
   ApiTokenListItem,
   ApiTokenScope,
   ConnectorListItem,
+  ConnectorType,
   ListEnvelope,
   OutboundChannelPutItem,
   OutboundChannelsListEnvelope,
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { MutateOnly, PageHeader, QueryGate, EmptyState } from "@/components/domain/PageState";
@@ -34,6 +36,24 @@ export function AdminIntegrationPage() {
   const memberships = session.me?.memberships ?? [];
   const projectIds = memberships.map((m) => m.project_id);
   const canIssue = projectIds.length > 0;
+  const canWriteConnector = memberships.some(
+    (membership) => membership.role === "owner" || membership.role === "admin",
+  );
+
+  const [registerType, setRegisterType] = useState<ConnectorType>("jira");
+  const [registerName, setRegisterName] = useState("");
+  const [registerAuthMethod, setRegisterAuthMethod] = useState("");
+  const [registerActionContract, setRegisterActionContract] = useState("{}");
+  const [registerHasCredential, setRegisterHasCredential] = useState(false);
+  const [registerError, setRegisterError] = useState<unknown>(null);
+  const [registerSuccess, setRegisterSuccess] = useState(false);
+
+  const [updateConnectorId, setUpdateConnectorId] = useState("");
+  const [updateName, setUpdateName] = useState("");
+  const [updateActionContract, setUpdateActionContract] = useState("{}");
+  const [updateDisableOutbound, setUpdateDisableOutbound] = useState(false);
+  const [updateError, setUpdateError] = useState<unknown>(null);
+  const [updateSuccess, setUpdateSuccess] = useState(false);
 
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
   const [tokenName, setTokenName] = useState("");
@@ -77,6 +97,17 @@ export function AdminIntegrationPage() {
   });
 
   const connectorItems = connectors.data?.data.items ?? [];
+  const updateTargetId = updateConnectorId || String(connectorItems[0]?.id ?? "");
+  const updateTarget = connectorItems.find((item) => String(item.id) === updateTargetId);
+
+  useEffect(() => {
+    if (!updateTarget) {
+      return;
+    }
+    setUpdateName(String(updateTarget.name ?? ""));
+    setUpdateActionContract(JSON.stringify(updateTarget.action_contract ?? {}, null, 2));
+    setUpdateDisableOutbound(false);
+  }, [updateTargetId, updateTarget?.version, updateTarget?.name]);
   const tokenItems = tokens.data?.data.items ?? [];
   const deliveryItems = deliveries.data?.data.items ?? [];
   const outboundItems = outboundChannels.data?.data.items ?? [];
@@ -170,6 +201,83 @@ export function AdminIntegrationPage() {
       });
   }
 
+  function parseActionContract(raw: string): Record<string, unknown> | null {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  function registerConnector() {
+    const actionContract = parseActionContract(registerActionContract);
+    if (!registerName.trim() || !registerAuthMethod.trim() || actionContract === null) {
+      return;
+    }
+    setRegisterError(null);
+    setRegisterSuccess(false);
+    void api
+      .post<ResourceEnvelope<ConnectorListItem>>("API-162", "/api/v1/connectors", {
+        type: registerType,
+        name: registerName.trim(),
+        auth_method: registerAuthMethod.trim(),
+        action_contract: actionContract,
+        ...(registerHasCredential ? { has_credential_binding: true } : {}),
+      })
+      .then(() => {
+        setRegisterSuccess(true);
+        setRegisterName("");
+        setRegisterAuthMethod("");
+        setRegisterActionContract("{}");
+        setRegisterHasCredential(false);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.connectors({ scope: "org" }) });
+      })
+      .catch((error: unknown) => {
+        setRegisterError(error);
+      });
+  }
+
+  function updateConnector() {
+    if (!updateTarget) return;
+    const actionContract = parseActionContract(updateActionContract);
+    if (!updateName.trim() || actionContract === null) {
+      return;
+    }
+    const body: {
+      expected_version: number;
+      name: string;
+      action_contract: Record<string, unknown>;
+      outbound_write_enabled?: boolean;
+    } = {
+      expected_version: updateTarget.version,
+      name: updateName.trim(),
+      action_contract: actionContract,
+    };
+    if (updateTarget.outbound_write_enabled === true && updateDisableOutbound) {
+      body.outbound_write_enabled = false;
+    }
+    setUpdateError(null);
+    setUpdateSuccess(false);
+    void api
+      .patch<ResourceEnvelope<ConnectorListItem>>(
+        "API-163",
+        `/api/v1/connectors/${updateTargetId}`,
+        body,
+      )
+      .then(() => {
+        setUpdateSuccess(true);
+        setUpdateDisableOutbound(false);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.connectors({ scope: "org" }) });
+      })
+      .catch((error: unknown) => {
+        setUpdateError(error);
+      });
+  }
+
   function revoke(id: string) {
     setRevokeError(null);
     void api
@@ -201,6 +309,88 @@ export function AdminIntegrationPage() {
             <TabsTrigger value="tokens" data-testid="integration-tab-tokens">ApiToken</TabsTrigger>
           </TabsList>
           <TabsContent value="connectors">
+            {canWriteConnector ? (
+              <Card className="mb-4">
+                <CardHeader>
+                  <CardTitle>注册连接器（API-162）</CardTitle>
+                </CardHeader>
+                <CardContent className="flex max-w-lg flex-col gap-3">
+                  <Alert>
+                    <AlertDescription>
+                      未声明副作用的 action_contract 默认拒绝。列表出现 ≠ 健康绿 ≠ 出站已通 ≠ 已触发 TestRun。
+                    </AlertDescription>
+                  </Alert>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="register-type">类型</Label>
+                    <select
+                      id="register-type"
+                      data-testid="register-type"
+                      className="rounded-md border px-3 py-2 text-sm"
+                      value={registerType}
+                      onChange={(e) => setRegisterType(e.target.value as ConnectorType)}
+                    >
+                      <option value="jira">jira</option>
+                      <option value="github">github</option>
+                      <option value="ci">ci</option>
+                      <option value="release">release</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="register-name">名称</Label>
+                    <Input
+                      id="register-name"
+                      data-testid="register-name"
+                      value={registerName}
+                      onChange={(e) => setRegisterName(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="register-auth-method">auth_method</Label>
+                    <Input
+                      id="register-auth-method"
+                      data-testid="register-auth-method"
+                      value={registerAuthMethod}
+                      onChange={(e) => setRegisterAuthMethod(e.target.value)}
+                      placeholder="hmac"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="register-action-contract">action_contract（JSON object）</Label>
+                    <Textarea
+                      id="register-action-contract"
+                      data-testid="register-action-contract"
+                      value={registerActionContract}
+                      onChange={(e) => setRegisterActionContract(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      data-testid="register-has-credential-binding"
+                      checked={registerHasCredential}
+                      onChange={(e) => setRegisterHasCredential(e.target.checked)}
+                    />
+                    has_credential_binding（占位，无明文）
+                  </label>
+                  <MutateOnly>
+                    <Button data-testid="register-connector" onClick={registerConnector}>
+                      注册（API-162）
+                    </Button>
+                  </MutateOnly>
+                  {registerSuccess ? (
+                    <Alert>
+                      <AlertDescription>
+                        连接器已登记。列表出现 ≠ 健康绿 ≠ 出站已通 ≠ 已触发 TestRun。
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {registerError ? (
+                    <UndevelopedCallout apis={PAGE_APIS.P25} error={registerError} action="注册连接器 API-162" />
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
             {connectorItems.length === 0 ? (
               <EmptyState title="无组织级连接器" />
             ) : (
@@ -229,6 +419,87 @@ export function AdminIntegrationPage() {
                 })}
               </div>
             )}
+            {canWriteConnector && connectorItems.length > 0 ? (
+              <Card className="mt-4">
+                <CardHeader>
+                  <CardTitle>更新连接器（API-163）</CardTitle>
+                </CardHeader>
+                <CardContent className="flex max-w-lg flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="update-connector">连接器</Label>
+                    <select
+                      id="update-connector"
+                      data-testid="update-connector"
+                      className="rounded-md border px-3 py-2 text-sm"
+                      value={updateTargetId}
+                      onChange={(e) => setUpdateConnectorId(e.target.value)}
+                    >
+                      {connectorItems.map((item, index) => {
+                        const id = String(item.id ?? index);
+                        return (
+                          <option key={id} value={id}>
+                            {String(item.name ?? id)} (v{item.version})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  {updateTarget ? (
+                    <>
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="update-name">名称</Label>
+                        <Input
+                          id="update-name"
+                          data-testid="update-name"
+                          value={updateName}
+                          onChange={(e) => setUpdateName(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="update-action-contract">action_contract（JSON object）</Label>
+                        <Textarea
+                          id="update-action-contract"
+                          data-testid="update-action-contract"
+                          value={updateActionContract}
+                          onChange={(e) => setUpdateActionContract(e.target.value)}
+                          rows={3}
+                        />
+                      </div>
+                      {updateTarget.outbound_write_enabled === true ? (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            data-testid="update-disable-outbound"
+                            checked={updateDisableOutbound}
+                            onChange={(e) => setUpdateDisableOutbound(e.target.checked)}
+                          />
+                          收紧 outbound_write_enabled（true→false）
+                        </label>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          outbound 已关闭。放开可写须走能力恢复审批（API-199），本表单禁止 false→true。
+                        </p>
+                      )}
+                      <MutateOnly>
+                        <Button data-testid="update-connector-submit" onClick={updateConnector}>
+                          更新（API-163）
+                        </Button>
+                      </MutateOnly>
+                    </>
+                  ) : null}
+                  {updateSuccess ? (
+                    <Alert>
+                      <AlertDescription>
+                        连接器已更新。列表刷新 ≠ 健康绿 ≠ 出站已通 ≠ 已触发 TestRun。
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {updateError ? (
+                    <UndevelopedCallout apis={PAGE_APIS.P25} error={updateError} action="更新连接器 API-163" />
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
           </TabsContent>
           <TabsContent value="webhooks">
             {deliveries.error ? (

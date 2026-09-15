@@ -15,13 +15,14 @@ import type {
 const apiGet = vi.fn();
 const apiPost = vi.fn();
 const apiPut = vi.fn();
+const apiPatch = vi.fn();
 
 vi.mock("@/api/client", () => ({
   api: {
     get: (...args: unknown[]) => apiGet(...args),
     post: (...args: unknown[]) => apiPost(...args),
     put: (...args: unknown[]) => apiPut(...args),
-    patch: vi.fn(),
+    patch: (...args: unknown[]) => apiPatch(...args),
     delete: vi.fn(),
   },
 }));
@@ -131,7 +132,9 @@ beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
   apiPut.mockReset();
+  apiPatch.mockReset();
   apiPost.mockResolvedValue({ data: { token: "ht_live_test" } });
+  apiPatch.mockResolvedValue({ data: connectorItem });
   apiPut.mockResolvedValue(outboundWithChannel);
   apiGet.mockImplementation((apiId: string, path: string) => {
     if (apiId === "API-160") {
@@ -376,6 +379,79 @@ describe("AdminIntegrationPage", () => {
     });
     await flush();
     expect(container.textContent).toContain("2026-09-01T12:00:00.000Z");
+  });
+
+  it("posts API-162 with required fields and no secret keys", async () => {
+    apiPost.mockImplementation((apiId: string) => {
+      if (apiId === "API-162") {
+        return Promise.resolve({ data: { ...connectorItem, id: "conn-new", name: "Jira Prod" } });
+      }
+      return Promise.resolve({ data: { token: "ht_live_test" } });
+    });
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    act(() => {
+      valueSetter?.call(container.querySelector("[data-testid='register-name']"), "Jira Prod");
+      container.querySelector("[data-testid='register-name']")?.dispatchEvent(new Event("input", { bubbles: true }));
+      valueSetter?.call(container.querySelector("[data-testid='register-auth-method']"), "hmac");
+      container.querySelector("[data-testid='register-auth-method']")?.dispatchEvent(new Event("input", { bubbles: true }));
+      textareaSetter?.call(container.querySelector("[data-testid='register-action-contract']"), "{}");
+      container.querySelector("[data-testid='register-action-contract']")?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => {
+      (container.querySelector("[data-testid='register-connector']") as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const registerCall = apiPost.mock.calls.find((call) => call[0] === "API-162");
+    expect(registerCall).toBeDefined();
+    const body = registerCall?.[2] as Record<string, unknown>;
+    expect(body.type).toBe("jira");
+    expect(body.name).toBe("Jira Prod");
+    expect(body.auth_method).toBe("hmac");
+    expect(body.action_contract).toEqual({});
+    expect(JSON.stringify(body)).not.toContain("credential");
+    expect(JSON.stringify(body)).not.toContain("webhook_secret");
+    expect(JSON.stringify(body)).not.toContain("credential_ref");
+  });
+
+  it("patches API-163 with expected_version CAS", async () => {
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    act(() => {
+      valueSetter?.call(container.querySelector("[data-testid='update-name']"), "GitHub Renamed");
+      container.querySelector("[data-testid='update-name']")?.dispatchEvent(new Event("input", { bubbles: true }));
+      textareaSetter?.call(container.querySelector("[data-testid='update-action-contract']"), '{"sideEffectLevel":"L2"}');
+      container.querySelector("[data-testid='update-action-contract']")?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => {
+      (container.querySelector("[data-testid='update-connector-submit']") as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const patchCall = apiPatch.mock.calls.find((call) => call[0] === "API-163");
+    expect(patchCall).toBeDefined();
+    expect(patchCall?.[1]).toBe("/api/v1/connectors/conn-1");
+    const body = patchCall?.[2] as { expected_version?: number; outbound_write_enabled?: boolean };
+    expect(body.expected_version).toBe(1);
+    expect(body.outbound_write_enabled).toBeUndefined();
+  });
+
+  it("does not PATCH outbound_write_enabled false to true", async () => {
+    const container = mount(<AdminIntegrationPage />);
+    await flush();
+    expect(container.querySelector("[data-testid='update-disable-outbound']")).toBeNull();
+    expect(container.textContent).toContain("API-199");
+    act(() => {
+      (container.querySelector("[data-testid='update-connector-submit']") as HTMLButtonElement)?.click();
+    });
+    await flush();
+    const patchCall = apiPatch.mock.calls.find((call) => call[0] === "API-163");
+    expect(patchCall).toBeDefined();
+    const body = patchCall?.[2] as { outbound_write_enabled?: boolean };
+    expect(body.outbound_write_enabled).not.toBe(true);
   });
 
   it("list does not show token_hash", async () => {
