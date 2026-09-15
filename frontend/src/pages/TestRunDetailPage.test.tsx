@@ -28,6 +28,8 @@ vi.mock("@/api/client", () => ({
   },
 }));
 
+let sessionRole: "owner" | "admin" | "tester" | "viewer" = "tester";
+
 vi.mock("@/hooks/useSession", () => ({
   useSession: () => ({
     phase: "ready" as const,
@@ -41,7 +43,7 @@ vi.mock("@/hooks/useSession", () => ({
         is_active: true,
         capability_controls: {},
       },
-      memberships: [{ project_id: "proj-1", role: "tester" as const }],
+      memberships: [{ project_id: "proj-1", role: sessionRole }],
       reauth_required: false,
     },
     error: null,
@@ -143,6 +145,7 @@ async function flush() {
 }
 
 beforeEach(() => {
+  sessionRole = "tester";
   FakeEventSource.instances = [];
   apiGet.mockReset();
   apiPost.mockReset();
@@ -581,6 +584,98 @@ describe("TestRunDetailPage", () => {
     expect(container.textContent).not.toContain("变量解析失败");
   });
 
+  it("posts case_result jira_write preview from failed result row", async () => {
+    const failedRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: failedRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: {
+            items: [
+              { id: "case-result-1", test_case_id: "case-1", outcome: "failed" },
+              { id: "case-result-2", test_case_id: "case-2", outcome: "passed" },
+            ],
+          },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [],
+            unclustered_refs: ["case-result-3"],
+            generation_status: "ready",
+            degraded: false,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      if (apiId === "API-065") {
+        return Promise.resolve({
+          data: { id: "case-result-1", artifact_ids: [] },
+        });
+      }
+      if (apiId === "API-066") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    apiPost.mockResolvedValue({
+      data: { gate: "REQUIRE_APPROVAL" },
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    const caseButton = container.querySelector("[data-testid='jira-case-result-case-result-1']") as HTMLButtonElement;
+    expect(caseButton).toBeTruthy();
+    expect(container.querySelector("[data-testid='jira-case-result-case-result-2']")).toBeNull();
+    expect(container.textContent).toContain("case-result-3");
+    const unclusteredButton = container.querySelector(
+      "[data-testid='jira-unclustered-case-result-3']",
+    ) as HTMLButtonElement;
+    expect(unclusteredButton).toBeTruthy();
+    await act(async () => {
+      unclusteredButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(apiPost).toHaveBeenCalledWith(
+      "API-120",
+      "/api/v1/action-previews",
+      expect.objectContaining({
+        target_object_type: "case_result",
+        target_object_id: "case-result-3",
+        payload: expect.objectContaining({
+          description: expect.stringMatching(/case-result-3/),
+          repro_steps: expect.stringMatching(/case_result case-result-3/),
+          evidence_ids: [],
+        }),
+      }),
+    );
+    apiPost.mockClear();
+    await act(async () => {
+      caseButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(apiPost).toHaveBeenCalledWith(
+      "API-120",
+      "/api/v1/action-previews",
+      expect.objectContaining({
+        action_type: "jira_write",
+        target_object_type: "case_result",
+        target_object_id: "case-result-1",
+        payload: expect.objectContaining({
+          description: expect.stringMatching(/case-result-1/),
+          repro_steps: expect.stringMatching(/case_result case-result-1/),
+          evidence_ids: [],
+        }),
+      }),
+    );
+  });
+
   it("posts jira_write preview on failed run and hides button for viewer role", async () => {
     const failedRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
     apiGet.mockImplementation((apiId: string) => {
@@ -659,5 +754,67 @@ describe("TestRunDetailPage", () => {
         target_object_id: "cluster-1",
       }),
     );
+  });
+
+  it("hides jira buttons for viewer role", async () => {
+    sessionRole = "viewer";
+    const failedRun: TestRunDetail = { ...pendingRun, status: "FAILED" };
+    apiGet.mockImplementation((apiId: string) => {
+      if (apiId === "API-061") {
+        return Promise.resolve({ data: failedRun } satisfies ResourceEnvelope<TestRunDetail>);
+      }
+      if (apiId === "API-064") {
+        return Promise.resolve({
+          data: { items: [{ id: "case-result-1", test_case_id: "case-1", outcome: "failed" }] },
+          page: { has_more: false, next_cursor: null },
+        } satisfies ListEnvelope<Record<string, unknown>>);
+      }
+      if (apiId === "API-130") {
+        return Promise.resolve({
+          data: {
+            test_run_id: "run-1",
+            items: [
+              {
+                id: "cluster-1",
+                test_run_id: "run-1",
+                category: "assertion_real_bug",
+                confidence: 0.85,
+                blocking_judgment: "blocker",
+                evidence_refs: [],
+                failure_refs: ["case-result-1"],
+              },
+            ],
+            unclustered_refs: ["case-result-2"],
+            generation_status: "ready",
+            degraded: false,
+          },
+        } satisfies ResourceEnvelope<FailureClusterReport>);
+      }
+      if (apiId === "API-131") {
+        return Promise.resolve({
+          data: {
+            id: "cluster-1",
+            category: "assertion_real_bug",
+            confidence: 0.85,
+            blocking_judgment: "blocker",
+            evidence_refs: [],
+            failure_refs: ["case-result-1"],
+            correction_history: [],
+          },
+        });
+      }
+      if (apiId === "API-133") {
+        return Promise.resolve({
+          data: { items: [] },
+          page: { has_more: false, next_cursor: null },
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${apiId}`));
+    });
+    const container = mount(<TestRunDetailPage />);
+    await flush();
+    expect(container.textContent).not.toContain("一键创建 Jira 缺陷");
+    expect(container.querySelector("[data-testid='jira-case-result-case-result-1']")).toBeNull();
+    expect(container.querySelector("[data-testid='jira-unclustered-case-result-2']")).toBeNull();
   });
 });

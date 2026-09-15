@@ -254,7 +254,8 @@ export function TestRunDetailPage() {
 
   const jiraWrite = useMutation({
     mutationFn: async (input: {
-      clusterId: string;
+      targetObjectType: "failure_cluster" | "case_result";
+      targetObjectId: string;
       description: string;
       reproSteps: string;
       evidenceIds: string[];
@@ -263,8 +264,8 @@ export function TestRunDetailPage() {
       return api.post<ResourceEnvelope<ActionPreview>>("API-120", "/api/v1/action-previews", {
         action_type: "jira_write",
         project_id: run?.project_id,
-        target_object_type: "failure_cluster",
-        target_object_id: input.clusterId,
+        target_object_type: input.targetObjectType,
+        target_object_id: input.targetObjectId,
         payload: {
           description: input.description,
           repro_steps: input.reproSteps,
@@ -498,7 +499,8 @@ export function TestRunDetailPage() {
                   showJiraButton={canCreateJira && !item.jira_issue && !detailRow?.jira_issue}
                   onCreateJira={() => {
                     jiraWrite.mutate({
-                      clusterId: item.id,
+                      targetObjectType: "failure_cluster",
+                      targetObjectId: item.id,
                       description: item.root_cause ?? "失败聚类缺陷",
                       reproSteps: `TestRun ${runId} · cluster ${item.id}`,
                       evidenceIds: item.evidence_refs ?? [],
@@ -538,13 +540,33 @@ export function TestRunDetailPage() {
                 <p>服务端未返回无法判断项。</p>
               ) : (
                 unclustered.map((caseResultId) => (
-                  <Link
-                    key={caseResultId}
-                    className="mb-1 block font-mono text-xs text-primary underline"
-                    to={`/test-center/case-results/${caseResultId}`}
-                  >
-                    {caseResultId}
-                  </Link>
+                  <div key={caseResultId} className="mb-2 flex flex-wrap items-center gap-2">
+                    <Link
+                      className="font-mono text-xs text-primary underline"
+                      to={`/test-center/case-results/${caseResultId}`}
+                    >
+                      {caseResultId}
+                    </Link>
+                    {canCreateJira ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        data-testid={`jira-unclustered-${caseResultId}`}
+                        disabled={jiraWrite.isPending}
+                        onClick={() => {
+                          jiraWrite.mutate({
+                            targetObjectType: "case_result",
+                            targetObjectId: caseResultId,
+                            description: `CaseResult ${caseResultId} 缺陷`,
+                            reproSteps: `TestRun ${runId} · case_result ${caseResultId}`,
+                            evidenceIds: [],
+                          });
+                        }}
+                      >
+                        一键创建 Jira 缺陷
+                      </Button>
+                    ) : null}
+                  </div>
                 ))
               )}
             </div>
@@ -575,6 +597,7 @@ export function TestRunDetailPage() {
                     <TableHead>Case</TableHead>
                     <TableHead>结果</TableHead>
                     <TableHead>Partial</TableHead>
+                    {canCreateJira ? <TableHead>Jira</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -593,6 +616,32 @@ export function TestRunDetailPage() {
                       <TableCell className="text-xs text-muted-foreground">
                         {item.is_partial ? "partial" : "—"}
                       </TableCell>
+                      {canCreateJira ? (
+                        <TableCell>
+                          {item.outcome === "failed" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              data-testid={`jira-case-result-${item.id}`}
+                              disabled={jiraWrite.isPending}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                jiraWrite.mutate({
+                                  targetObjectType: "case_result",
+                                  targetObjectId: item.id,
+                                  description: `CaseResult ${item.id} 缺陷`,
+                                  reproSteps: `TestRun ${runId} · case_result ${item.id}`,
+                                  evidenceIds: [],
+                                });
+                              }}
+                            >
+                              一键创建 Jira 缺陷
+                            </Button>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))}
                 </TableBody>
