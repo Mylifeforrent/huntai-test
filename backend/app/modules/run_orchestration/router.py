@@ -32,7 +32,10 @@ from app.core.errors import (
 )
 from app.core.logging import get_trace_id
 from app.modules.identity_tenancy.service import SessionContext, require_idempotency_key
-from app.modules.integration_hub.service import authenticate_api_token_by_prefix
+from app.modules.integration_hub.service import (
+    authenticate_api_token_by_prefix,
+    queue_api_token_last_used_touch,
+)
 from app.modules.run_orchestration import repository as repo
 from app.modules.run_orchestration.command_port import cancel_external_ci_with_collect
 from app.modules.run_orchestration.executor import run_test_run_background
@@ -208,6 +211,11 @@ async def api_062_080_start_test_run(
         token = await authenticate_api_token_by_prefix(db, raw_token=bearer)
         if token is None:
             raise token_revoked(trace_id)
+        queue_api_token_last_used_touch(
+            background_tasks,
+            organization_id=token.organization_id,
+            api_token_id=token.id,
+        )
         if "execute" not in list(token.scopes or []):
             raise token_cannot_approve(trace_id, "Token missing execute scope")
         if body.trigger_type in {"manual", "schedule"}:

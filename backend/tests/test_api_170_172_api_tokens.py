@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -17,6 +18,7 @@ from app.modules.identity_tenancy.models import (
 )
 from app.modules.integration_hub.service import authenticate_api_token
 from tests.helpers import login_as
+from tests.test_run_helpers import activate_platform_executor_env, create_active_script_case
 
 
 async def _seed_tester(
@@ -71,6 +73,31 @@ def _issue_body(
         "project_ids": [str(project_id)],
         "expires_at": expires_at,
     }
+
+
+async def _issue_token(
+    client: AsyncClient,
+    *,
+    project_id: uuid.UUID,
+    scopes: list[str] | None = None,
+) -> tuple[str, str]:
+    issue = await client.post(
+        "/api/v1/api-tokens",
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+        json=_issue_body(project_id=project_id, scopes=scopes),
+    )
+    assert issue.status_code == 200
+    issued = issue.json()["data"]
+    plaintext = issued["token"]
+    token_id = issued["id"]
+    return plaintext, token_id
+
+
+async def _get_token_list_item(client: AsyncClient, token_id: str) -> dict[str, object]:
+    list_resp = await client.get("/api/v1/api-tokens")
+    assert list_resp.status_code == 200
+    items = list_resp.json()["data"]["items"]
+    return next(item for item in items if item["id"] == token_id)
 
 
 @pytest.mark.asyncio
@@ -300,3 +327,151 @@ async def test_api_172_cross_tenant_not_found(
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "HT-RES-001"
+
+
+@pytest.mark.asyncio
+async def test_api_170_last_used_at_null_after_issue(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await login_as(client)
+    _plaintext, token_id = await _issue_token(client, project_id=project_id)
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_170_last_used_at_set_after_read_token_call(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await login_as(client)
+    plaintext, token_id = await _issue_token(client, project_id=project_id, scopes=["read"])
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"] is None
+
+    client.cookies.clear()
+    read_resp = await client.get(
+        "/api/v1/test-runs",
+        headers={"Authorization": f"Bearer {plaintext}"},
+        params={"project_id": str(project_id)},
+    )
+    assert read_resp.status_code == 200
+
+    await login_as(client)
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"]
+    datetime.fromisoformat(str(item["last_used_at"]))
+
+
+@pytest.mark.asyncio
+async def test_api_170_last_used_at_set_after_execute_token_post(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    db_session: AsyncSession,
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    env = await activate_platform_executor_env(client, db_session, seeded_identity)
+    case = await create_active_script_case(client, project_id=project_id)
+    await login_as(client)
+    plaintext, token_id = await _issue_token(client, project_id=project_id, scopes=["execute"])
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"] is None
+
+    client.cookies.clear()
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.text = "{}"
+    mock_response.headers = {}
+    mock_client = AsyncMock()
+    mock_client.request = AsyncMock(return_value=mock_response)
+    with patch("app.modules.run_orchestration.executor.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = mock_client
+        response = await client.post(
+            "/api/v1/test-runs",
+            headers={
+                "Idempotency-Key": str(uuid.uuid4()),
+                "Authorization": f"Bearer {plaintext}",
+            },
+            json={
+                "project_id": str(project_id),
+                "env_id": env["id"],
+                "execution_source": "script",
+                "case_ids": [case["id"]],
+                "params": {"TARGET_ENV": "https://example.test"},
+            },
+        )
+    assert response.status_code == 200
+
+    await login_as(client)
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"]
+    datetime.fromisoformat(str(item["last_used_at"]))
+
+
+@pytest.mark.asyncio
+async def test_api_170_last_used_at_unchanged_on_bad_bearer(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await login_as(client)
+    _plaintext, token_id = await _issue_token(client, project_id=project_id)
+
+    client.cookies.clear()
+    bad_resp = await client.get(
+        "/api/v1/test-runs",
+        headers={"Authorization": "Bearer ht_live_invalid_token_value"},
+        params={"project_id": str(project_id)},
+    )
+    assert bad_resp.status_code == 401
+
+    await login_as(client)
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_170_last_used_at_unchanged_on_revoked_token(
+    client: AsyncClient,
+    seeded_identity: dict[str, object],
+    mock_oidc_token_exchange: object,
+) -> None:
+    _ = mock_oidc_token_exchange
+    project_id = seeded_identity["project_id"]
+    assert isinstance(project_id, uuid.UUID)
+    await login_as(client)
+    plaintext, token_id = await _issue_token(client, project_id=project_id)
+
+    revoke = await client.post(
+        f"/api/v1/api-tokens/{token_id}/revocations",
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+        json={},
+    )
+    assert revoke.status_code == 200
+
+    client.cookies.clear()
+    read_resp = await client.get(
+        "/api/v1/test-runs",
+        headers={"Authorization": f"Bearer {plaintext}"},
+        params={"project_id": str(project_id)},
+    )
+    assert read_resp.status_code == 401
+
+    await login_as(client)
+    item = await _get_token_list_item(client, token_id)
+    assert item["last_used_at"] is None
